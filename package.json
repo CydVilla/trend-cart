@@ -4,12 +4,13 @@
   "private": true,
   "packageManager": "pnpm@10.34.4",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "esbuild", "prisma", "sharp"]
   },
   "scripts": {
+    "heroku-postbuild": "pnpm db:generate && pnpm --filter @trendcart/web build",
     "dev:web": "pnpm --filter @trendcart/web dev",
     "dev:worker": "pnpm --filter @trendcart/worker dev",
     "build": "pnpm -r build",

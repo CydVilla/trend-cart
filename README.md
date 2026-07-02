@@ -140,8 +140,45 @@ Every skip is recorded with a reason (`BotReply.skipReason`, `CandidateEvaluatio
 
 ## Deployment (Heroku)
 
-Planned for after the MVP works locally: a `web` dyno (Next.js), a `worker` dyno
-(ingestion/bot), and Heroku Postgres. `pnpm db:deploy` runs migrations in release phase.
+The repo is Heroku-ready: [Procfile](Procfile) defines `web` (dashboard +
+public pages), `worker` (bot, scale to 1 when wanted), and a `release` phase
+that runs migrations. `heroku-postbuild` generates the Prisma client and
+builds Next.js.
+
+```bash
+heroku login
+heroku create <app-name>
+heroku addons:create heroku-postgresql:essential-0   # ~$5/mo
+heroku config:set DASHBOARD_PASSWORD=<pick-one> AMAZON_ASSOCIATE_TAG=... \
+  PUBLIC_SITE_URL=https://<app-name>.herokuapp.com DRY_RUN=true
+git push heroku main
+# one-time seed against the Heroku DB (run locally):
+DATABASE_URL="$(heroku config:get DATABASE_URL)" pnpm db:seed
+```
+
+The dashboard is protected by HTTP Basic auth whenever `DASHBOARD_PASSWORD`
+is set (user `admin`, or override with `DASHBOARD_USER`); `/recommendations/*`
+stays public. The worker dyno additionally needs `ANTHROPIC_API_KEY`,
+`BOT_ACCOUNT_HANDLE`, and `BOT_APP_PASSWORD` set before scaling it up.
+
+## Post-MVP roadmap
+
+Ranked by leverage — see git history / discussion for full rationale:
+
+1. **Search-based discovery.** Replace firehose+keyword matching with polling
+   `app.bsky.feed.searchPosts` per category: precise, returns engagement
+   counts at discovery time (making "trending" real), and far cheaper.
+2. **Site-pull over bot-push.** Make the recommendation pages a real content
+   site; add a safe second channel — the bot posting curated lists to its own
+   timeline. Cold replies stay the smallest, most conservative channel.
+3. **Close the measurement loop.** `/go/[productId]` click-tracking redirects,
+   reply-outcome tracking (likes vs. blocks on our replies), and a daily
+   funnel metrics row surfaced in the dashboard.
+4. **Operator notifications.** Digest/push when replies enter the approval
+   queue (candidates expire in 24h — an unseen queue means the bot never
+   posts); move rate limits/cooldowns into a DB settings table.
+5. **Hygiene.** Split ingest and act into separate processes; Haiku triage
+   before Opus; a golden set of labeled posts to eval prompt changes.
 
 ## Phase status
 
