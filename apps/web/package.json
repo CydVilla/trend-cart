@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@prisma/client": "^6.5.0",
     "@trendcart/db": "workspace:*",
     "@trendcart/shared": "workspace:*",
     "dotenv": "^16.4.0",

@@ -15,6 +15,10 @@ loadEnv({ path: path.resolve(process.cwd(), ".env") });
 const nextConfig = {
   // Workspace packages ship TS source; Next transpiles them.
   transpilePackages: ["@trendcart/db", "@trendcart/shared"],
+  // Prisma's generated client (with its native query engine) must be loaded
+  // from node_modules at runtime, never bundled — bundling strands the
+  // engine binary and crashes on hosted Linux.
+  serverExternalPackages: ["@prisma/client"],
 };
 
 export default nextConfig;

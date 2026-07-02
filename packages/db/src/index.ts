@@ -1,4 +1,4 @@
-import { PrismaClient } from "./generated/client/index.js";
+import { PrismaClient } from "@prisma/client";
 
 // Singleton so Next.js hot-reload in dev doesn't exhaust DB connections.
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -21,4 +21,4 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 // Re-export generated model types and enums (Post, ProductCategory, SafetyStatus, ...)
-export * from "./generated/client/index.js";
+export * from "@prisma/client";
