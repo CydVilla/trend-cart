@@ -16,14 +16,21 @@ enum SafetyStatus {
 }
 
 /// Lifecycle of a bot reply. PENDING_APPROVAL/APPROVED support the
-/// manual-approval flow (dashboard approves before posting).
+/// manual-approval flow; POSTING is the exactly-once claim state.
 enum ReplyStatus {
   DRY_RUN
   PENDING_APPROVAL
   APPROVED
+  POSTING
   POSTED
   SKIPPED
   FAILED
+}
+
+/// How a post entered the pipeline.
+enum PostSource {
+  FIREHOSE
+  MANUAL
 }
 
 /// A candidate Bluesky post captured from the Jetstream firehose.
@@ -56,9 +63,14 @@ model Post {
 
   /// Category slugs matched by the cheap keyword pre-filter
   detectedCategories String[]     @default([])
+  /// The exact keyword phrases that fired (observability + tuning signal)
+  matchedKeywords    String[]     @default([])
   /// 0–100, set by LLM evaluation (null = not yet evaluated)
   productIntentScore Int?
   safetyStatus       SafetyStatus @default(PENDING)
+  source             PostSource   @default(FIREHOSE)
+  /// Set when the post vanished from the AppView (deleted) — never act on it
+  deadAt             DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -143,6 +155,12 @@ model BotReply {
   replyUri   String?
   status     ReplyStatus
   skipReason String?
+  /// When the reply actually went out — rate limits derive from this
+  postedAt   DateTime?
+  approvedAt DateTime?
+  /// Posting retry bookkeeping (transient errors retry, they don't kill)
+  attemptCount  Int       @default(0)
+  nextAttemptAt DateTime?
 
   createdAt DateTime @default(now())
 
@@ -165,6 +183,13 @@ model CandidateEvaluation {
   productIntentScore  Int
   safetyDecision      SafetyStatus
   recommendedCategory String?
+  /// Direct Amazon search query for dynamic recommendations (e.g. a game title)
+  recommendedSearchQuery String?
+  /// LLM's suggestion when real intent exists but no category fits
+  suggestedNewCategory   String?
+  /// Which model produced this verdict ("fake", "policy", or a real model id) —
+  /// the reply pipeline only acts on verdicts matching its current mode
+  model               String  @default("unknown")
   shouldReply         Boolean
   reason              String
   suggestedReplyAngle String?
@@ -175,4 +200,28 @@ model CandidateEvaluation {
 
   @@index([postId])
   @@index([createdAt])
+}
+
+/// Authors the bot must never reply to again. Populated automatically when
+/// anyone interacts with the bot (conservative consent-revocation) or manually.
+model AuthorOptOut {
+  did       String   @id
+  reason    String
+  createdAt DateTime @default(now())
+}
+
+/// Singleton (id = "worker") liveness + ground-truth mode row, upserted by the
+/// worker every 30s. `paused` is the operator kill switch (set by dashboard,
+/// read by the worker each tick — the worker never writes it).
+model WorkerHeartbeat {
+  id           String   @id
+  startedAt    DateTime
+  updatedAt    DateTime @updatedAt
+  dryRun       Boolean
+  replyMode    String
+  model        String
+  paused       Boolean  @default(false)
+  postingState String
+  loops        Json
+  counters     Json
 }

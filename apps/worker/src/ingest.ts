@@ -22,10 +22,18 @@ function skip(stats: IngestStats, reason: string): void {
   stats.skipped[reason] = (stats.skipped[reason] ?? 0) + 1;
 }
 
+/** Accept en, en-US, en-GB…; posts with no langs at all also pass (keyword
+ *  matching against English phrases is the effective language filter). */
+function isEnglish(langs: string[] | undefined): boolean {
+  if (!langs || langs.length === 0) return true;
+  return langs.some((lang) => lang.toLowerCase().startsWith("en"));
+}
+
 /**
- * Handle one Jetstream event: apply the cheap filter funnel and persist
- * keyword-matched posts as candidates. Deletions remove any stored candidate
- * so we never evaluate or reply to a post the author took down.
+ * Handle one Jetstream event. Gate ORDER matters: the category matcher runs
+ * BEFORE the sensitive/promo filters so that every post those filters kill
+ * was a real candidate — making filter over-reach measurable instead of
+ * silently destroying the funnel.
  */
 export async function processPostEvent(
   event: JetstreamEvent,
@@ -54,21 +62,21 @@ export async function processPostEvent(
   if (!text) return skip(stats, "empty");
   if (record?.reply) return skip(stats, "is_reply");
   if (text.length < config.ingest.minPostLength) return skip(stats, "too_short");
-  if (config.ingest.requireEnglish && !record?.langs?.includes("en")) {
+  if (config.ingest.requireEnglish && !isEnglish(record?.langs)) {
     return skip(stats, "not_english");
   }
-  if (findSensitiveMatch(text)) return skip(stats, "sensitive_topic");
-  if (findPromotionalMatch(text)) return skip(stats, "promotional");
 
-  const matchedCategories = matcher.match(text);
-  if (matchedCategories.length === 0) return skip(stats, "no_category_match");
+  const matches = matcher.match(text);
+  if (matches.length === 0) return skip(stats, "no_category_match");
+
+  // Post-match kills: these counters are the filter-over-reach alarm.
+  if (findSensitiveMatch(text)) return skip(stats, "sensitive_after_match");
+  if (findPromotionalMatch(text)) return skip(stats, "promo_after_match");
 
   if (!commit.cid) return skip(stats, "missing_cid");
 
-  // createMany + skipDuplicates compiles to a single atomic
-  // INSERT ... ON CONFLICT DO NOTHING, so redelivered events (cursor rewinds,
-  // at-least-once delivery) can't race each other the way upsert's
-  // find-then-create does.
+  // createMany + skipDuplicates = single atomic INSERT ... ON CONFLICT DO
+  // NOTHING, immune to redelivered events racing each other.
   const result = await prisma.post.createMany({
     data: [
       {
@@ -78,7 +86,8 @@ export async function processPostEvent(
         text,
         // Use network receive time, not the client-set createdAt (can be wrong).
         indexedAt: new Date(event.time_us / 1000),
-        detectedCategories: matchedCategories,
+        detectedCategories: matches.map((m) => m.slug),
+        matchedKeywords: matches.map((m) => m.keyword),
       },
     ],
     skipDuplicates: true,

@@ -1,7 +1,55 @@
 import Link from "next/link";
 import { prisma, ReplyStatus } from "@trendcart/db";
+import { toggleWorkerPaused } from "./actions";
+import { Badge } from "./ui";
 
 export const dynamic = "force-dynamic";
+
+const HEARTBEAT_STALE_MS = 2 * 60_000;
+
+async function WorkerStatusCard() {
+  const heartbeat = await prisma.workerHeartbeat.findUnique({ where: { id: "worker" } });
+  if (!heartbeat) {
+    return (
+      <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
+        <span className="font-medium text-zinc-700">Worker:</span> never seen — start it with{" "}
+        <code>pnpm dev:worker</code>.
+      </div>
+    );
+  }
+  const stale = Date.now() - heartbeat.updatedAt.getTime() > HEARTBEAT_STALE_MS;
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-3 rounded-lg border p-4 text-sm ${
+        stale ? "border-red-300 bg-red-50" : "border-zinc-200 bg-white"
+      }`}
+    >
+      <span className="font-medium">Worker</span>
+      <Badge tone={stale ? "red" : "green"}>{stale ? "STALE / DOWN" : "live"}</Badge>
+      <Badge tone={heartbeat.dryRun ? "amber" : "blue"}>
+        {heartbeat.dryRun ? "dry run" : `LIVE · ${heartbeat.replyMode}`}
+      </Badge>
+      <span className="text-zinc-500">{heartbeat.model}</span>
+      <span className="text-zinc-400">{heartbeat.postingState}</span>
+      {heartbeat.paused && <Badge tone="red">PAUSED</Badge>}
+      <span className="text-xs text-zinc-400">
+        last tick {heartbeat.updatedAt.toLocaleTimeString("en-US")}
+      </span>
+      <form action={toggleWorkerPaused} className="ml-auto">
+        <button
+          type="submit"
+          className={`rounded px-3 py-1 text-xs font-medium ${
+            heartbeat.paused
+              ? "bg-emerald-600 text-white hover:bg-emerald-700"
+              : "border border-red-300 text-red-700 hover:bg-red-50"
+          }`}
+        >
+          {heartbeat.paused ? "Resume bot" : "Pause bot"}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 type Stats = {
   posts: number;
@@ -54,6 +102,7 @@ export default async function HomePage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Overview</h1>
+      <WorkerStatusCard />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         {cards.map((card) => (
           <Link

@@ -9,13 +9,18 @@ import { findPromotionalMatch, findSensitiveMatch } from "../filters.js";
 /**
  * Deterministic heuristic client for exercising the full evaluation/reply
  * pipeline without API calls (USE_FAKE_LLM=true). Mirrors the real client's
- * decision shape: sensitive → unsafe, promo → reject, keyword match → high
- * intent, otherwise low intent.
+ * decision shape. Evaluations it produces are stamped model="fake" and are
+ * never acted on by a real-LLM reply pipeline.
  */
 export class FakeLlmClient implements LlmClient {
   async classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult> {
+    const base = {
+      recommendedSearchQuery: null,
+      suggestedNewCategory: null,
+    };
     if (findSensitiveMatch(input.postText)) {
       return {
+        ...base,
         productIntentScore: 0,
         safetyStatus: "unsafe",
         recommendedCategorySlug: null,
@@ -26,6 +31,7 @@ export class FakeLlmClient implements LlmClient {
     }
     if (findPromotionalMatch(input.postText)) {
       return {
+        ...base,
         productIntentScore: 5,
         safetyStatus: "safe",
         recommendedCategorySlug: null,
@@ -37,6 +43,7 @@ export class FakeLlmClient implements LlmClient {
     const slug = input.keywordMatches[0] ?? null;
     if (!slug) {
       return {
+        ...base,
         productIntentScore: 25,
         safetyStatus: "safe",
         recommendedCategorySlug: null,
@@ -46,6 +53,7 @@ export class FakeLlmClient implements LlmClient {
       };
     }
     return {
+      ...base,
       productIntentScore: 78,
       safetyStatus: "safe",
       recommendedCategorySlug: slug,
@@ -56,16 +64,17 @@ export class FakeLlmClient implements LlmClient {
   }
 
   async generateReply(input: GenerateReplyInput): Promise<string> {
-    // Mirror the real client's shape: text is budgeted around the URL and the
-    // URL is appended last, so truncation can never chop the link off.
-    const textBudget = input.maxLength - input.recommendationPageUrl.length - 1;
+    // Mirror the real client's shape: text is budgeted around the URL+suffix
+    // and both are appended last, so truncation can never chop the link off.
+    const reservedChars = input.linkUrl.length + input.linkSuffix.length + 1;
+    const textBudget = input.maxLength - reservedChars;
     const products = input.productNames.slice(0, 3).join(", ");
-    let text = `This is usually fixable with a few ${input.categoryName.toLowerCase()} pieces${
+    let text = `This is usually fixable with a few ${(input.categoryName ?? "practical").toLowerCase()} pieces${
       products ? ` — think ${products}` : ""
     }. I put together a quick list here:`;
     if (text.length > textBudget) {
       text = `${text.slice(0, Math.max(0, textBudget - 1)).trimEnd()}…`;
     }
-    return `${text} ${input.recommendationPageUrl}`;
+    return `${text} ${input.linkUrl}${input.linkSuffix}`;
   }
 }

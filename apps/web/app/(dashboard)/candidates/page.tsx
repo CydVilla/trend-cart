@@ -1,5 +1,5 @@
 import { prisma } from "@trendcart/db";
-import { skipPost } from "../actions";
+import { injectPost, skipPost } from "../actions";
 import { Badge, EmptyState, formatDate, bskyPostUrl, replyStatusTone, safetyTone, truncate } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,23 @@ export default async function CandidatesPage() {
   return (
     <div>
       <h1 className="mb-4 text-2xl font-bold">Candidate posts</h1>
+
+      <form
+        action={injectPost}
+        className="mb-4 flex gap-2 rounded-lg border border-zinc-200 bg-white p-3"
+      >
+        <input
+          name="url"
+          placeholder="Test a post: paste a bsky.app post URL (top-level posts only) — it enters the pipeline immediately"
+          className="flex-1 rounded border border-zinc-300 px-3 py-1.5 text-sm"
+        />
+        <button
+          type="submit"
+          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+        >
+          Inject
+        </button>
+      </form>
       {posts.length === 0 ? (
         <EmptyState>
           No candidates yet — run <code>pnpm dev:worker</code> and posts matching category

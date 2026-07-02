@@ -1,18 +1,18 @@
 /**
  * Final gate before a reply can be stored or posted. The LLM prompt already
  * asks for all of this — the validator assumes the prompt failed and checks
- * everything mechanically. A reply that fails here is recorded as FAILED,
- * never posted.
+ * everything mechanically. A reply that fails here is retried once, then
+ * recorded as FAILED, never posted.
+ *
+ * Posture note: the bot is DISCLOSED (bot bio, affiliate suffix on direct
+ * Amazon links), so disclosure vocabulary is allowed — what stays banned is
+ * hype, fake urgency, and claim-making.
  */
 
 const LINK_REGEX = /https?:\/\/\S+/g;
 
 /** Lowercase phrases that must never appear in a reply. */
 export const BANNED_PHRASES = [
-  "as an ai",
-  "i'm an ai",
-  "i am an ai",
-  "language model",
   "buy now",
   "act now",
   "limited time",
@@ -47,7 +47,7 @@ export function validateReply(
     return { ok: false, reason: `must contain exactly one link (found ${links.length})` };
   }
   if (!trimmed.includes(requiredUrl)) {
-    return { ok: false, reason: "link is not the recommendation page URL" };
+    return { ok: false, reason: "link is not the expected URL" };
   }
 
   if (trimmed.includes("#")) return { ok: false, reason: "contains a hashtag" };

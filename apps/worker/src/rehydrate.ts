@@ -1,4 +1,4 @@
-import { prisma } from "@trendcart/db";
+import { prisma, ReplyStatus } from "@trendcart/db";
 import { computeEngagementScore, computeEngagementVelocity } from "@trendcart/shared";
 import { config } from "./config.js";
 
@@ -6,12 +6,13 @@ import { config } from "./config.js";
  * Jetstream commit events carry no engagement counts (the post was just
  * created), so this loop periodically re-fetches stored candidates from the
  * public AppView by URI and updates counts, score, and velocity.
- * No auth required — this is the same API the public web app uses.
+ * A post missing from the AppView is DEAD (deleted/suspended): it is marked
+ * so and any not-yet-posted replies for it are cancelled.
  */
 
 const GETPOSTS_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts";
 const BATCH_SIZE = 25; // getPosts max
-const TICK_MS = 60_000;
+const FETCH_TIMEOUT_MS = 15_000;
 
 /** Subset of app.bsky.feed.defs#postView we consume. */
 type AppViewPost = {
@@ -32,7 +33,10 @@ export type RehydrateStats = {
 async function fetchPosts(uris: string[]): Promise<AppViewPost[]> {
   const url = new URL(GETPOSTS_URL);
   for (const uri of uris) url.searchParams.append("uris", uri);
-  const response = await fetch(url, { headers: { accept: "application/json" } });
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
   if (!response.ok) {
     throw new Error(`getPosts failed: ${response.status} ${response.statusText}`);
   }
@@ -40,7 +44,24 @@ async function fetchPosts(uris: string[]): Promise<AppViewPost[]> {
   return body.posts ?? [];
 }
 
-async function tick(stats: RehydrateStats): Promise<void> {
+async function markDead(postId: string, now: Date): Promise<void> {
+  await prisma.$transaction([
+    prisma.post.update({
+      where: { id: postId },
+      data: { deadAt: now, lastHydratedAt: now },
+    }),
+    // Cancel anything not yet posted — never reply to a deleted post.
+    prisma.botReply.updateMany({
+      where: {
+        postId,
+        status: { in: [ReplyStatus.PENDING_APPROVAL, ReplyStatus.APPROVED] },
+      },
+      data: { status: ReplyStatus.SKIPPED, skipReason: "post deleted before reply went out" },
+    }),
+  ]);
+}
+
+export async function rehydrateTick(stats: RehydrateStats): Promise<void> {
   const now = new Date();
   const oldestCreatedAt = new Date(now.getTime() - config.ingest.rehydrateMaxAgeHours * 3_600_000);
   const staleBefore = new Date(now.getTime() - config.ingest.rehydrateIntervalMinutes * 60_000);
@@ -48,6 +69,7 @@ async function tick(stats: RehydrateStats): Promise<void> {
   // Never-hydrated posts first, then the longest-stale.
   const due = await prisma.post.findMany({
     where: {
+      deadAt: null,
       createdAt: { gte: oldestCreatedAt },
       OR: [{ lastHydratedAt: null }, { lastHydratedAt: { lt: staleBefore } }],
     },
@@ -68,11 +90,7 @@ async function tick(stats: RehydrateStats): Promise<void> {
   for (const post of due) {
     const view = fetched.get(post.uri);
     if (!view) {
-      // Deleted or not indexed — stamp it so it doesn't clog the queue.
-      await prisma.post.update({
-        where: { id: post.id },
-        data: { lastHydratedAt: now },
-      });
+      await markDead(post.id, now);
       stats.missing += 1;
       continue;
     }
@@ -103,17 +121,4 @@ async function tick(stats: RehydrateStats): Promise<void> {
     });
     stats.hydrated += 1;
   }
-}
-
-/** Starts the loop; returns a stop function. */
-export function startRehydrationLoop(stats: RehydrateStats): () => void {
-  const run = (): void => {
-    tick(stats).catch((error) => {
-      stats.errors += 1;
-      console.error("[rehydrate] tick failed:", error instanceof Error ? error.message : error);
-    });
-  };
-  run(); // hydrate immediately on startup
-  const timer = setInterval(run, TICK_MS);
-  return () => clearInterval(timer);
 }

@@ -1,25 +1,24 @@
 /**
  * Cheap, zero-cost filters that run on every firehose event.
- * Their job is to keep the LLM (Phase 4) and the database from ever seeing
- * the vast majority of posts. False negatives are fine — we're sampling a
- * firehose, not building an index.
+ * They exist to keep obvious junk away from the LLM — the LLM is the real
+ * judgment layer, so these lists stay LEAN. Over-broad stems here have
+ * already been proven to veto the bot's own trigger vocabulary ("keyboard
+ * died", "sick setup", budget questions), so: when in doubt, let the LLM see it.
  */
 
 /**
- * Sensitive-topic pre-filter. This is NOT the real safety system (the LLM
- * evaluates safety in Phase 4) — it's a conservative first gate so we never
- * even store posts about tragedy, politics, illness, crisis, etc.
- * False positives just mean a skipped post, which costs nothing.
+ * Hard-kill topics where even storing the post is pointless: unmistakable
+ * tragedy/crisis, politics, adult content. Nuanced safety (illness mentions,
+ * grief-adjacent language, sarcasm) is the LLM's job, not a regex's.
  */
 const SENSITIVE_PATTERNS: RegExp[] = [
-  /\b(died?|death|dying|passed away|funeral|memorial|grief|griev)/i,
-  /\b(suicid|self.?harm|depress|anxiety|panic attack|trauma|crisis)/i,
-  /\b(cancer|diagnos|chemo|hospital|surgery|illness|disease|chronic pain|sick)/i,
-  /\b(politic|election|vote|voting|senat|congress|president|democrat|republican)/i,
-  /\b(war|bombing|shooting|violence|assault|abuse|attack)/i,
-  /\b(church|jesus|allah|quran|bible|religio|pray for|prayers)/i,
-  /\b(nsfw|onlyfans|porn|sexual)/i,
-  /\b(divorce|breakup|broke up|laid off|fired|lost my job|evict|homeless)/i,
+  /\b(passed away|funeral|memorial|grie(f|ving)|condolence|rest in peace)\b/i,
+  /\b(suicid\w*|self.?harm)\b/i,
+  /\b(cancer|chemo\w*|hospice|terminal illness)\b/i,
+  /\b(politic\w*|election|senat\w*|congress|president|democrat|republican)\b/i,
+  /\b(bombing|shooting|massacre|genocide|war crime)\b/i,
+  /\b(nsfw|onlyfans|porn\w*)\b/i,
+  /\bpray for\b/i,
 ];
 
 /** Returns the matched sensitive pattern source, or null if the text is clean. */
@@ -31,9 +30,9 @@ export function findSensitiveMatch(text: string): string | null {
 }
 
 /**
- * Promotional-post filter: posts that are themselves ads (deal bots, affiliate
- * spam) contain product keywords but zero genuine product need. Engaging with
- * them would make us look like — and amplify — exactly what we're avoiding.
+ * Promotional-post filter: unmistakable ad markers only. Posts that merely
+ * mention prices or budgets ("looking for a grinder under $50") are the
+ * HIGHEST-intent posts on the network and must pass through.
  */
 const PROMO_PATTERNS: RegExp[] = [
   /\b\d+%\s*off\b/i,
@@ -43,10 +42,10 @@ const PROMO_PATTERNS: RegExp[] = [
   /\b(flash|clearance)\s*sale\b/i,
   /\blink in bio\b/i,
   /\baffiliate\b/i,
-  /\$\d+(\.\d{2})?\s*(•|\||-)?\s*(was|now|only|deal)\b/i,
-  /\b(just|only|for)\s*\$\d+/i,
-  /\bspecial\b.*\$\d+/i,
-  /\b(buy now|shop now|order now|限定)\b/i,
+  /\b(buy|shop|order) now\b/i,
+  /\bgiveaway\b/i,
+  /\bwas \$\d+/i,
+  /\$\d+(\.\d{2})?\s*[•|]/, // price-bullet formatting typical of deal bots
 ];
 
 /** Returns the matched promo pattern source, or null if the post looks organic. */
@@ -63,6 +62,8 @@ export type MatcherCategory = {
   negativeKeywords: string[];
 };
 
+export type KeywordMatch = { slug: string; keyword: string };
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -74,7 +75,7 @@ function keywordToRegex(keyword: string): RegExp {
 
 type CompiledCategory = {
   slug: string;
-  keywords: RegExp[];
+  keywords: Array<{ phrase: string; regex: RegExp }>;
   negativeKeywords: RegExp[];
 };
 
@@ -92,7 +93,7 @@ export class CategoryMatcher {
   update(categories: MatcherCategory[]): void {
     this.compiled = categories.map((c) => ({
       slug: c.slug,
-      keywords: c.keywords.map(keywordToRegex),
+      keywords: c.keywords.map((k) => ({ phrase: k.trim(), regex: keywordToRegex(k) })),
       negativeKeywords: c.negativeKeywords.map(keywordToRegex),
     }));
   }
@@ -101,13 +102,17 @@ export class CategoryMatcher {
     return this.compiled.length;
   }
 
-  /** Returns slugs of all categories whose keywords hit (and negatives don't). */
-  match(text: string): string[] {
-    const matches: string[] = [];
+  /**
+   * Returns one entry per matching category, including WHICH keyword fired —
+   * the tuning signal that lets keyword lists improve from evidence.
+   */
+  match(text: string): KeywordMatch[] {
+    const matches: KeywordMatch[] = [];
     for (const category of this.compiled) {
-      if (!category.keywords.some((k) => k.test(text))) continue;
+      const hit = category.keywords.find((k) => k.regex.test(text));
+      if (!hit) continue;
       if (category.negativeKeywords.some((k) => k.test(text))) continue;
-      matches.push(category.slug);
+      matches.push({ slug: category.slug, keyword: hit.phrase });
     }
     return matches;
   }

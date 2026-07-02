@@ -161,6 +161,29 @@ const categories: CategorySeed[] = [
     ],
   },
   {
+    slug: "video-games",
+    name: "Video Games",
+    description:
+      "Games and gaming hardware people are asking about or raving over — served by dynamic Amazon search links rather than a fixed product list.",
+    keywords: [
+      "what should i play",
+      "game recommendations",
+      "any game recs",
+      "worth buying the game",
+      "just finished the game",
+      "game of the year",
+      "nintendo switch",
+      "steam deck",
+      "ps5",
+      "xbox series",
+    ],
+    negativeKeywords: ["gambling", "casino", "crypto"],
+    exampleProblems: [
+      "Just rolled credits on this game, absolute masterpiece, everyone should play it",
+      "Beat the whole game in one weekend — what should I play next?",
+    ],
+  },
+  {
     slug: "kitchen-organization",
     name: "Kitchen Organization",
     description: "Pantry bins, drawer organizers, and racks that reclaim kitchen space.",

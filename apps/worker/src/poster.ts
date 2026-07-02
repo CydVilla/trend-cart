@@ -1,9 +1,12 @@
 import { AtpAgent, RichText } from "@atproto/api";
 import { prisma, ReplyStatus } from "@trendcart/db";
 import { config } from "./config.js";
+import { isPaused, setPostingState } from "./heartbeat.js";
 
-const TICK_MS = 30_000;
 const MAX_LOGIN_FAILURES = 3;
+const MAX_POST_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 10 * 60_000;
+const GETPOSTS_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts";
 
 export type PosterStats = {
   posted: number;
@@ -11,32 +14,61 @@ export type PosterStats = {
   disabled: boolean;
 };
 
+export type Poster = {
+  tick: () => Promise<void>;
+  enabled: boolean;
+};
+
+/** Errors that mean "this reply can never be posted" (vs. transient network). */
+function isPermanentPostError(message: string): boolean {
+  return /blocked|not found|invalid|deleted|suspended/i.test(message);
+}
+
+async function targetStillExists(uri: string): Promise<boolean> {
+  try {
+    const url = new URL(GETPOSTS_URL);
+    url.searchParams.append("uris", uri);
+    const response = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) return true; // AppView hiccup — don't skip on a 5xx
+    const body = (await response.json()) as { posts?: Array<{ uri: string }> };
+    return (body.posts ?? []).some((p) => p.uri === uri);
+  } catch {
+    return true; // network failure is not evidence of deletion
+  }
+}
+
 /**
  * Publishes APPROVED replies to Bluesky, one at a time, oldest first.
  * Hard rules:
- *  - never runs when DRY_RUN=true (the loop isn't even started)
- *  - needs BOT_ACCOUNT_HANDLE + BOT_APP_PASSWORD (app password, never the
- *    real account password)
- *  - keeps the global cooldown between actual posts even if many rows were
- *    approved at once in the dashboard
- *  - repeated login failures disable posting until restart (no hammering)
+ *  - exactly-once: rows are CLAIMED (APPROVED→POSTING) before any network
+ *    call, so a crash can never double-post
+ *  - the global cooldown derives from postedAt in the DB (restart-proof)
+ *  - pre-flight: the target must still exist and the author must not have
+ *    opted out between approval and posting
+ *  - transient post errors retry up to 3 times; permanent ones FAIL
+ *  - never runs when DRY_RUN=true; repeated login failures disable posting
  */
-export function startPostingLoop(stats: PosterStats): (() => void) | null {
+export function createPoster(stats: PosterStats): Poster {
   if (config.bot.dryRun) {
     console.log("  posting:          disabled (DRY_RUN=true)");
-    return null;
+    setPostingState("disabled: DRY_RUN=true");
+    return { tick: async () => {}, enabled: false };
   }
   if (!config.bluesky.handle || !config.bluesky.appPassword) {
     console.warn(
       "  posting:          disabled — set BOT_ACCOUNT_HANDLE and BOT_APP_PASSWORD to enable",
     );
-    return null;
+    setPostingState("disabled: missing credentials");
+    return { tick: async () => {}, enabled: false };
   }
   console.log(`  posting:          enabled as @${config.bluesky.handle}`);
+  setPostingState("enabled");
 
   let agent: AtpAgent | null = null;
   let loginFailures = 0;
-  let lastPostedAt = 0;
   let stopped = false;
 
   async function ensureAgent(): Promise<AtpAgent | null> {
@@ -58,6 +90,7 @@ export function startPostingLoop(stats: PosterStats): (() => void) | null {
       );
       if (loginFailures >= MAX_LOGIN_FAILURES) {
         console.error("[poster] disabling posting until restart — check BOT_APP_PASSWORD");
+        setPostingState("disabled: repeated login failures");
         stats.disabled = true;
         stopped = true;
       }
@@ -65,35 +98,81 @@ export function startPostingLoop(stats: PosterStats): (() => void) | null {
     }
   }
 
+  async function releaseClaim(id: string, skipReason: string): Promise<void> {
+    await prisma.botReply.update({
+      where: { id },
+      data: { status: ReplyStatus.SKIPPED, skipReason },
+    });
+  }
+
   async function tick(): Promise<void> {
     if (stopped) return;
+    if (await isPaused()) return;
 
-    // Respect the global gap between real posts, even for a backlog of
-    // dashboard-approved rows.
-    if (Date.now() - lastPostedAt < config.bot.globalReplyCooldownMinutes * 60_000) return;
+    // Restart-proof global gap between real posts, derived from the DB.
+    const lastPosted = await prisma.botReply.findFirst({
+      where: { status: ReplyStatus.POSTED, postedAt: { not: null } },
+      orderBy: { postedAt: "desc" },
+      select: { postedAt: true },
+    });
+    if (
+      lastPosted?.postedAt &&
+      Date.now() - lastPosted.postedAt.getTime() <
+        config.bot.globalReplyCooldownMinutes * 60_000
+    ) {
+      return;
+    }
 
-    const approved = await prisma.botReply.findFirst({
-      where: { status: ReplyStatus.APPROVED },
+    const candidate = await prisma.botReply.findFirst({
+      where: {
+        status: ReplyStatus.APPROVED,
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
+      },
       orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (!candidate) return;
+
+    // CLAIM before any network call — the count===1 guard makes posting
+    // exactly-once even across overlapping ticks or competing processes.
+    const claim = await prisma.botReply.updateMany({
+      where: { id: candidate.id, status: ReplyStatus.APPROVED },
+      data: { status: ReplyStatus.POSTING },
+    });
+    if (claim.count !== 1) return;
+
+    const approved = await prisma.botReply.findUniqueOrThrow({
+      where: { id: candidate.id },
       include: { post: true },
     });
-    if (!approved) return;
 
-    // Approval that arrives too late is worse than none — replying to a
-    // days-old post reads as necro-spam even with a perfect match.
+    // Stale-approval guard: a reply approved too late reads as necro-spam.
     if (approved.post.indexedAt.getTime() < Date.now() - 48 * 3_600_000) {
-      await prisma.botReply.update({
-        where: { id: approved.id },
-        data: {
-          status: ReplyStatus.SKIPPED,
-          skipReason: "approved too late — post older than 48h at posting time",
-        },
-      });
+      await releaseClaim(approved.id, "approved too late — post older than 48h at posting time");
+      return;
+    }
+    // Consent + existence pre-flight, both may have changed since approval.
+    const optOut = await prisma.authorOptOut.findUnique({
+      where: { did: approved.post.authorDid },
+    });
+    if (optOut) {
+      await releaseClaim(approved.id, "author opted out before posting");
+      return;
+    }
+    if (approved.post.deadAt || !(await targetStillExists(approved.post.uri))) {
+      await releaseClaim(approved.id, "post deleted before posting");
       return;
     }
 
     const activeAgent = await ensureAgent();
-    if (!activeAgent) return;
+    if (!activeAgent) {
+      // Login failed — put the claim back for a later tick.
+      await prisma.botReply.update({
+        where: { id: approved.id },
+        data: { status: ReplyStatus.APPROVED, nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS) },
+      });
+      return;
+    }
 
     try {
       // RichText facets make the link clickable in Bluesky clients.
@@ -109,31 +188,37 @@ export function startPostingLoop(stats: PosterStats): (() => void) | null {
       });
       await prisma.botReply.update({
         where: { id: approved.id },
-        data: { status: ReplyStatus.POSTED, replyUri: result.uri },
+        data: { status: ReplyStatus.POSTED, replyUri: result.uri, postedAt: new Date() },
       });
-      lastPostedAt = Date.now();
       stats.posted += 1;
       console.log(`[poster] posted reply to ${approved.post.uri}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await prisma.botReply.update({
-        where: { id: approved.id },
-        data: { status: ReplyStatus.FAILED, skipReason: `post failed: ${message}` },
-      });
-      stats.postFailed += 1;
-      console.error(`[poster] post failed for ${approved.post.uri}: ${message}`);
+      const attempts = approved.attemptCount + 1;
+      if (isPermanentPostError(message) || attempts >= MAX_POST_ATTEMPTS) {
+        await prisma.botReply.update({
+          where: { id: approved.id },
+          data: {
+            status: ReplyStatus.FAILED,
+            skipReason: `post failed (attempt ${attempts}): ${message}`,
+            attemptCount: attempts,
+          },
+        });
+        stats.postFailed += 1;
+        console.error(`[poster] post failed permanently for ${approved.post.uri}: ${message}`);
+      } else {
+        await prisma.botReply.update({
+          where: { id: approved.id },
+          data: {
+            status: ReplyStatus.APPROVED,
+            attemptCount: attempts,
+            nextAttemptAt: new Date(Date.now() + RETRY_DELAY_MS),
+          },
+        });
+        console.warn(`[poster] transient post error (attempt ${attempts}), will retry: ${message}`);
+      }
     }
   }
 
-  const run = (): void => {
-    tick().catch((error) => {
-      console.error("[poster] tick failed:", error instanceof Error ? error.message : error);
-    });
-  };
-  run();
-  const timer = setInterval(run, TICK_MS);
-  return () => {
-    stopped = true;
-    clearInterval(timer);
-  };
+  return { tick, enabled: true };
 }

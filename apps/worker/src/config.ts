@@ -35,7 +35,10 @@ export const config = {
     model: envString("ANTHROPIC_MODEL", "claude-opus-4-8"),
     /* Deterministic fake client for pipeline testing without API spend */
     useFake: envBool("USE_FAKE_LLM", false),
-    maxEvalsPerHour: envInt("MAX_LLM_EVALS_PER_HOUR", 20),
+    maxEvalsPerHour: envInt("MAX_LLM_EVALS_PER_HOUR", 40),
+    /* Firehose posts wait this long before evaluation so the engagement
+       snapshot is meaningful; manually injected posts skip the wait. */
+    evalMinPostAgeMinutes: envInt("EVAL_MIN_POST_AGE_MINUTES", 30),
   },
 
   site: {

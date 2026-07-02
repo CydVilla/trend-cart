@@ -1,15 +1,16 @@
-import { prisma, ReplyStatus, type Post } from "@trendcart/db";
-import type { LlmClient } from "@trendcart/shared";
+import { prisma, ReplyStatus, type CandidateEvaluation, type Post } from "@trendcart/db";
+import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
+import { isPaused } from "./heartbeat.js";
 import { validateReply } from "./validate.js";
 
-const TICK_MS = 60_000;
 const BATCH_SIZE = 5;
 /** Statuses that count as "the bot engaged" for cooldowns/limits/dedupe. */
 const ACTIVE_STATUSES = [
   ReplyStatus.DRY_RUN,
   ReplyStatus.PENDING_APPROVAL,
   ReplyStatus.APPROVED,
+  ReplyStatus.POSTING,
   ReplyStatus.POSTED,
 ];
 
@@ -22,20 +23,29 @@ export type ReplyStats = {
 
 /**
  * skip  = permanent, recorded as a SKIPPED row (auditable, never retried)
- * defer = temporary (rate limit / cooldown window), retried next tick
+ * defer = temporary (rate limit / cooldown window / missing page), retried
+ *         next tick without writing a row
  */
 type PolicyDecision =
   | { action: "proceed" }
   | { action: "skip"; reason: string }
   | { action: "defer"; reason: string };
 
-async function checkReplyPolicy(post: Post, categorySlug: string): Promise<PolicyDecision> {
+async function checkReplyPolicy(post: Post, categorySlug: string | null): Promise<PolicyDecision> {
   const now = Date.now();
 
-  // Replying to old posts reads as necro-spam, even when the match is good.
-  if (post.indexedAt.getTime() < now - 24 * 3_600_000) {
-    return { action: "skip", reason: "candidate expired (post older than 24h)" };
+  if (post.deadAt) return { action: "skip", reason: "post was deleted" };
+
+  // Replying to old posts reads as necro-spam. Operator-injected posts get a
+  // longer window — a human explicitly chose them.
+  const maxAgeHours = post.source === "MANUAL" ? 7 * 24 : 24;
+  if (post.indexedAt.getTime() < now - maxAgeHours * 3_600_000) {
+    return { action: "skip", reason: `candidate expired (post older than ${maxAgeHours}h)` };
   }
+
+  // Consent revocation is permanent and checked before anything else social.
+  const optOut = await prisma.authorOptOut.findUnique({ where: { did: post.authorDid } });
+  if (optOut) return { action: "skip", reason: "author opted out" };
 
   // Per-author cooldown — never reply to the same person twice in the window.
   const authorCutoff = new Date(now - config.bot.authorCooldownHours * 3_600_000);
@@ -81,7 +91,7 @@ async function checkReplyPolicy(post: Post, categorySlug: string): Promise<Polic
   }
 
   // Per-category cooldown — don't recommend the same category twice in a row.
-  if (config.bot.categoryCooldownMinutes > 0) {
+  if (categorySlug && config.bot.categoryCooldownMinutes > 0) {
     const categoryCutoff = new Date(now - config.bot.categoryCooldownMinutes * 60_000);
     const recentInCategory = await prisma.botReply.findFirst({
       where: {
@@ -118,40 +128,88 @@ function initialStatus(): ReplyStatus {
   return ReplyStatus.APPROVED; // auto mode — posting loop picks it up
 }
 
+type ReplyLink = {
+  url: string;
+  /** FTC-clear disclosure for direct Amazon links; pages carry it on-site. */
+  suffix: string;
+  categoryName: string | null;
+  productNames: string[];
+};
+
+/**
+ * Pick the single link a reply will carry: the curated recommendation page
+ * when the category has one published, otherwise a tagged Amazon search for
+ * the specific product the LLM identified (with in-reply disclosure).
+ */
+async function chooseLink(evaluation: CandidateEvaluation): Promise<ReplyLink | null> {
+  if (evaluation.recommendedCategory) {
+    const category = await prisma.productCategory.findUnique({
+      where: { slug: evaluation.recommendedCategory },
+      include: {
+        recommendationPage: true,
+        products: { where: { isActive: true }, take: 5 },
+      },
+    });
+    if (category?.recommendationPage?.isPublished) {
+      return {
+        url: `${config.site.publicUrl}/recommendations/${category.recommendationPage.slug}`,
+        suffix: "",
+        categoryName: category.name,
+        productNames: category.products.map((p) => p.name),
+      };
+    }
+    // Category matched but has no published page — fall through to a direct
+    // search if the evaluation carries one.
+    if (evaluation.recommendedSearchQuery && config.site.amazonAssociateTag) {
+      return {
+        url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
+        suffix: " (affiliate link)",
+        categoryName: category?.name ?? null,
+        productNames: [],
+      };
+    }
+    return null; // wait for the page — defer, don't burn the candidate
+  }
+  if (evaluation.recommendedSearchQuery && config.site.amazonAssociateTag) {
+    return {
+      url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
+      suffix: " (affiliate link)",
+      categoryName: null,
+      productNames: [],
+    };
+  }
+  return null;
+}
+
 /**
  * One pass: take evaluations that cleared Phase 4's gates and have no reply
  * yet, run the anti-spam policy, generate + validate the reply, and store it
  * in the mode-appropriate status. Every permanent decision leaves a row.
  */
 export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Promise<void> {
+  if (await isPaused()) return;
+
   const due = await prisma.candidateEvaluation.findMany({
-    where: { shouldReply: true, post: { replies: { none: {} } } },
+    where: {
+      shouldReply: true,
+      // Only act on verdicts from the mode we're running in — fake test
+      // verdicts must never drive a real-LLM pipeline (and vice versa).
+      model: config.llm.useFake ? "fake" : { notIn: ["fake", "policy"] },
+      post: { replies: { none: {} }, deadAt: null },
+    },
     include: { post: true },
     orderBy: { createdAt: "asc" },
     take: BATCH_SIZE,
   });
 
   for (const evaluation of due) {
-    const slug = evaluation.recommendedCategory;
-    if (!slug) {
-      await writeSkip(evaluation.postId, "evaluation has no category", stats);
+    const link = await chooseLink(evaluation);
+    if (!link) {
+      stats.deferred += 1; // usually "category page not published yet"
       continue;
     }
 
-    const category = await prisma.productCategory.findUnique({
-      where: { slug },
-      include: {
-        recommendationPage: true,
-        products: { where: { isActive: true }, take: 5 },
-      },
-    });
-    const page = category?.recommendationPage;
-    if (!category || !page?.isPublished) {
-      await writeSkip(evaluation.postId, `no published recommendation page for ${slug}`, stats);
-      continue;
-    }
-
-    const policy = await checkReplyPolicy(evaluation.post, slug);
+    const policy = await checkReplyPolicy(evaluation.post, evaluation.recommendedCategory);
     if (policy.action === "skip") {
       await writeSkip(evaluation.postId, policy.reason, stats);
       continue;
@@ -161,17 +219,19 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue; // no row — the next tick retries once the window frees up
     }
 
-    const pageUrl = `${config.site.publicUrl}/recommendations/${page.slug}`;
+    const replyInput = {
+      postText: evaluation.post.text,
+      categoryName: link.categoryName,
+      suggestedReplyAngle: evaluation.suggestedReplyAngle,
+      linkUrl: link.url,
+      linkSuffix: link.suffix,
+      productNames: link.productNames,
+      maxLength: config.bot.replyMaxLength,
+    };
+
     let text: string;
     try {
-      text = await llm.generateReply({
-        postText: evaluation.post.text,
-        categoryName: category.name,
-        suggestedReplyAngle: evaluation.suggestedReplyAngle,
-        recommendationPageUrl: pageUrl,
-        productNames: category.products.map((p) => p.name),
-        maxLength: config.bot.replyMaxLength,
-      });
+      text = await llm.generateReply(replyInput);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await prisma.botReply.create({
@@ -186,20 +246,15 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
-    let validation = validateReply(text, pageUrl, config.bot.replyMaxLength);
+    let validation = validateReply(text, link.url, config.bot.replyMaxLength);
     if (!validation.ok) {
-      // One retry with a tighter budget — over-length is the common failure,
-      // and the model usually lands it on the second attempt.
+      // One retry with a tighter budget — over-length is the common failure.
       try {
         const retryText = await llm.generateReply({
-          postText: evaluation.post.text,
-          categoryName: category.name,
-          suggestedReplyAngle: evaluation.suggestedReplyAngle,
-          recommendationPageUrl: pageUrl,
-          productNames: category.products.map((p) => p.name),
+          ...replyInput,
           maxLength: config.bot.replyMaxLength - 30,
         });
-        const retryValidation = validateReply(retryText, pageUrl, config.bot.replyMaxLength);
+        const retryValidation = validateReply(retryText, link.url, config.bot.replyMaxLength);
         if (retryValidation.ok) {
           text = retryText;
           validation = retryValidation;
@@ -240,16 +295,4 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     });
     stats.generated += 1;
   }
-}
-
-/** Starts the loop; returns a stop function. */
-export function startReplyLoop(llm: LlmClient, stats: ReplyStats): () => void {
-  const run = (): void => {
-    generateDueReplies(llm, stats).catch((error) => {
-      console.error("[reply] tick failed:", error instanceof Error ? error.message : error);
-    });
-  };
-  run();
-  const timer = setInterval(run, TICK_MS);
-  return () => clearInterval(timer);
 }

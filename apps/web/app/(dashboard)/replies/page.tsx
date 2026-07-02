@@ -19,16 +19,31 @@ export default async function RepliesPage() {
     }),
   ]);
 
-  const dryRunOn = process.env.DRY_RUN !== "false";
+  // Ground truth from the worker's heartbeat, not this web process's env.
+  const heartbeat = await prisma.workerHeartbeat.findUnique({ where: { id: "worker" } });
 
   return (
     <div>
       <h1 className="mb-4 text-2xl font-bold">Replies</h1>
 
-      {dryRunOn && (
-        <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          <strong>DRY_RUN is on</strong> — approved replies will not be posted until you set{" "}
-          <code>DRY_RUN=false</code> and provide <code>BOT_APP_PASSWORD</code>.
+      {heartbeat ? (
+        heartbeat.dryRun ? (
+          <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+            <strong>Worker is in DRY_RUN</strong> — approved replies will not be posted. Posting
+            state: <code>{heartbeat.postingState}</code>.
+          </div>
+        ) : (
+          <div className="mb-4 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
+            <strong>Worker is LIVE</strong> ({heartbeat.replyMode} mode) — approving here posts to
+            Bluesky. Posting state: <code>{heartbeat.postingState}</code>
+            {heartbeat.paused && (
+              <strong className="ml-2 text-red-700">· currently PAUSED</strong>
+            )}
+          </div>
+        )
+      ) : (
+        <div className="mb-4 rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-600">
+          Worker has never reported in — its mode is unknown until it runs.
         </div>
       )}
 
