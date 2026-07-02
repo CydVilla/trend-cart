@@ -186,7 +186,28 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
-    const validation = validateReply(text, pageUrl, config.bot.replyMaxLength);
+    let validation = validateReply(text, pageUrl, config.bot.replyMaxLength);
+    if (!validation.ok) {
+      // One retry with a tighter budget — over-length is the common failure,
+      // and the model usually lands it on the second attempt.
+      try {
+        const retryText = await llm.generateReply({
+          postText: evaluation.post.text,
+          categoryName: category.name,
+          suggestedReplyAngle: evaluation.suggestedReplyAngle,
+          recommendationPageUrl: pageUrl,
+          productNames: category.products.map((p) => p.name),
+          maxLength: config.bot.replyMaxLength - 30,
+        });
+        const retryValidation = validateReply(retryText, pageUrl, config.bot.replyMaxLength);
+        if (retryValidation.ok) {
+          text = retryText;
+          validation = retryValidation;
+        }
+      } catch {
+        // fall through to the FAILED row with the original validation reason
+      }
+    }
     if (!validation.ok) {
       await prisma.botReply.create({
         data: {

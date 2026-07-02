@@ -56,10 +56,16 @@ export class FakeLlmClient implements LlmClient {
   }
 
   async generateReply(input: GenerateReplyInput): Promise<string> {
+    // Mirror the real client's shape: text is budgeted around the URL and the
+    // URL is appended last, so truncation can never chop the link off.
+    const textBudget = input.maxLength - input.recommendationPageUrl.length - 1;
     const products = input.productNames.slice(0, 3).join(", ");
-    const reply = `This is usually fixable with a few ${input.categoryName.toLowerCase()} pieces${
+    let text = `This is usually fixable with a few ${input.categoryName.toLowerCase()} pieces${
       products ? ` — think ${products}` : ""
-    }. I put together a quick list here: ${input.recommendationPageUrl}`;
-    return reply.length <= input.maxLength ? reply : reply.slice(0, input.maxLength);
+    }. I put together a quick list here:`;
+    if (text.length > textBudget) {
+      text = `${text.slice(0, Math.max(0, textBudget - 1)).trimEnd()}…`;
+    }
+    return `${text} ${input.recommendationPageUrl}`;
   }
 }

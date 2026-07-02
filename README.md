@@ -152,5 +152,18 @@ Planned for after the MVP works locally: a `web` dyno (Next.js), a `worker` dyno
 - [x] Phase 5 — reply generation, validation, and Bluesky posting loop
 - [x] Phase 6 — dashboard (candidates, reply approval, categories, products, page management)
 - [x] Phase 7 — public recommendation pages (/recommendations/[slug] + index)
-- [ ] Phase 8 — safety & rate limits
-- [ ] Phase 9 — seed data
+- [x] Phase 8 — safety & rate limits (audited; stale-approval guard added to poster)
+- [x] Phase 9 — seed data (8 published pages, 3 products per category, idempotent)
+
+## Going live checklist
+
+1. Fill the bot account's profile: display name, avatar, and a bio that
+   **discloses it is a bot** and links to the site.
+2. Give the account organic life first — a few own-timeline posts (e.g. its
+   recommendation lists) before it ever replies to anyone.
+3. Add the deployed site URL to your Amazon Associates account's site list.
+4. Put auth in front of the dashboard.
+5. Run with `DRY_RUN=true` for a few days; review dry-run replies in the
+   dashboard until you trust the judgment.
+6. Then `DRY_RUN=false` + `REPLY_MODE=manual` — every reply still needs your
+   click. `auto` mode exists but is not recommended.

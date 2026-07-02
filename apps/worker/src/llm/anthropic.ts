@@ -36,9 +36,9 @@ Be strict. When in doubt, do not reply: a missed opportunity costs nothing, a ba
 const REPLY_SYSTEM = `You write replies for TrendCart, a Bluesky account that suggests practical product categories to people describing everyday problems. You sound like a helpful person, never a marketer.
 
 Hard requirements:
-- Stay under the character limit you are given. This is a hard cap.
-- Acknowledge the specific problem in the post, suggest 2-3 concrete product types in plain text (no links on them), then include the ONE provided URL verbatim as the only link.
-- Exactly one link in the reply: the provided recommendation page URL.
+- Stay under the word limit you are given — shorter is better.
+- Do NOT include any URL or link. The recommendation page link is appended automatically after your text.
+- Acknowledge the specific problem in the post, then suggest 2-3 concrete product types in plain text.
 - No hashtags, no @-mentions, no emoji unless it feels truly natural.
 - No hype ("game changer", "you NEED this"), no fake urgency, no exclamation-point pileups.
 - No medical, legal, or financial claims. No invented facts about products.
@@ -64,12 +64,11 @@ ${input.postText}
 """`;
 }
 
-function buildReplyPrompt(input: GenerateReplyInput): string {
-  return `Character limit: ${input.maxLength}
+function buildReplyPrompt(input: GenerateReplyInput, wordBudget: number): string {
+  return `Word limit: at most ${wordBudget} words. Do not include any link — it is appended after your text automatically.
 Category: ${input.categoryName}
 Product types you may mention: ${input.productNames.join(", ")}
 Reply angle: ${input.suggestedReplyAngle ?? "address the specific problem in the post"}
-Recommendation page URL (include verbatim, as the only link): ${input.recommendationPageUrl}
 
 Post you are replying to:
 """
@@ -110,12 +109,18 @@ export class AnthropicLlmClient implements LlmClient {
   }
 
   async generateReply(input: GenerateReplyInput): Promise<string> {
+    // LLMs are bad at counting characters, so the model only writes the text
+    // portion against a word budget; the URL is appended deterministically.
+    const textBudget = input.maxLength - input.recommendationPageUrl.length - 1;
+    // ~6.5 chars/word average leaves comfortable headroom under the budget.
+    const wordBudget = Math.max(12, Math.floor(textBudget / 6.5));
+
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: 512,
       output_config: { effort: "low" },
       system: REPLY_SYSTEM,
-      messages: [{ role: "user", content: buildReplyPrompt(input) }],
+      messages: [{ role: "user", content: buildReplyPrompt(input, wordBudget) }],
     });
     if (response.stop_reason === "refusal") {
       throw new Error("reply generation was refused");
@@ -126,6 +131,8 @@ export class AnthropicLlmClient implements LlmClient {
       .join("")
       .trim();
     if (!text) throw new Error("reply generation returned empty text");
-    return text;
+    // Model was told not to include links, but never trust that blindly.
+    if (text.includes(input.recommendationPageUrl)) return text;
+    return `${text} ${input.recommendationPageUrl}`;
   }
 }

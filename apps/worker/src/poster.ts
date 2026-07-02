@@ -79,6 +79,19 @@ export function startPostingLoop(stats: PosterStats): (() => void) | null {
     });
     if (!approved) return;
 
+    // Approval that arrives too late is worse than none — replying to a
+    // days-old post reads as necro-spam even with a perfect match.
+    if (approved.post.indexedAt.getTime() < Date.now() - 48 * 3_600_000) {
+      await prisma.botReply.update({
+        where: { id: approved.id },
+        data: {
+          status: ReplyStatus.SKIPPED,
+          skipReason: "approved too late — post older than 48h at posting time",
+        },
+      });
+      return;
+    }
+
     const activeAgent = await ensureAgent();
     if (!activeAgent) return;
 
