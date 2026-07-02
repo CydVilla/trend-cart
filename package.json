@@ -21,7 +21,7 @@
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @trendcart/db generate",
     "db:migrate": "pnpm --filter @trendcart/db migrate",
-    "db:deploy": "pnpm --filter @trendcart/db deploy",
+    "db:deploy": "pnpm --filter @trendcart/db migrate:deploy",
     "db:studio": "pnpm --filter @trendcart/db studio",
     "db:seed": "pnpm --filter @trendcart/db seed"
   },
