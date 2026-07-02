@@ -151,6 +151,6 @@ Planned for after the MVP works locally: a `web` dyno (Next.js), a `worker` dyno
 - [x] Phase 4 — candidate evaluation (LLM classification with server-side gates)
 - [x] Phase 5 — reply generation, validation, and Bluesky posting loop
 - [x] Phase 6 — dashboard (candidates, reply approval, categories, products, page management)
-- [ ] Phase 7 — recommendation pages
+- [x] Phase 7 — public recommendation pages (/recommendations/[slug] + index)
 - [ ] Phase 8 — safety & rate limits
 - [ ] Phase 9 — seed data
