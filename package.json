@@ -1,0 +1,35 @@
+{
+  "name": "trendcart",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.34.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@prisma/client", "@prisma/engines", "esbuild", "prisma", "sharp"]
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @trendcart/web dev",
+    "dev:worker": "pnpm --filter @trendcart/worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @trendcart/db generate",
+    "db:migrate": "pnpm --filter @trendcart/db migrate",
+    "db:deploy": "pnpm --filter @trendcart/db deploy",
+    "db:studio": "pnpm --filter @trendcart/db studio",
+    "db:seed": "pnpm --filter @trendcart/db seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "eslint": "^9.20.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.24.0"
+  }
+}

@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: trendcart-db
+    environment:
+      POSTGRES_USER: trendcart
+      POSTGRES_PASSWORD: trendcart
+      POSTGRES_DB: trendcart
+    ports:
+      # Host port 5433 — a native Postgres already occupies 5432 on this machine
+      - "5433:5432"
+    volumes:
+      - trendcart_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trendcart -d trendcart"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  trendcart_pgdata:

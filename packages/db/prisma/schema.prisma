@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Safety classification for a post. PENDING = not yet evaluated.
+enum SafetyStatus {
+  PENDING
+  SAFE
+  UNSAFE
+  UNCERTAIN
+}
+
+/// Lifecycle of a bot reply. PENDING_APPROVAL/APPROVED support the
+/// manual-approval flow (dashboard approves before posting).
+enum ReplyStatus {
+  DRY_RUN
+  PENDING_APPROVAL
+  APPROVED
+  POSTED
+  SKIPPED
+  FAILED
+}
+
+/// A candidate Bluesky post captured from the Jetstream firehose.
+model Post {
+  id           String   @id @default(cuid())
+  /// AT URI, e.g. at://did:plc:abc123/app.bsky.feed.post/3kxyz — globally unique
+  uri          String   @unique
+  /// Content hash of the record; needed (with uri) to construct a reply ref
+  cid          String
+  authorDid    String
+  /// Handle may be unknown at ingest time (Jetstream sends DIDs); resolved later
+  authorHandle String?
+  text         String
+  /// When the post was indexed by the network (from the event)
+  indexedAt    DateTime
+
+  // Engagement counts are 0 at ingest (Jetstream commit events carry no counts);
+  // rehydrated later via app.bsky.feed.getPosts using the URI.
+  likeCount   Int @default(0)
+  repostCount Int @default(0)
+  replyCount  Int @default(0)
+  quoteCount  Int @default(0)
+
+  /// likeCount*1 + repostCount*3 + replyCount*2 + quoteCount*3
+  engagementScore    Float @default(0)
+  /// Change in engagementScore per hour between rehydrations
+  engagementVelocity Float @default(0)
+  /// Last time counts were refreshed from the AppView (null = never)
+  lastHydratedAt     DateTime?
+
+  /// Category slugs matched by the cheap keyword pre-filter
+  detectedCategories String[]     @default([])
+  /// 0–100, set by LLM evaluation (null = not yet evaluated)
+  productIntentScore Int?
+  safetyStatus       SafetyStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  evaluations CandidateEvaluation[]
+  replies     BotReply[]
+
+  @@index([authorDid])
+  @@index([createdAt])
+  @@index([engagementScore])
+  @@index([safetyStatus, productIntentScore])
+}
+
+/// Curated product categories, e.g. desk-cable-management, coffee-setup.
+model ProductCategory {
+  id               String   @id @default(cuid())
+  slug             String   @unique
+  name             String
+  description      String
+  /// Cheap pre-filter: post text must hit at least one keyword
+  keywords         String[] @default([])
+  /// If any of these appear, the category does NOT match
+  negativeKeywords String[] @default([])
+  /// Example problem statements, used as few-shot context for the LLM
+  exampleProblems  String[] @default([])
+  isActive         Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products           Product[]
+  recommendationPage RecommendationPage?
+}
+
+/// Manually curated products. `url` stores the plain merchant URL;
+/// the affiliate tag (AMAZON_ASSOCIATE_TAG) is appended at render time.
+model Product {
+  id                          String  @id @default(cuid())
+  categoryId                  String
+  name                        String
+  description                 String
+  /// Human-friendly, e.g. "$15–$25"
+  priceRange                  String
+  merchant                    String  @default("amazon")
+  url                         String
+  imageUrl                    String?
+  affiliateDisclosureRequired Boolean @default(true)
+  isActive                    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+}
+
+/// Public landing page at /recommendations/[slug]. One per category.
+model RecommendationPage {
+  id               String  @id @default(cuid())
+  slug             String  @unique
+  categoryId       String  @unique
+  title            String
+  intro            String
+  /// Optional LLM-generated summary of why these products help
+  generatedSummary String?
+  isPublished      Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+/// Every reply the bot generated — including dry runs and skips —
+/// so we can rate-limit, dedupe, and audit.
+model BotReply {
+  id         String      @id @default(cuid())
+  postId     String
+  replyText  String
+  /// AT URI of the posted reply (null unless status = POSTED)
+  replyUri   String?
+  status     ReplyStatus
+  skipReason String?
+
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+/// Full record of one evaluation run for a post (inputs, raw LLM output,
+/// and the decision) — the audit log for "why did/didn't the bot reply?".
+model CandidateEvaluation {
+  id                  String       @id @default(cuid())
+  postId              String
+  /// What we sent to the evaluator (post text, matched categories, etc.)
+  rawInput            Json
+  /// Raw LLM response, null if the cheap filters rejected before the LLM ran
+  llmOutput           Json?
+  productIntentScore  Int
+  safetyDecision      SafetyStatus
+  recommendedCategory String?
+  shouldReply         Boolean
+  reason              String
+  suggestedReplyAngle String?
+
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([createdAt])
+}

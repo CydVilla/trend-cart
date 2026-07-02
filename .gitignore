@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Env — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Build output
+.next/
+dist/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Prisma generated client (regenerate with `pnpm db:generate`);
+# keep migration SQL committed — do NOT ignore packages/db/prisma/migrations
+packages/db/src/generated/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+.claude/settings.local.json

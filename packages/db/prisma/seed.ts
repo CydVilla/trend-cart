@@ -1,0 +1,205 @@
+import { prisma } from "../src/index.js";
+
+/**
+ * Seed curated product categories (Phase 3 needs these for keyword matching).
+ * Idempotent: upserts by slug, so it's safe to re-run after editing.
+ * Products and recommendation pages are seeded in Phase 9.
+ */
+
+type CategorySeed = {
+  slug: string;
+  name: string;
+  description: string;
+  keywords: string[];
+  negativeKeywords: string[];
+  exampleProblems: string[];
+};
+
+const categories: CategorySeed[] = [
+  {
+    slug: "desk-cable-management",
+    name: "Desk Cable Management",
+    description: "Under-desk trays, reusable ties, and clips that tame messy cables.",
+    keywords: [
+      "cable management",
+      "cables everywhere",
+      "cable mess",
+      "tangled cables",
+      "tangled wires",
+      "cords everywhere",
+      "messy desk",
+      "desk setup",
+      "under desk",
+    ],
+    negativeKeywords: ["guitar cable", "cable tv", "cable news", "internet outage"],
+    exampleProblems: [
+      "My desk setup is such a mess, these cables are driving me insane",
+      "Working from home would be great if my desk didn't look like a wire jungle",
+    ],
+  },
+  {
+    slug: "home-office-lighting",
+    name: "Home Office Lighting",
+    description: "Desk lamps, ring lights, and bias lighting for better video calls and less eye strain.",
+    keywords: [
+      "desk lamp",
+      "ring light",
+      "home office lighting",
+      "bad lighting",
+      "eye strain",
+      "glare on my screen",
+      "too dark on zoom",
+      "look like a shadow on calls",
+    ],
+    negativeKeywords: ["stage lighting", "photography studio"],
+    exampleProblems: [
+      "Every video call I look like I'm in witness protection, my lighting is so bad",
+      "My eyes are killing me after a day at this dim desk",
+    ],
+  },
+  {
+    slug: "dog-grooming",
+    name: "Dog Grooming",
+    description: "Deshedding brushes, grooming gloves, and nail tools for keeping dogs (and homes) tidy.",
+    keywords: [
+      "dog hair everywhere",
+      "shedding season",
+      "dog is shedding",
+      "sheds so much",
+      "dog grooming",
+      "fur all over",
+      "dog nails",
+      "matted fur",
+    ],
+    negativeKeywords: ["cat", "vet bill", "groomer appointment"],
+    exampleProblems: [
+      "My couch is 90% dog hair at this point",
+      "Shedding season has turned my apartment into a fur tornado",
+    ],
+  },
+  {
+    slug: "travel-backpack",
+    name: "Travel & Packing",
+    description: "Carry-on backpacks, packing cubes, and organizers for lighter, saner travel.",
+    keywords: [
+      "packing cubes",
+      "travel backpack",
+      "overpacked",
+      "can't fit in my carry on",
+      "carry on only",
+      "one bag travel",
+      "packing for a trip",
+      "suitcase is a disaster",
+    ],
+    negativeKeywords: ["flight delayed", "flight cancelled", "lost my luggage"],
+    exampleProblems: [
+      "Packing for a week in a carry-on feels physically impossible",
+      "My backpack is a black hole, I can never find anything in it",
+    ],
+  },
+  {
+    slug: "mechanical-keyboard",
+    name: "Mechanical Keyboards",
+    description: "Boards, switches, and keycaps for people whose keyboard is ruining their day.",
+    keywords: [
+      "mechanical keyboard",
+      "keycaps",
+      "keyboard switches",
+      "keyboard died",
+      "keyboard is mushy",
+      "membrane keyboard",
+      "keys stopped working",
+      "hate this keyboard",
+    ],
+    negativeKeywords: ["piano keyboard", "midi keyboard", "synth"],
+    exampleProblems: [
+      "This laptop keyboard is turning my fingers into sadness",
+      "My keyboard double-types every other letter, I'm done",
+    ],
+  },
+  {
+    slug: "workout-recovery",
+    name: "Workout Recovery",
+    description: "Foam rollers, massage tools, and stretching gear for sore-but-healthy muscles.",
+    keywords: [
+      "sore muscles",
+      "so sore from",
+      "foam roller",
+      "post workout",
+      "leg day destroyed me",
+      "massage gun",
+      "doms",
+      "recovery day",
+    ],
+    negativeKeywords: ["injury", "injured", "surgery", "physical therapy", "doctor"],
+    exampleProblems: [
+      "Leg day was two days ago and I still can't sit down like a normal person",
+      "Everything hurts and I need my muscles to forgive me",
+    ],
+  },
+  {
+    slug: "coffee-setup",
+    name: "Coffee Setup",
+    description: "Grinders, pour-over gear, and espresso accessories for better home coffee.",
+    keywords: [
+      "coffee setup",
+      "espresso machine",
+      "pour over",
+      "coffee grinder",
+      "french press",
+      "cold brew",
+      "coffee at home tastes",
+      "bad coffee",
+    ],
+    negativeKeywords: ["coffee shop hiring", "coffee date", "gift card"],
+    exampleProblems: [
+      "My home coffee tastes like disappointment compared to the cafe",
+      "I need a grinder that doesn't sound like a jet engine at 6am",
+    ],
+  },
+  {
+    slug: "kitchen-organization",
+    name: "Kitchen Organization",
+    description: "Pantry bins, drawer organizers, and racks that reclaim kitchen space.",
+    keywords: [
+      "kitchen organization",
+      "pantry is a mess",
+      "tupperware avalanche",
+      "spice rack",
+      "no counter space",
+      "kitchen counter clutter",
+      "junk drawer",
+      "cabinets are chaos",
+    ],
+    negativeKeywords: ["renovation", "remodel", "landlord"],
+    exampleProblems: [
+      "Opening my tupperware cabinet is a game of Jenga I always lose",
+      "My kitchen has zero counter space and infinite clutter",
+    ],
+  },
+];
+
+async function main(): Promise<void> {
+  for (const c of categories) {
+    await prisma.productCategory.upsert({
+      where: { slug: c.slug },
+      create: { ...c, isActive: true },
+      update: {
+        name: c.name,
+        description: c.description,
+        keywords: c.keywords,
+        negativeKeywords: c.negativeKeywords,
+        exampleProblems: c.exampleProblems,
+      },
+    });
+    console.log(`  upserted category: ${c.slug}`);
+  }
+  console.log(`Seeded ${categories.length} categories.`);
+}
+
+main()
+  .catch((error) => {
+    console.error("Seed failed:", error);
+    process.exitCode = 1;
+  })
+  .finally(() => prisma.$disconnect());
