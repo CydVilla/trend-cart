@@ -23,6 +23,7 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  // Everything except the public site and framework assets requires auth.
-  matcher: ["/((?!recommendations|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except the public site, the health probe (leaks only liveness
+  // booleans), and framework assets requires auth.
+  matcher: ["/((?!recommendations|api/health|_next/static|_next/image|favicon.ico).*)"],
 };
