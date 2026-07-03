@@ -185,6 +185,11 @@ is set (user `admin`, or override with `DASHBOARD_USER`); `/recommendations/*`
 stays public. The worker dyno additionally needs `ANTHROPIC_API_KEY`,
 `BOT_ACCOUNT_HANDLE`, and `BOT_APP_PASSWORD` set before scaling it up.
 
+## Changelog & decisions
+
+See [CHANGELOG.md](CHANGELOG.md) for what shipped when, and
+[docs/adr/](docs/adr/README.md) for the architecture decision records.
+
 ## Post-MVP roadmap
 
 Ranked by leverage — see git history / discussion for full rationale:
