@@ -20,15 +20,28 @@ packages/
   shared/     Shared types, LLM client interface, engagement scoring, affiliate URL utils
 ```
 
-Data flow:
+Candidates enter three ways:
 
 ```
-Jetstream firehose → cheap filters (length, language, keywords) → Post row
-  → rehydrate engagement counts by URI → engagement score/velocity
-  → LLM evaluation (only for keyword-matched candidates) → CandidateEvaluation row
-  → safety + intent + cooldown + rate-limit gates → BotReply (dry_run / pending approval)
-  → dashboard approval → post reply linking to /recommendations/[slug]
+1. FIREHOSE  Jetstream → keyword match → cheap filters → 30-min maturation
+             → trending floor (MIN_ENGAGEMENT_SCORE) → LLM evaluation
+2. MENTION   someone tags @trend-cart.bsky.social (optionally under another
+             post) → evaluated immediately as a solicited request
+3. MANUAL    operator pastes a bsky.app URL in the dashboard, optionally with
+             a trusted note ("the picture shows the physical edition") and/or
+             an Amazon link that forces the reply to use it
 ```
+
+Every candidate then flows: LLM evaluation (safety + intent + author-profile
+signals, injection-hardened) → server-side gates → reply generation →
+validation → BotReply (dry_run / pending approval) → dashboard approval →
+posted to Bluesky.
+
+Reply links (one per reply, by priority): operator-provided link → tagged
+Amazon search for the specific product ("deltarune on Amazon") → the
+category's /recommendations/[slug] page. Links render as clickable anchor
+text via rich-text facets — never raw URLs — with "(affiliate link)"
+disclosure on direct Amazon links.
 
 ## Prerequisites
 
@@ -86,13 +99,21 @@ loop publishes `APPROVED` rows to Bluesky and needs `BOT_APP_PASSWORD`
 
 ## Dashboard
 
-`pnpm dev:web` → http://localhost:3000. Sections: **Candidates** (ingested posts
-with evaluation details and a manual Skip), **Replies** (approve/reject the
-pending queue; shows a banner while DRY_RUN is on), **Categories** (edit
-keywords — the worker hot-reloads them within 5 min), **Products** (add
-products with plain Amazon URLs; the affiliate tag is applied at render),
-**Pages** (create/publish recommendation pages with inline preview — the bot
-only replies for categories with a published page).
+`pnpm dev:web` → http://localhost:3000. Sections: **Candidates** (posts sorted
+by engagement, evaluation verdicts, manual Skip, and the inject/override form:
+paste a post URL + optional trusted note + optional forced Amazon link;
+re-pasting an existing candidate resets its verdict for a fresh run),
+**Replies** (approve/reject the pending queue — cards show the clickable
+anchor and its exact link destination; the mode banner reflects the worker's
+real heartbeat, not env guesses), **Categories**, **Products**, **Pages**, and
+a worker status card on Overview with a **Pause bot** kill switch.
+`/api/health` is public and returns 500 when the worker heartbeat goes stale —
+point a free uptime pinger at it.
+
+The bot also answers **mention requests**: anyone who tags the bot gets a
+recommendation reply (still safety-evaluated, rate-capped, and approval-gated).
+Opt-out is phrase-based ("opt out", "stop", "leave me alone") and permanent
+until the person mentions the bot again.
 
 ⚠️ The dashboard has **no authentication** — it is for local use. Add auth
 (e.g. basic-auth middleware) before deploying it anywhere public.
@@ -113,6 +134,9 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `REPLY_MODE` | `dry_run` \| `manual` (approve in dashboard) \| `auto` (off by default) |
 | `MAX_REPLIES_PER_HOUR` / `_DAY` | Hard rate limits |
 | `MIN_PRODUCT_INTENT_SCORE` | LLM intent threshold (0–100) below which the bot never replies |
+| `MIN_ENGAGEMENT_SCORE` | Trending floor — firehose posts below it are never evaluated |
+| `EVAL_MIN_POST_AGE_MINUTES` | Maturation wait so the engagement snapshot means something |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5` default (cheap); swap to an Opus model for max judgment |
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |
 | `BOT_APP_PASSWORD` | Bluesky **app password** (never your real password) |
 
