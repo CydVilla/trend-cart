@@ -110,12 +110,19 @@ export class AnthropicLlmClient implements LlmClient {
       : new Anthropic({ timeout: 60_000 });
   }
 
+  /** Haiku-tier models reject the effort parameter — send it only where supported. */
+  private get supportsEffort(): boolean {
+    return !this.model.includes("haiku");
+  }
+
   async classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult> {
     const response = await this.client.messages.parse({
       model: this.model,
       max_tokens: 1024,
       // Classification is a scoped task — low effort keeps latency/cost down.
-      output_config: { effort: "low", format: zodOutputFormat(EvaluationSchema) },
+      output_config: this.supportsEffort
+        ? { effort: "low", format: zodOutputFormat(EvaluationSchema) }
+        : { format: zodOutputFormat(EvaluationSchema) },
       system: CLASSIFY_SYSTEM,
       messages: [{ role: "user", content: buildClassifyPrompt(input) }],
     });
@@ -136,7 +143,7 @@ export class AnthropicLlmClient implements LlmClient {
     const response = await this.client.messages.create({
       model: this.model,
       max_tokens: 512,
-      output_config: { effort: "low" },
+      ...(this.supportsEffort ? { output_config: { effort: "low" as const } } : {}),
       system: REPLY_SYSTEM,
       messages: [{ role: "user", content: buildReplyPrompt(input, wordBudget) }],
     });
