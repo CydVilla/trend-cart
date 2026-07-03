@@ -8,7 +8,7 @@ import { newIngestStats, processPostEvent } from "./ingest.js";
 import { JetstreamClient } from "./jetstream.js";
 import { AnthropicLlmClient } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
-import { createOptOutListener, type NotificationStats } from "./notifications.js";
+import { createNotificationListener, type NotificationStats } from "./notifications.js";
 import { createPoster, type PosterStats } from "./poster.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
 import { generateDueReplies, type ReplyStats } from "./reply.js";
@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const evalStats: EvaluateStats = { evaluated: 0, wouldReply: 0, rejected: 0, errors: 0 };
   const replyStats: ReplyStats = { generated: 0, skipped: 0, deferred: 0, failed: 0 };
   const posterStats: PosterStats = { posted: 0, postFailed: 0, disabled: false };
-  const notificationStats: NotificationStats = { optOuts: 0, errors: 0 };
+  const notificationStats: NotificationStats = { optOuts: 0, requests: 0, errors: 0 };
   setCountersRef({
     ingest: ingestStats,
     rehydrate: rehydrateStats,
@@ -103,9 +103,9 @@ async function main(): Promise<void> {
   jetstream.start();
 
   const poster = createPoster(posterStats);
-  const optOutListener = createOptOutListener(notificationStats);
-  if (!optOutListener) {
-    console.warn("  opt-out listener: disabled (no Bluesky credentials)");
+  const notificationListener = createNotificationListener(notificationStats);
+  if (!notificationListener) {
+    console.warn("  mentions/opt-out:  disabled (no Bluesky credentials)");
   }
 
   const stops = [
@@ -118,11 +118,12 @@ async function main(): Promise<void> {
     startLoop("categories", CATEGORY_RELOAD_MS, async () => {
       matcher.update(await loadMatcherCategories());
     }),
-    ...(optOutListener
+    ...(notificationListener
       ? [
-          startLoop("optout", 3 * 60_000, async () => {
+          // 90s cadence: mention requests deserve a prompt answer.
+          startLoop("notifications", 90_000, async () => {
             try {
-              await optOutListener.tick();
+              await notificationListener.tick();
             } catch (error) {
               notificationStats.errors += 1;
               throw error;
@@ -145,7 +146,8 @@ async function main(): Promise<void> {
         `rejected=${evalStats.rejected} evalErrors=${evalStats.errors} ` +
         `| replies=${replyStats.generated} replySkips=${replyStats.skipped} ` +
         `replyDefer=${replyStats.deferred} replyFail=${replyStats.failed} ` +
-        `posted=${posterStats.posted} optOuts=${notificationStats.optOuts}`,
+        `posted=${posterStats.posted} requests=${notificationStats.requests} ` +
+        `optOuts=${notificationStats.optOuts}`,
     );
   }, STATS_LOG_MS);
 

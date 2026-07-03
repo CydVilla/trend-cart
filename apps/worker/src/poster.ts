@@ -184,11 +184,16 @@ export function createPoster(stats: PosterStats): Poster {
       const richText = new RichText({ text: approved.replyText });
       await richText.detectFacets(activeAgent);
       const postRef = { uri: approved.post.uri, cid: approved.post.cid };
+      // Mention requests made mid-thread carry the real thread root so our
+      // reply joins the conversation; top-level posts are their own root.
+      const rootRef =
+        approved.post.threadRootUri && approved.post.threadRootCid
+          ? { uri: approved.post.threadRootUri, cid: approved.post.threadRootCid }
+          : postRef;
       const result = await activeAgent.post({
         text: richText.text,
         facets: richText.facets,
-        // We only ingest top-level posts, so root === parent.
-        reply: { root: postRef, parent: postRef },
+        reply: { root: rootRef, parent: postRef },
         createdAt: new Date().toISOString(),
       });
       await prisma.botReply.update({

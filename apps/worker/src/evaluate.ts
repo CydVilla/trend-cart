@@ -179,7 +179,8 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       lastHydratedAt: { not: null },
       createdAt: { gte: new Date(now - 24 * 3_600_000) },
       evaluations: { none: {} },
-      OR: [{ source: "MANUAL" }, { indexedAt: { lte: maturedBefore } }],
+      // Solicited/injected posts evaluate immediately; firehose posts mature.
+      OR: [{ source: { in: ["MANUAL", "MENTION"] } }, { indexedAt: { lte: maturedBefore } }],
     },
     orderBy: { engagementScore: "desc" },
     take: Math.min(BATCH_SIZE, budget),
@@ -236,6 +237,8 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       },
       postAgeMinutes: (now - post.indexedAt.getTime()) / 60_000,
       authorProfile,
+      isDirectRequest: post.source === "MENTION",
+      threadContext: post.contextText,
     };
 
     let raw: CandidateEvaluationResult;

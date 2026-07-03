@@ -38,6 +38,7 @@ async function checkReplyPolicy(post: Post, categorySlug: string | null): Promis
   const now = Date.now();
 
   if (post.deadAt) return { action: "skip", reason: "post was deleted" };
+  const solicited = post.source === "MENTION";
 
   // Replying to old posts reads as necro-spam. Operator-injected posts get a
   // longer window — a human explicitly chose them.
@@ -51,17 +52,20 @@ async function checkReplyPolicy(post: Post, categorySlug: string | null): Promis
   if (optOut) return { action: "skip", reason: "author opted out" };
 
   // Per-author cooldown — never reply to the same person twice in the window.
-  const authorCutoff = new Date(now - config.bot.authorCooldownHours * 3_600_000);
-  const authorReply = await prisma.botReply.findFirst({
-    where: {
-      status: { in: ACTIVE_STATUSES },
-      createdAt: { gte: authorCutoff },
-      post: { authorDid: post.authorDid },
-    },
-    select: { id: true },
-  });
-  if (authorReply) {
-    return { action: "skip", reason: `author cooldown (${config.bot.authorCooldownHours}h)` };
+  // Direct requests are exempt: someone asking deserves an answer every time.
+  if (!solicited) {
+    const authorCutoff = new Date(now - config.bot.authorCooldownHours * 3_600_000);
+    const authorReply = await prisma.botReply.findFirst({
+      where: {
+        status: { in: ACTIVE_STATUSES },
+        createdAt: { gte: authorCutoff },
+        post: { authorDid: post.authorDid },
+      },
+      select: { id: true },
+    });
+    if (authorReply) {
+      return { action: "skip", reason: `author cooldown (${config.bot.authorCooldownHours}h)` };
+    }
   }
 
   // Hourly/daily caps.
@@ -94,7 +98,8 @@ async function checkReplyPolicy(post: Post, categorySlug: string | null): Promis
   }
 
   // Per-category cooldown — don't recommend the same category twice in a row.
-  if (categorySlug && config.bot.categoryCooldownMinutes > 0) {
+  // (Skipped for solicited requests: the asker chose the topic, not the bot.)
+  if (!solicited && categorySlug && config.bot.categoryCooldownMinutes > 0) {
     const categoryCutoff = new Date(now - config.bot.categoryCooldownMinutes * 60_000);
     const recentInCategory = await prisma.botReply.findFirst({
       where: {
@@ -235,6 +240,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       linkSuffix: link.suffix,
       productNames: link.productNames,
       maxLength: config.bot.replyMaxLength,
+      isDirectRequest: evaluation.post.source === "MENTION",
     };
 
     let text: string;

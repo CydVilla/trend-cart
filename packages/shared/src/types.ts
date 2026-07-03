@@ -48,6 +48,10 @@ export type ClassifyPostInput = {
   engagement: { likeCount: number; repostCount: number; replyCount: number; quoteCount: number };
   postAgeMinutes: number;
   authorProfile: AuthorProfileContext;
+  /** True when the author tagged the bot asking for a recommendation. */
+  isDirectRequest?: boolean;
+  /** Parent-post text when the request was made under someone else's post. */
+  threadContext?: string | null;
 };
 
 export type GenerateReplyInput = {
@@ -62,6 +66,8 @@ export type GenerateReplyInput = {
   /** Product names to optionally mention (never as links). */
   productNames: string[];
   maxLength: number;
+  /** True when answering someone who tagged the bot — address them directly. */
+  isDirectRequest?: boolean;
 };
 
 /**

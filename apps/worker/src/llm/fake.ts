@@ -40,6 +40,23 @@ export class FakeLlmClient implements LlmClient {
         suggestedReplyAngle: null,
       };
     }
+    if (input.isDirectRequest) {
+      return {
+        ...base,
+        productIntentScore: 80,
+        safetyStatus: "safe",
+        recommendedCategorySlug: null,
+        recommendedSearchQuery: input.postText
+          .replace(/@[\w.-]+/g, "")
+          .trim()
+          .split(/\s+/)
+          .slice(0, 4)
+          .join(" "),
+        shouldReply: true,
+        reason: "fake: direct request — answering with a search recommendation",
+        suggestedReplyAngle: "answer the requester directly",
+      };
+    }
     const slug = input.keywordMatches[0] ?? null;
     if (!slug) {
       return {

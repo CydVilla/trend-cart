@@ -31,6 +31,8 @@ enum ReplyStatus {
 enum PostSource {
   FIREHOSE
   MANUAL
+  /// Someone tagged the bot asking for a recommendation (solicited)
+  MENTION
 }
 
 /// A candidate Bluesky post captured from the Jetstream firehose.
@@ -71,6 +73,13 @@ model Post {
   source             PostSource   @default(FIREHOSE)
   /// Set when the post vanished from the AppView (deleted) — never act on it
   deadAt             DateTime?
+  /// For MENTION requests made under someone else's post: the parent post's
+  /// text, given to the classifier as conversation context
+  contextText        String?
+  /// Real thread root for MENTION requests (the bot's reply must thread into
+  /// the existing conversation, not start a new one). Null → root = the post.
+  threadRootUri      String?
+  threadRootCid      String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
