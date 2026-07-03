@@ -52,6 +52,8 @@ export type ClassifyPostInput = {
   isDirectRequest?: boolean;
   /** Parent-post text when the request was made under someone else's post. */
   threadContext?: string | null;
+  /** TRUSTED note from the bot's operator (e.g. what a post's image shows). */
+  operatorNote?: string | null;
 };
 
 export type GenerateReplyInput = {
@@ -59,15 +61,18 @@ export type GenerateReplyInput = {
   /** Null for dynamic search recommendations with no curated category. */
   categoryName: string | null;
   suggestedReplyAngle: string | null;
-  /** The single link the reply will carry (recommendation page or tagged Amazon search). */
-  linkUrl: string;
-  /** Deterministic suffix appended after the link, e.g. " (affiliate link)". */
-  linkSuffix: string;
   /** Product names to optionally mention (never as links). */
   productNames: string[];
-  maxLength: number;
+  /**
+   * Character budget for the model's TEXT ONLY. The caller composes the final
+   * reply as `${text} ${linkAnchor}${suffix}` with the link attached as a
+   * rich-text facet — the model never sees or writes URLs.
+   */
+  textBudget: number;
   /** True when answering someone who tagged the bot — address them directly. */
   isDirectRequest?: boolean;
+  /** TRUSTED note from the bot's operator, overrides inferences from the post. */
+  operatorNote?: string | null;
 };
 
 /**

@@ -138,18 +138,46 @@ function initialStatus(): ReplyStatus {
 
 type ReplyLink = {
   url: string;
+  /** Human-readable clickable text — the URL rides on it as a facet. */
+  anchor: string;
   /** FTC-clear disclosure for direct Amazon links; pages carry it on-site. */
   suffix: string;
   categoryName: string | null;
   productNames: string[];
 };
 
+/** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
+function searchAnchor(query: string): string {
+  const short = query.split(/\s+/).slice(0, 4).join(" ");
+  return `${short.length > 34 ? short.slice(0, 34).trimEnd() : short} on Amazon`;
+}
+
 /**
- * Pick the single link a reply will carry: the curated recommendation page
- * when the category has one published, otherwise a tagged Amazon search for
- * the specific product the LLM identified (with in-reply disclosure).
+ * Pick the single link a reply will carry, by priority:
+ *  1. an operator-provided link (the human already decided),
+ *  2. a tagged Amazon search for the SPECIFIC product the LLM identified
+ *     (a direct pointer beats a generic list page),
+ *  3. the category's curated recommendation page.
  */
-async function chooseLink(evaluation: CandidateEvaluation): Promise<ReplyLink | null> {
+async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<ReplyLink | null> {
+  if (post.operatorLinkUrl) {
+    return {
+      url: post.operatorLinkUrl,
+      anchor: "this one on Amazon",
+      suffix: " (affiliate link)",
+      categoryName: null,
+      productNames: [],
+    };
+  }
+  if (evaluation.recommendedSearchQuery && config.site.amazonAssociateTag) {
+    return {
+      url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
+      anchor: searchAnchor(evaluation.recommendedSearchQuery),
+      suffix: " (affiliate link)",
+      categoryName: null,
+      productNames: [],
+    };
+  }
   if (evaluation.recommendedCategory) {
     const category = await prisma.productCategory.findUnique({
       where: { slug: evaluation.recommendedCategory },
@@ -161,30 +189,13 @@ async function chooseLink(evaluation: CandidateEvaluation): Promise<ReplyLink | 
     if (category?.recommendationPage?.isPublished) {
       return {
         url: `${config.site.publicUrl}/recommendations/${category.recommendationPage.slug}`,
+        anchor: `${category.name} picks`,
         suffix: "",
         categoryName: category.name,
         productNames: category.products.map((p) => p.name),
       };
     }
-    // Category matched but has no published page — fall through to a direct
-    // search if the evaluation carries one.
-    if (evaluation.recommendedSearchQuery && config.site.amazonAssociateTag) {
-      return {
-        url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
-        suffix: " (affiliate link)",
-        categoryName: category?.name ?? null,
-        productNames: [],
-      };
-    }
     return null; // wait for the page — defer, don't burn the candidate
-  }
-  if (evaluation.recommendedSearchQuery && config.site.amazonAssociateTag) {
-    return {
-      url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
-      suffix: " (affiliate link)",
-      categoryName: null,
-      productNames: [],
-    };
   }
   return null;
 }
@@ -226,26 +237,29 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue; // no row — the next tick retries once the window frees up
     }
 
-    const link = await chooseLink(evaluation);
+    const link = await chooseLink(evaluation, evaluation.post);
     if (!link) {
       stats.deferred += 1; // "page not published yet" — bounded by the expiry skip above
       continue;
     }
 
+    // The display text ends with the clickable anchor (+ disclosure); the URL
+    // itself is attached as a facet at posting time, never shown raw.
+    const reserved = link.anchor.length + link.suffix.length + 1;
+    const compose = (text: string) => `${text} ${link.anchor}${link.suffix}`;
     const replyInput = {
       postText: evaluation.post.text,
       categoryName: link.categoryName,
       suggestedReplyAngle: evaluation.suggestedReplyAngle,
-      linkUrl: link.url,
-      linkSuffix: link.suffix,
       productNames: link.productNames,
-      maxLength: config.bot.replyMaxLength,
+      textBudget: config.bot.replyMaxLength - reserved,
       isDirectRequest: evaluation.post.source === "MENTION",
+      operatorNote: evaluation.post.operatorNote,
     };
 
     let text: string;
     try {
-      text = await llm.generateReply(replyInput);
+      text = compose(await llm.generateReply(replyInput));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (isTransientError(error)) {
@@ -266,15 +280,17 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
-    let validation = validateReply(text, link.url, config.bot.replyMaxLength);
+    let validation = validateReply(text, link.anchor, config.bot.replyMaxLength);
     if (!validation.ok) {
       // One retry with a tighter budget — over-length is the common failure.
       try {
-        const retryText = await llm.generateReply({
-          ...replyInput,
-          maxLength: config.bot.replyMaxLength - 30,
-        });
-        const retryValidation = validateReply(retryText, link.url, config.bot.replyMaxLength);
+        const retryText = compose(
+          await llm.generateReply({
+            ...replyInput,
+            textBudget: replyInput.textBudget - 30,
+          }),
+        );
+        const retryValidation = validateReply(retryText, link.anchor, config.bot.replyMaxLength);
         if (retryValidation.ok) {
           text = retryText;
           validation = retryValidation;
@@ -311,7 +327,13 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     }
 
     await prisma.botReply.create({
-      data: { postId: evaluation.postId, replyText: text, status: initialStatus() },
+      data: {
+        postId: evaluation.postId,
+        replyText: text,
+        linkUrl: link.url,
+        linkAnchor: link.anchor,
+        status: initialStatus(),
+      },
     });
     stats.generated += 1;
   }

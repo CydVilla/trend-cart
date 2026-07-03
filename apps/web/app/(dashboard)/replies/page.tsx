@@ -71,8 +71,23 @@ export default async function RepliesPage() {
                   {reply.post.text}
                 </blockquote>
                 <div className="mt-3 rounded bg-zinc-50 p-3 text-sm">
-                  {reply.replyText}
+                  {reply.linkAnchor && reply.replyText.includes(reply.linkAnchor) ? (
+                    <>
+                      {reply.replyText.slice(0, reply.replyText.lastIndexOf(reply.linkAnchor))}
+                      <span className="font-medium text-blue-600 underline">{reply.linkAnchor}</span>
+                      {reply.replyText.slice(
+                        reply.replyText.lastIndexOf(reply.linkAnchor) + reply.linkAnchor.length,
+                      )}
+                    </>
+                  ) : (
+                    reply.replyText
+                  )}
                   <div className="mt-1 text-xs text-zinc-400">{reply.replyText.length} chars</div>
+                  {reply.linkUrl && (
+                    <div className="mt-1 break-all text-xs text-zinc-400">
+                      link destination: <span className="text-blue-600">{reply.linkUrl}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-3 flex gap-2">
                   <form action={approveReply}>

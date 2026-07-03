@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma, ReplyStatus, SafetyStatus } from "@trendcart/db";
+import { withAffiliateTag } from "@trendcart/shared";
 import { revalidatePath } from "next/cache";
 
 function str(formData: FormData, name: string): string {
@@ -60,6 +61,22 @@ export async function toggleWorkerPaused(): Promise<void> {
 export async function injectPost(formData: FormData): Promise<void> {
   const input = str(formData, "url");
   if (!input) return;
+  const note = str(formData, "note") || null;
+
+  // Operator link: Amazon hosts only, our tag enforced (a pasted SiteStripe
+  // link keeps its params; a plain product URL gets the tag added).
+  const rawLink = str(formData, "link");
+  let operatorLinkUrl: string | null = null;
+  if (rawLink) {
+    try {
+      const parsed = new URL(rawLink);
+      if (/(^|\.)amazon\.[a-z.]+$|(^|\.)amzn\.to$/i.test(parsed.hostname)) {
+        operatorLinkUrl = withAffiliateTag(rawLink, process.env.AMAZON_ASSOCIATE_TAG ?? "");
+      }
+    } catch {
+      /* invalid URL — ignore the link, the note may still be useful */
+    }
+  }
 
   let did: string | null = null;
   let rkey: string | null = null;
@@ -95,6 +112,7 @@ export async function injectPost(formData: FormData): Promise<void> {
       cid: string;
       author: { did: string; handle?: string };
       record?: { text?: string; reply?: unknown };
+      embed?: { images?: Array<{ alt?: string }> };
       indexedAt?: string;
       likeCount?: number;
       repostCount?: number;
@@ -106,31 +124,60 @@ export async function injectPost(formData: FormData): Promise<void> {
   // Top-level posts only — the poster builds reply refs with root === parent.
   if (!post?.record?.text || post.record.reply) return;
 
+  // The classifier can't see images, but it can see their alt text.
+  const embed = post.embed;
+  const altTexts = (embed?.images ?? []).map((i) => i.alt).filter(Boolean);
+  const contextText =
+    embed?.images?.length
+      ? `Post includes ${embed.images.length} image(s).${altTexts.length ? ` Alt text: ${altTexts.join(" | ")}` : ""}`
+      : null;
+
   const counts = {
     likeCount: post.likeCount ?? 0,
     repostCount: post.repostCount ?? 0,
     replyCount: post.replyCount ?? 0,
     quoteCount: post.quoteCount ?? 0,
   };
-  await prisma.post.createMany({
-    data: [
-      {
+  const data = {
+    authorHandle: post.author.handle ?? null,
+    text: post.record.text,
+    indexedAt: post.indexedAt ? new Date(post.indexedAt) : new Date(),
+    ...counts,
+    engagementScore:
+      counts.likeCount + counts.repostCount * 3 + counts.replyCount * 2 + counts.quoteCount * 3,
+    source: "MANUAL" as const,
+    lastHydratedAt: new Date(),
+    contextText,
+    operatorNote: note,
+    operatorLinkUrl,
+    deadAt: null,
+  };
+
+  const existing = await prisma.post.findUnique({ where: { uri: post.uri }, select: { id: true } });
+  if (existing) {
+    // OVERRIDE RESET: wipe prior verdicts and unposted replies so the post
+    // re-runs with the operator's guidance. POSTED replies are never touched.
+    await prisma.$transaction([
+      prisma.candidateEvaluation.deleteMany({ where: { postId: existing.id } }),
+      prisma.botReply.deleteMany({
+        where: { postId: existing.id, status: { not: ReplyStatus.POSTED } },
+      }),
+      prisma.post.update({
+        where: { id: existing.id },
+        data: { ...data, safetyStatus: SafetyStatus.PENDING, productIntentScore: null },
+      }),
+    ]);
+  } else {
+    await prisma.post.create({
+      data: {
         uri: post.uri,
         cid: post.cid,
         authorDid: post.author.did,
-        authorHandle: post.author.handle ?? null,
-        text: post.record.text,
-        indexedAt: post.indexedAt ? new Date(post.indexedAt) : new Date(),
-        ...counts,
-        engagementScore:
-          counts.likeCount + counts.repostCount * 3 + counts.replyCount * 2 + counts.quoteCount * 3,
         matchedKeywords: ["manual-injection"],
-        source: "MANUAL",
-        lastHydratedAt: new Date(),
+        ...data,
       },
-    ],
-    skipDuplicates: true,
-  });
+    });
+  }
   revalidatePath("/candidates");
 }
 

@@ -21,19 +21,33 @@ export default async function CandidatesPage() {
 
       <form
         action={injectPost}
-        className="mb-4 flex gap-2 rounded-lg border border-zinc-200 bg-white p-3"
+        className="mb-4 space-y-2 rounded-lg border border-zinc-200 bg-white p-3"
       >
-        <input
-          name="url"
-          placeholder="Test a post: paste a bsky.app post URL (top-level posts only) — it enters the pipeline immediately"
-          className="flex-1 rounded border border-zinc-300 px-3 py-1.5 text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-        >
-          Inject
-        </button>
+        <div className="flex gap-2">
+          <input
+            name="url"
+            placeholder="Inject or override: paste a bsky.app post URL (re-pasting an existing candidate resets its verdict)"
+            className="flex-1 rounded border border-zinc-300 px-3 py-1.5 text-sm"
+          />
+          <button
+            type="submit"
+            className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            Run
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <input
+            name="note"
+            placeholder='Optional note for the bot (trusted) — e.g. "the picture shows the physical edition of Zelda TOTK, recommend that game"'
+            className="flex-1 rounded border border-zinc-300 px-3 py-1.5 text-sm"
+          />
+          <input
+            name="link"
+            placeholder="Optional Amazon link to use (forces a reply with this link)"
+            className="flex-1 rounded border border-zinc-300 px-3 py-1.5 text-sm"
+          />
+        </div>
       </form>
       {posts.length === 0 ? (
         <EmptyState>

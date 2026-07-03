@@ -40,6 +40,18 @@ export class FakeLlmClient implements LlmClient {
         suggestedReplyAngle: null,
       };
     }
+    if (input.operatorNote) {
+      return {
+        ...base,
+        productIntentScore: 85,
+        safetyStatus: "safe",
+        recommendedCategorySlug: null,
+        recommendedSearchQuery: input.operatorNote.split(/\s+/).slice(0, 4).join(" "),
+        shouldReply: true,
+        reason: "fake: operator note provided — recommending per note",
+        suggestedReplyAngle: input.operatorNote,
+      };
+    }
     if (input.isDirectRequest) {
       return {
         ...base,
@@ -81,17 +93,15 @@ export class FakeLlmClient implements LlmClient {
   }
 
   async generateReply(input: GenerateReplyInput): Promise<string> {
-    // Mirror the real client's shape: text is budgeted around the URL+suffix
-    // and both are appended last, so truncation can never chop the link off.
-    const reservedChars = input.linkUrl.length + input.linkSuffix.length + 1;
-    const textBudget = input.maxLength - reservedChars;
+    // Mirror the real client: return TEXT ONLY within the budget; the caller
+    // composes the anchor/facet, so truncation can never chop the link off.
     const products = input.productNames.slice(0, 3).join(", ");
     let text = `This is usually fixable with a few ${(input.categoryName ?? "practical").toLowerCase()} pieces${
       products ? ` — think ${products}` : ""
     }. I put together a quick list here:`;
-    if (text.length > textBudget) {
-      text = `${text.slice(0, Math.max(0, textBudget - 1)).trimEnd()}…`;
+    if (text.length > input.textBudget) {
+      text = `${text.slice(0, Math.max(0, input.textBudget - 1)).trimEnd()}…`;
     }
-    return `${text} ${input.linkUrl}${input.linkSuffix}`;
+    return text;
   }
 }

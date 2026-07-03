@@ -4,9 +4,9 @@
  * everything mechanically. A reply that fails here is retried once, then
  * recorded as FAILED, never posted.
  *
- * Posture note: the bot is DISCLOSED (bot bio, affiliate suffix on direct
- * Amazon links), so disclosure vocabulary is allowed — what stays banned is
- * hype, fake urgency, and claim-making.
+ * Replies carry their link as a rich-text FACET: the display text contains a
+ * human-readable anchor ("Deltarune on Amazon"), never a raw URL. The URL
+ * itself is validated at composition time in reply.ts.
  */
 
 const LINK_REGEX = /https?:\/\/\S+/g;
@@ -32,22 +32,24 @@ export const BANNED_PHRASES = [
 export type ReplyValidation = { ok: true } | { ok: false; reason: string };
 
 export function validateReply(
-  text: string,
-  requiredUrl: string,
+  displayText: string,
+  linkAnchor: string,
   maxLength: number,
 ): ReplyValidation {
-  const trimmed = text.trim();
+  const trimmed = displayText.trim();
   if (!trimmed) return { ok: false, reason: "empty reply" };
   if (trimmed.length > maxLength) {
     return { ok: false, reason: `too long (${trimmed.length} > ${maxLength})` };
   }
 
-  const links = trimmed.match(LINK_REGEX) ?? [];
-  if (links.length !== 1) {
-    return { ok: false, reason: `must contain exactly one link (found ${links.length})` };
+  // Raw URLs never appear in display text — the link is a facet on the anchor.
+  const rawLinks = trimmed.match(LINK_REGEX) ?? [];
+  if (rawLinks.length > 0) {
+    return { ok: false, reason: `raw URL in display text (${rawLinks.length})` };
   }
-  if (!trimmed.includes(requiredUrl)) {
-    return { ok: false, reason: "link is not the expected URL" };
+  const anchorCount = trimmed.split(linkAnchor).length - 1;
+  if (anchorCount !== 1) {
+    return { ok: false, reason: `link anchor must appear exactly once (found ${anchorCount})` };
   }
 
   if (trimmed.includes("#")) return { ok: false, reason: "contains a hashtag" };

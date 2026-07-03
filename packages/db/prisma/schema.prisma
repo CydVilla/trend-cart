@@ -80,6 +80,12 @@ model Post {
   /// the existing conversation, not start a new one). Null → root = the post.
   threadRootUri      String?
   threadRootCid      String?
+  /// Operator override: trusted context for the LLM ("the picture shows the
+  /// physical edition — recommend that game")
+  operatorNote       String?
+  /// Operator override: exact Amazon link the reply must use (tag applied at
+  /// injection). When set, LLM classification is bypassed entirely.
+  operatorLinkUrl    String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -164,6 +170,11 @@ model BotReply {
   replyUri   String?
   status     ReplyStatus
   skipReason String?
+  /// The reply's single link, posted as a rich-text facet: replyText shows
+  /// linkAnchor as clickable text, linkUrl is the destination. Legacy rows
+  /// (null linkUrl) carry a raw URL inside replyText instead.
+  linkUrl    String?
+  linkAnchor String?
   /// When the reply actually went out — rate limits derive from this
   postedAt   DateTime?
   approvedAt DateTime?

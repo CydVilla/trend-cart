@@ -180,9 +180,31 @@ export function createPoster(stats: PosterStats): Poster {
     }
 
     try {
-      // RichText facets make the link clickable in Bluesky clients.
-      const richText = new RichText({ text: approved.replyText });
-      await richText.detectFacets(activeAgent);
+      // The reply's link rides on the anchor text as a rich-text facet —
+      // readers see "Deltarune on Amazon", not a raw URL. Legacy rows (no
+      // linkUrl) fall back to auto-detecting URLs in the text.
+      let text = approved.replyText;
+      let facets: import("@atproto/api").AppBskyRichtextFacet.Main[] | undefined;
+      if (approved.linkUrl && approved.linkAnchor) {
+        const anchorIndex = text.lastIndexOf(approved.linkAnchor);
+        if (anchorIndex >= 0) {
+          const encoder = new TextEncoder();
+          const byteStart = encoder.encode(text.slice(0, anchorIndex)).length;
+          const byteEnd = byteStart + encoder.encode(approved.linkAnchor).length;
+          facets = [
+            {
+              index: { byteStart, byteEnd },
+              features: [{ $type: "app.bsky.richtext.facet#link", uri: approved.linkUrl }],
+            },
+          ];
+        }
+      }
+      if (!facets) {
+        const richText = new RichText({ text });
+        await richText.detectFacets(activeAgent);
+        text = richText.text;
+        facets = richText.facets;
+      }
       const postRef = { uri: approved.post.uri, cid: approved.post.cid };
       // Mention requests made mid-thread carry the real thread root so our
       // reply joins the conversation; top-level posts are their own root.
@@ -191,8 +213,8 @@ export function createPoster(stats: PosterStats): Poster {
           ? { uri: approved.post.threadRootUri, cid: approved.post.threadRootCid }
           : postRef;
       const result = await activeAgent.post({
-        text: richText.text,
-        facets: richText.facets,
+        text,
+        facets,
         reply: { root: rootRef, parent: postRef },
         createdAt: new Date().toISOString(),
       });

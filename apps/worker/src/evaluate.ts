@@ -205,6 +205,32 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   const modelTag = evaluationModelTag();
 
   for (const post of due) {
+    // Operator link override: the human already decided this post gets a
+    // reply with a specific link — no LLM judgment needed, just generation.
+    if (post.operatorLinkUrl) {
+      await prisma.$transaction([
+        prisma.candidateEvaluation.create({
+          data: {
+            postId: post.id,
+            rawInput: { operatorNote: post.operatorNote } as Prisma.InputJsonValue,
+            productIntentScore: 100,
+            safetyDecision: SafetyStatus.SAFE,
+            model: modelTag, // consumed by this run's reply pipeline
+            shouldReply: true,
+            reason: "operator directive (link provided)",
+            suggestedReplyAngle: post.operatorNote,
+          },
+        }),
+        prisma.post.update({
+          where: { id: post.id },
+          data: { productIntentScore: 100, safetyStatus: SafetyStatus.SAFE },
+        }),
+      ]);
+      stats.evaluated += 1;
+      stats.wouldReply += 1;
+      continue;
+    }
+
     // Per-author fairness: one prolific account can't monopolize the budget.
     const authorEvals = await prisma.candidateEvaluation.count({
       where: {
@@ -273,6 +299,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       authorProfile,
       isDirectRequest: post.source === "MENTION",
       threadContext: post.contextText,
+      operatorNote: post.operatorNote,
     };
 
     let raw: CandidateEvaluationResult;
