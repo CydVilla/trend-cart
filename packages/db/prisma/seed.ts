@@ -251,6 +251,12 @@ const pages: PageSeed[] = [
       "The gap between sad home coffee and café coffee is mostly grind quality and water control. Fix those two and everything improves.",
   },
   {
+    slug: "video-games",
+    title: "Gaming picks & gear",
+    intro:
+      "Games people can't stop talking about, and the gear that makes long sessions better. Specific game recommendations in replies link straight to Amazon search.",
+  },
+  {
     slug: "kitchen-organization",
     title: "Reclaim your counter space",
     intro:
@@ -419,6 +425,27 @@ const productsBySlug: Record<string, ProductSeed[]> = {
         "Repeatable ratios instead of guessing — the cheapest way to make good coffee happen twice.",
       priceRange: "$15–$25",
       url: "https://www.amazon.com/s?k=coffee+scale+with+timer",
+    },
+  ],
+  "video-games": [
+    {
+      name: "Wireless pro controller",
+      description:
+        "The single biggest comfort upgrade for long sessions — proper grips, real triggers, no drift anxiety.",
+      priceRange: "$45–$70",
+      url: "https://www.amazon.com/s?k=wireless+pro+controller",
+    },
+    {
+      name: "Gaming headset with mic",
+      description: "Clear game audio and a mic that doesn't make the party mute you.",
+      priceRange: "$40–$80",
+      url: "https://www.amazon.com/s?k=gaming+headset+with+microphone",
+    },
+    {
+      name: "Switch carrying case",
+      description: "Hard shell, game-card slots — the accessory every handheld owner buys second.",
+      priceRange: "$12–$20",
+      url: "https://www.amazon.com/s?k=nintendo+switch+carrying+case",
     },
   ],
   "kitchen-organization": [

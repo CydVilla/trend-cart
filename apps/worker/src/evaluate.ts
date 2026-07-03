@@ -117,7 +117,7 @@ async function fetchAuthorProfile(did: string): Promise<AuthorProfileContext> {
 }
 
 /** True for API-level failures that should pause the loop, not blame the post. */
-function isTransientError(error: unknown): boolean {
+export function isTransientError(error: unknown): boolean {
   return (
     error instanceof Anthropic.AuthenticationError ||
     error instanceof Anthropic.RateLimitError ||

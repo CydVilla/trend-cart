@@ -1,4 +1,4 @@
-import { prisma } from "@trendcart/db";
+import { prisma, ReplyStatus } from "@trendcart/db";
 import { config } from "./config.js";
 import { CategoryMatcher, findPromotionalMatch, findSensitiveMatch } from "./filters.js";
 import type { JetstreamEvent } from "./jetstream.js";
@@ -48,8 +48,24 @@ export async function processPostEvent(
   const uri = `at://${event.did}/${POST_COLLECTION}/${commit.rkey}`;
 
   if (commit.operation === "delete") {
-    const { count } = await prisma.post.deleteMany({ where: { uri } });
-    if (count > 0) stats.deletes += 1;
+    // Soft-kill, never row-delete: POSTED reply rows must survive (rate
+    // limits, cooldowns, and dedupe all derive from them).
+    const existing = await prisma.post.findUnique({
+      where: { uri },
+      select: { id: true, deadAt: true },
+    });
+    if (!existing || existing.deadAt) return;
+    await prisma.$transaction([
+      prisma.post.update({ where: { id: existing.id }, data: { deadAt: new Date() } }),
+      prisma.botReply.updateMany({
+        where: {
+          postId: existing.id,
+          status: { in: [ReplyStatus.PENDING_APPROVAL, ReplyStatus.APPROVED] },
+        },
+        data: { status: ReplyStatus.SKIPPED, skipReason: "post deleted before reply went out" },
+      }),
+    ]);
+    stats.deletes += 1;
     return;
   }
 

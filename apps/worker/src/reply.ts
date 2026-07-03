@@ -1,10 +1,13 @@
 import { prisma, ReplyStatus, type CandidateEvaluation, type Post } from "@trendcart/db";
 import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
+import { isTransientError } from "./evaluate.js";
 import { isPaused } from "./heartbeat.js";
 import { validateReply } from "./validate.js";
 
 const BATCH_SIZE = 5;
+const GENERATION_BACKOFF_MS = 10 * 60_000;
+let generationBackoffUntil = 0;
 /** Statuses that count as "the bot engaged" for cooldowns/limits/dedupe. */
 const ACTIVE_STATUSES = [
   ReplyStatus.DRY_RUN,
@@ -188,13 +191,15 @@ async function chooseLink(evaluation: CandidateEvaluation): Promise<ReplyLink | 
  */
 export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Promise<void> {
   if (await isPaused()) return;
+  if (Date.now() < generationBackoffUntil) return;
 
   const due = await prisma.candidateEvaluation.findMany({
     where: {
       shouldReply: true,
-      // Only act on verdicts from the mode we're running in — fake test
-      // verdicts must never drive a real-LLM pipeline (and vice versa).
-      model: config.llm.useFake ? "fake" : { notIn: ["fake", "policy"] },
+      // ALLOWLIST the exact model tag this run produces — fake verdicts,
+      // policy rows, legacy pre-migration "unknown" rows, and verdicts from
+      // other model configurations can never drive this pipeline.
+      model: config.llm.useFake ? "fake" : config.llm.model,
       post: { replies: { none: {} }, deadAt: null },
     },
     include: { post: true },
@@ -203,12 +208,9 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
   });
 
   for (const evaluation of due) {
-    const link = await chooseLink(evaluation);
-    if (!link) {
-      stats.deferred += 1; // usually "category page not published yet"
-      continue;
-    }
-
+    // Policy runs FIRST so the 24h/7d expiry always writes a terminal SKIPPED
+    // row — otherwise permanently-deferring candidates (e.g. a category whose
+    // page never gets published) wedge the oldest-first queue forever.
     const policy = await checkReplyPolicy(evaluation.post, evaluation.recommendedCategory);
     if (policy.action === "skip") {
       await writeSkip(evaluation.postId, policy.reason, stats);
@@ -217,6 +219,12 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     if (policy.action === "defer") {
       stats.deferred += 1;
       continue; // no row — the next tick retries once the window frees up
+    }
+
+    const link = await chooseLink(evaluation);
+    if (!link) {
+      stats.deferred += 1; // "page not published yet" — bounded by the expiry skip above
+      continue;
     }
 
     const replyInput = {
@@ -234,6 +242,12 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       text = await llm.generateReply(replyInput);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (isTransientError(error)) {
+        // API outage: back off the whole loop, don't blame the candidate.
+        generationBackoffUntil = Date.now() + GENERATION_BACKOFF_MS;
+        console.error(`[reply] transient API error — backing off: ${message}`);
+        return;
+      }
       await prisma.botReply.create({
         data: {
           postId: evaluation.postId,

@@ -21,6 +21,16 @@ function parseReplyMode(raw: string): ReplyMode {
   throw new Error(`REPLY_MODE must be dry_run | manual | auto, got: ${raw}`);
 }
 
+const useFakeLlm = envBool("USE_FAKE_LLM", false);
+let dryRun = envBool("DRY_RUN", true);
+// Fail-safe: heuristic fake verdicts must never post to real people. A
+// leftover USE_FAKE_LLM=true forces dry-run rather than trusting env-var
+// discipline across three independent variables.
+if (useFakeLlm && !dryRun) {
+  console.warn("USE_FAKE_LLM=true forces DRY_RUN=true — fake verdicts never post live.");
+  dryRun = true;
+}
+
 export const config = {
   databaseUrl: requireEnv("DATABASE_URL"),
 
@@ -34,7 +44,7 @@ export const config = {
     anthropicApiKey: envString("ANTHROPIC_API_KEY", ""),
     model: envString("ANTHROPIC_MODEL", "claude-opus-4-8"),
     /* Deterministic fake client for pipeline testing without API spend */
-    useFake: envBool("USE_FAKE_LLM", false),
+    useFake: useFakeLlm,
     maxEvalsPerHour: envInt("MAX_LLM_EVALS_PER_HOUR", 40),
     /* Firehose posts wait this long before evaluation so the engagement
        snapshot is meaningful; manually injected posts skip the wait. */
@@ -54,7 +64,7 @@ export const config = {
   },
 
   bot: {
-    dryRun: envBool("DRY_RUN", true),
+    dryRun,
     replyMode: parseReplyMode(envString("REPLY_MODE", "manual")),
     maxRepliesPerHour: envInt("MAX_REPLIES_PER_HOUR", 3),
     maxRepliesPerDay: envInt("MAX_REPLIES_PER_DAY", 20),

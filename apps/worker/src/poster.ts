@@ -147,8 +147,13 @@ export function createPoster(stats: PosterStats): Poster {
     });
 
     // Stale-approval guard: a reply approved too late reads as necro-spam.
-    if (approved.post.indexedAt.getTime() < Date.now() - 48 * 3_600_000) {
-      await releaseClaim(approved.id, "approved too late — post older than 48h at posting time");
+    // Mirrors the reply pipeline's windows (operator-injected posts get 7d).
+    const maxPostAgeHours = approved.post.source === "MANUAL" ? 7 * 24 : 48;
+    if (approved.post.indexedAt.getTime() < Date.now() - maxPostAgeHours * 3_600_000) {
+      await releaseClaim(
+        approved.id,
+        `approved too late — post older than ${maxPostAgeHours}h at posting time`,
+      );
       return;
     }
     // Consent + existence pre-flight, both may have changed since approval.
