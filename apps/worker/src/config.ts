@@ -49,6 +49,10 @@ export const config = {
     /* Firehose posts wait this long before evaluation so the engagement
        snapshot is meaningful; manually injected posts skip the wait. */
     evalMinPostAgeMinutes: envInt("EVAL_MIN_POST_AGE_MINUTES", 30),
+    /* Trending floor: a firehose post must reach this engagement score
+       (likes + 3*reposts + 2*replies + 3*quotes) after maturing, or the LLM
+       never sees it. Mentions and manual injections are exempt. */
+    minEngagementScore: envInt("MIN_ENGAGEMENT_SCORE", 10),
   },
 
   site: {

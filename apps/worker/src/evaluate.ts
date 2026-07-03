@@ -7,6 +7,7 @@ import type {
   LlmClient,
 } from "@trendcart/shared";
 import { config } from "./config.js";
+import { findPromotionalMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
 
 const BATCH_SIZE = 3;
@@ -179,8 +180,17 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       lastHydratedAt: { not: null },
       createdAt: { gte: new Date(now - 24 * 3_600_000) },
       evaluations: { none: {} },
-      // Solicited/injected posts evaluate immediately; firehose posts mature.
-      OR: [{ source: { in: ["MANUAL", "MENTION"] } }, { indexedAt: { lte: maturedBefore } }],
+      // Solicited/injected posts evaluate immediately; firehose posts must
+      // BOTH mature and clear the trending floor — recent AND actually liked.
+      // Posts still below the floor keep waiting (they may still be rising)
+      // and simply expire unevaluated if they never catch on: zero LLM spend.
+      OR: [
+        { source: { in: ["MANUAL", "MENTION"] } },
+        {
+          indexedAt: { lte: maturedBefore },
+          engagementScore: { gte: config.llm.minEngagementScore },
+        },
+      ],
     },
     orderBy: { engagementScore: "desc" },
     take: Math.min(BATCH_SIZE, budget),
@@ -224,6 +234,30 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     }
 
     const authorProfile = config.llm.useFake ? null : await fetchAuthorProfile(post.authorDid);
+
+    // Sellers advertise in their bios. A promotional author bio disqualifies
+    // the post before any LLM spend — the bot only engages with real people.
+    if (authorProfile && findPromotionalMatch(authorProfile.bio)) {
+      await prisma.$transaction([
+        prisma.candidateEvaluation.create({
+          data: {
+            postId: post.id,
+            rawInput: { authorBio: authorProfile.bio } as Prisma.InputJsonValue,
+            productIntentScore: 0,
+            safetyDecision: SafetyStatus.UNCERTAIN,
+            model: "policy",
+            shouldReply: false,
+            reason: "author bio looks promotional (deal/affiliate account)",
+          },
+        }),
+        prisma.post.update({
+          where: { id: post.id },
+          data: { safetyStatus: SafetyStatus.UNCERTAIN },
+        }),
+      ]);
+      continue;
+    }
+
     const input = {
       postText: post.text,
       authorHandle: post.authorHandle,

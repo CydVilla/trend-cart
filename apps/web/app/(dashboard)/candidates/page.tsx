@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 
 export default async function CandidatesPage() {
   const posts = await prisma.post.findMany({
-    orderBy: { createdAt: "desc" },
+    // Trending first: the page mirrors the evaluation queue's priorities.
+    orderBy: [{ engagementScore: "desc" }, { createdAt: "desc" }],
     take: 50,
     include: {
       evaluations: { orderBy: { createdAt: "desc" }, take: 1 },
