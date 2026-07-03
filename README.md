@@ -115,8 +115,9 @@ recommendation reply (still safety-evaluated, rate-capped, and approval-gated).
 Opt-out is phrase-based ("opt out", "stop", "leave me alone") and permanent
 until the person mentions the bot again.
 
-⚠️ The dashboard has **no authentication** — it is for local use. Add auth
-(e.g. basic-auth middleware) before deploying it anywhere public.
+The dashboard is protected by HTTP Basic auth whenever `DASHBOARD_PASSWORD`
+is set (see middleware.ts); public `/recommendations/*` pages and
+`/api/health` stay open. Never deploy publicly without setting it.
 
 ## Verifying the scaffold
 
@@ -144,14 +145,20 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 
 The bot only replies when **all** of these pass:
 
-1. Cheap filters: post length, language, keyword match against an active category.
-2. LLM evaluation: `productIntentScore >= 70`, `safetyStatus = safe`, category maps to an
-   active `ProductCategory`. Sensitive topics (tragedy, politics, illness, personal
-   crisis, etc.) are always unsafe.
-3. Cooldowns: per-author, per-category, and global gaps between replies.
-4. Rate limits: hourly and daily caps.
-5. Reply validation: length, at most one link, no banned phrases, not a recent duplicate.
-6. Mode gate: dry-run records only; manual mode queues for dashboard approval.
+1. Cheap filters: post length, language, keyword match, sensitive-topic and
+   promotional-post patterns, promotional author bios.
+2. Trending floor: 30-min maturation + `MIN_ENGAGEMENT_SCORE` (firehose only).
+3. LLM evaluation: `productIntentScore >= MIN_PRODUCT_INTENT_SCORE` (60),
+   `safetyStatus = safe`, and a valid category or sanitized search query.
+   Sensitive topics (tragedy, politics, illness, personal crisis, etc.) and
+   prompt-injection attempts are always unsafe.
+4. Cooldowns (per-author, per-category, global — solicited requests exempt
+   from the first two), hourly/daily caps, permanent opt-out list.
+5. Reply validation: length, exactly one anchored facet link, no raw URLs,
+   no banned phrases, not a recent duplicate.
+6. Mode gate: dry-run records only; manual mode queues for dashboard
+   approval; the poster re-checks existence, opt-out, and staleness, and
+   claims the row for exactly-once posting.
 
 Every skip is recorded with a reason (`BotReply.skipReason`, `CandidateEvaluation.reason`).
 
@@ -159,8 +166,10 @@ Every skip is recorded with a reason (`BotReply.skipReason`, `CandidateEvaluatio
 
 - Recommendation pages carry an affiliate disclosure ("As an Amazon Associate I earn
   from qualifying purchases").
-- Add your deployed site URL to your Amazon Associates account's site list.
-- Replies link to your recommendation pages, not directly to Amazon.
+- Direct Amazon links in replies carry an in-reply "(affiliate link)" suffix,
+  and the bot account's bio discloses automation + affiliate funding.
+- Add the deployed site URL and the Bluesky account to your Amazon Associates
+  account's list of properties.
 
 ## Deployment (Heroku)
 
