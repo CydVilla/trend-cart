@@ -14,8 +14,10 @@ export default async function CategoriesPage() {
     <div>
       <h1 className="mb-1 text-2xl font-bold">Categories</h1>
       <p className="mb-4 text-sm text-zinc-500">
-        Keywords drive the cheap pre-filter; the worker reloads them within 5 minutes — no restart
-        needed. One keyword or phrase per line (or comma-separated).
+        Keywords are the Bluesky <strong>search queries</strong> used to discover trending
+        candidates (top posts of the last 24h per query; the first 6 per category are polled each
+        cycle). One query per line — phrase them like searches. Changes apply on the next
+        discovery cycle.
       </p>
       {categories.length === 0 ? (
         <EmptyState>

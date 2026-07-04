@@ -29,7 +29,10 @@ enum ReplyStatus {
 
 /// How a post entered the pipeline.
 enum PostSource {
+  /// Legacy Jetstream-firehose captures (discovery v1, retired)
   FIREHOSE
+  /// Bluesky search: top posts of the last 24h per category query
+  SEARCH
   MANUAL
   /// Someone tagged the bot asking for a recommendation (solicited)
   MENTION
@@ -58,8 +61,6 @@ model Post {
 
   /// likeCount*1 + repostCount*3 + replyCount*2 + quoteCount*3
   engagementScore    Float @default(0)
-  /// Change in engagementScore per hour between rehydrations
-  engagementVelocity Float @default(0)
   /// Last time counts were refreshed from the AppView (null = never)
   lastHydratedAt     DateTime?
 

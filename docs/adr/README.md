@@ -5,7 +5,8 @@ made. Format: Status / Context / Decision / Consequences.
 
 | # | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-firehose-discovery.md) | Jetstream firehose + keyword pre-filter for discovery | Accepted (supersession planned) |
+| [0001](0001-firehose-discovery.md) | Jetstream firehose + keyword pre-filter for discovery | Superseded by 0008 |
+| [0008](0008-search-discovery.md) | Search-based discovery: top posts of the last 24h per query | Accepted |
 | [0002](0002-llm-verdicts-are-advisory.md) | LLM verdicts are advisory; server-side gates are authoritative | Accepted |
 | [0003](0003-manual-approval-and-exactly-once.md) | Manual approval, DRY_RUN master switch, exactly-once posting | Accepted |
 | [0004](0004-disclosed-bot-posture.md) | Disclosed bot with in-reply affiliate disclosure | Accepted |

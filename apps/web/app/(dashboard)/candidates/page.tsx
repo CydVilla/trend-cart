@@ -91,7 +91,7 @@ export default async function CandidatesPage() {
                     </td>
                     <td className="px-3 py-2 text-xs">
                       <div>score {post.engagementScore}</div>
-                      <div className="text-zinc-400">{post.engagementVelocity.toFixed(1)}/h</div>
+                      <div className="text-zinc-400">{post.likeCount}♥ {post.repostCount}↻</div>
                     </td>
                     <td className="px-3 py-2 text-xs">{post.detectedCategories.join(", ")}</td>
                     <td className="px-3 py-2">

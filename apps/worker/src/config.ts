@@ -37,7 +37,6 @@ export const config = {
   bluesky: {
     handle: envString("BOT_ACCOUNT_HANDLE", ""),
     appPassword: envString("BOT_APP_PASSWORD", ""),
-    jetstreamUrl: envString("JETSTREAM_URL", "wss://jetstream2.us-east.bsky.network/subscribe"),
   },
 
   llm: {
@@ -63,6 +62,8 @@ export const config = {
   ingest: {
     minPostLength: envInt("MIN_POST_LENGTH", 40),
     requireEnglish: envBool("REQUIRE_ENGLISH", true),
+    /* How often to poll Bluesky search for trending candidates */
+    discoverIntervalMinutes: envInt("DISCOVER_INTERVAL_MINUTES", 15),
     rehydrateIntervalMinutes: envInt("REHYDRATE_INTERVAL_MINUTES", 15),
     rehydrateMaxAgeHours: envInt("REHYDRATE_MAX_AGE_HOURS", 24),
   },

@@ -1,11 +1,9 @@
 import { prisma } from "@trendcart/db";
 import type { LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
+import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
-import { CategoryMatcher } from "./filters.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
-import { newIngestStats, processPostEvent } from "./ingest.js";
-import { JetstreamClient } from "./jetstream.js";
 import { AnthropicLlmClient } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
@@ -13,7 +11,6 @@ import { createPoster, type PosterStats } from "./poster.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
 import { generateDueReplies, type ReplyStats } from "./reply.js";
 
-const CATEGORY_RELOAD_MS = 5 * 60_000;
 const STATS_LOG_MS = 30_000;
 
 /**
@@ -42,37 +39,30 @@ function startLoop(name: string, intervalMs: number, fn: () => Promise<void>): (
   };
 }
 
-async function loadMatcherCategories() {
-  return prisma.productCategory.findMany({
-    where: { isActive: true },
-    select: { slug: true, keywords: true, negativeKeywords: true },
-  });
-}
-
 async function main(): Promise<void> {
   console.log("TrendCart worker starting");
   console.log(`  reply mode:       ${config.bot.replyMode} (dry run: ${config.bot.dryRun})`);
-  console.log(`  jetstream:        ${config.bluesky.jetstreamUrl}`);
-  console.log(`  eval maturation:  ${config.llm.evalMinPostAgeMinutes}m (manual posts skip it)`);
+  console.log(`  discovery:        Bluesky search, every ${config.ingest.discoverIntervalMinutes}m (top posts, last 24h)`);
+  console.log(`  trending floor:   engagement >= ${config.llm.minEngagementScore}`);
   console.log(`  affiliate tag:    ${config.site.amazonAssociateTag || "(unset)"}`);
 
   await prisma.$queryRaw`SELECT 1`;
 
-  const matcher = new CategoryMatcher(await loadMatcherCategories());
-  if (matcher.categoryCount === 0) {
-    console.warn("No active categories — nothing will match. Run: pnpm db:seed");
+  const categoryCount = await prisma.productCategory.count({ where: { isActive: true } });
+  if (categoryCount === 0) {
+    console.warn("No active categories — nothing to search for. Run: pnpm db:seed");
   } else {
-    console.log(`  categories:       ${matcher.categoryCount} active`);
+    console.log(`  categories:       ${categoryCount} active (keywords = search queries)`);
   }
 
-  const ingestStats = newIngestStats();
+  const discoverStats = newDiscoverStats();
   const rehydrateStats: RehydrateStats = { hydrated: 0, missing: 0, errors: 0 };
   const evalStats: EvaluateStats = { evaluated: 0, wouldReply: 0, rejected: 0, errors: 0 };
   const replyStats: ReplyStats = { generated: 0, skipped: 0, deferred: 0, failed: 0 };
   const posterStats: PosterStats = { posted: 0, postFailed: 0, disabled: false };
   const notificationStats: NotificationStats = { optOuts: 0, requests: 0, errors: 0 };
   setCountersRef({
-    ingest: ingestStats,
+    discover: discoverStats,
     rehydrate: rehydrateStats,
     evaluate: evalStats,
     reply: replyStats,
@@ -88,20 +78,10 @@ async function main(): Promise<void> {
       `(max ${config.llm.maxEvalsPerHour}/hr)`,
   );
 
-  const jetstream = new JetstreamClient({
-    url: config.bluesky.jetstreamUrl,
-    wantedCollections: ["app.bsky.feed.post"],
-    onEvent: (event) => {
-      recordLoopTick("ingest");
-      // Fire-and-forget: only keyword-matched posts ever reach the DB,
-      // so in-flight writes stay rare relative to event volume.
-      processPostEvent(event, matcher, ingestStats).catch((error) => {
-        console.error("ingest failed:", error instanceof Error ? error.message : error);
-      });
-    },
-  });
-  jetstream.start();
-
+  const discoverer = createDiscoverer(discoverStats);
+  if (!discoverer) {
+    console.warn("  discovery:        disabled (no Bluesky credentials)");
+  }
   const poster = createPoster(posterStats);
   const notificationListener = createNotificationListener(notificationStats);
   if (!notificationListener) {
@@ -109,15 +89,20 @@ async function main(): Promise<void> {
   }
 
   const stops = [
+    ...(discoverer
+      ? [
+          startLoop(
+            "discover",
+            config.ingest.discoverIntervalMinutes * 60_000,
+            () => discoverer.tick(),
+          ),
+        ]
+      : []),
     startLoop("rehydrate", 60_000, () => rehydrateTick(rehydrateStats)),
     startLoop("evaluate", 60_000, () => evaluateDueCandidates(llm, evalStats)),
     startLoop("reply", 60_000, () => generateDueReplies(llm, replyStats)),
     startLoop("poster", 30_000, () => poster.tick()),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
-    // Pick up dashboard edits to categories without restarting the worker.
-    startLoop("categories", CATEGORY_RELOAD_MS, async () => {
-      matcher.update(await loadMatcherCategories());
-    }),
     ...(notificationListener
       ? [
           // 90s cadence: mention requests deserve a prompt answer.
@@ -134,13 +119,13 @@ async function main(): Promise<void> {
   ];
 
   const statsTimer = setInterval(() => {
-    const skips = Object.entries(ingestStats.skipped)
+    const skips = Object.entries(discoverStats.skipped)
       .sort((a, b) => b[1] - a[1])
       .map(([reason, count]) => `${reason}=${count}`)
       .join(" ");
     console.log(
-      `[stats] events=${ingestStats.events} creates=${ingestStats.creates} ` +
-        `saved=${ingestStats.saved} deleted=${ingestStats.deletes} | ${skips} | ` +
+      `[stats] queries=${discoverStats.queries} found=${discoverStats.found} ` +
+        `saved=${discoverStats.saved} discoverErrors=${discoverStats.errors} | ${skips} | ` +
         `hydrated=${rehydrateStats.hydrated} dead=${rehydrateStats.missing} ` +
         `| evaluated=${evalStats.evaluated} wouldReply=${evalStats.wouldReply} ` +
         `rejected=${evalStats.rejected} evalErrors=${evalStats.errors} ` +
@@ -153,7 +138,6 @@ async function main(): Promise<void> {
 
   const shutdown = (signal: string): void => {
     console.log(`\n${signal} received — shutting down`);
-    jetstream.stop();
     stops.forEach((stop) => stop());
     clearInterval(statsTimer);
     prisma.$disconnect().finally(() => process.exit(0));

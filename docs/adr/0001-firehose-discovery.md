@@ -1,7 +1,7 @@
 # ADR-0001: Jetstream firehose + keyword pre-filter for discovery
 
-**Status:** Accepted — supersession by `app.bsky.feed.searchPosts` polling is
-planned (see README roadmap #1).
+**Status:** Superseded by [ADR-0008](0008-search-discovery.md) (2026-07-04) —
+live data showed 89% of firehose captures never reached the engagement floor.
 
 ## Context
 The bot needs candidate posts. Options: consume the full firehose and filter

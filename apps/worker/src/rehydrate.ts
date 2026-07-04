@@ -1,5 +1,5 @@
 import { prisma, ReplyStatus } from "@trendcart/db";
-import { computeEngagementScore, computeEngagementVelocity } from "@trendcart/shared";
+import { computeEngagementScore } from "@trendcart/shared";
 import { config } from "./config.js";
 
 /**
@@ -102,19 +102,12 @@ export async function rehydrateTick(stats: RehydrateStats): Promise<void> {
       quoteCount: view.quoteCount ?? 0,
     };
     const score = computeEngagementScore(counts);
-    const velocity = computeEngagementVelocity(
-      post.engagementScore,
-      score,
-      post.lastHydratedAt ?? post.indexedAt,
-      now,
-    );
 
     await prisma.post.update({
       where: { id: post.id },
       data: {
         ...counts,
         engagementScore: score,
-        engagementVelocity: velocity,
         authorHandle: view.author?.handle ?? undefined,
         lastHydratedAt: now,
       },

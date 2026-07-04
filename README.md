@@ -23,8 +23,9 @@ packages/
 Candidates enter three ways:
 
 ```
-1. FIREHOSE  Jetstream → keyword match → cheap filters → 30-min maturation
-             → trending floor (MIN_ENGAGEMENT_SCORE) → LLM evaluation
+1. SEARCH    Bluesky search, every 15 min: each category keyword runs as a
+             query (top posts, last 24h) → cheap filters → engagement floor
+             at discovery → LLM evaluation
 2. MENTION   someone tags @trend-cart.bsky.social (optionally under another
              post) → evaluated immediately as a solicited request
 3. MANUAL    operator pastes a bsky.app URL in the dashboard, optionally with
@@ -77,9 +78,10 @@ pnpm dev:worker   # Jetstream ingestion worker
 pnpm db:studio    # browse the database
 ```
 
-The worker logs a stats line every 30s showing the ingestion funnel, e.g.
-`events=12000 creates=4100 saved=6 | not_english=2100 too_short=1300 no_category_match=690 ...`
-— most posts should be filtered; only keyword-matched candidates are stored.
+The worker logs a stats line every 30s showing the discovery funnel, e.g.
+`queries=54 found=310 saved=12 | below_floor=180 promotional=40 ...`
+— candidates arrive from Bluesky search already trending; only results
+clearing the gates and the engagement floor are stored.
 
 Candidate evaluation (Phase 4) needs an LLM: set `ANTHROPIC_API_KEY` in `.env`,
 or set `USE_FAKE_LLM=true` to exercise the pipeline with a deterministic

@@ -195,20 +195,28 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     orderBy: { indexedAt: "asc" },
     take: batchLimit,
   });
-  const firehose =
+  const trending =
     solicited.length < batchLimit
       ? await prisma.post.findMany({
           where: {
             ...baseWhere,
-            source: "FIREHOSE",
-            indexedAt: { lte: maturedBefore },
-            engagementScore: { gte: config.llm.minEngagementScore },
+            OR: [
+              // Search-discovered posts arrive already trending with real
+              // counts — no maturation needed, floor re-checked.
+              { source: "SEARCH", engagementScore: { gte: config.llm.minEngagementScore } },
+              // Legacy firehose rows keep the original mature+floor rules.
+              {
+                source: "FIREHOSE",
+                indexedAt: { lte: maturedBefore },
+                engagementScore: { gte: config.llm.minEngagementScore },
+              },
+            ],
           },
           orderBy: { engagementScore: "desc" },
           take: batchLimit - solicited.length,
         })
       : [];
-  const due = [...solicited, ...firehose];
+  const due = [...solicited, ...trending];
   if (due.length === 0) return;
 
   const categories: CategoryContext[] = await prisma.productCategory.findMany({
@@ -252,7 +260,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     // recommendations evaluate at the normal floor. Solicited and injected
     // posts never hit this.
     if (
-      post.source === "FIREHOSE" &&
+      (post.source === "FIREHOSE" || post.source === "SEARCH") &&
       !INTENT_MARKERS.test(post.text) &&
       post.engagementScore < config.llm.minEngagementScore * 3
     ) {

@@ -3,6 +3,25 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-04 — Discovery v2: search replaces the firehose
+
+### Changed
+- **Discovery is now Bluesky search** (ADR-0008): every 15 minutes the worker
+  polls each category keyword as a query (`sort=top`, last 24h) and saves
+  results that clear the cheap gates AND the engagement floor at discovery —
+  candidates arrive already trending, already hydrated. Category keywords are
+  now literally the search queries (dashboard-editable).
+
+### Removed (feature audit)
+- The Jetstream firehose pipeline (`jetstream.ts`, `ingest.ts`,
+  CategoryMatcher): live data showed 89% of its captures (521 of 585) never
+  reached the engagement floor. ~5M events/day of processing replaced by ~50
+  search queries per cycle.
+- `engagementVelocity`: computed and stored since Phase 3, consulted by
+  nothing. Column dropped; candidates table shows likes/reposts instead.
+- `JETSTREAM_URL` config; the maturation wait no longer applies to
+  search-discovered posts (they arrive with real counts).
+
 ## 2026-07-03 (later) — Operator controls, funnel efficiency, review fixes
 
 ### Added
