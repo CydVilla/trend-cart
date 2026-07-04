@@ -7,7 +7,6 @@ export const dynamic = "force-dynamic";
 export default async function CategoriesPage() {
   const categories = await prisma.productCategory.findMany({
     orderBy: { name: "asc" },
-    include: { _count: { select: { products: true } }, recommendationPage: true },
   });
 
   return (
@@ -34,12 +33,7 @@ export default async function CategoriesPage() {
                   {category.isActive ? "active" : "inactive"}
                 </Badge>
                 <span className="text-xs text-zinc-400">
-                  {category.keywords.length} keywords · {category._count.products} products ·{" "}
-                  {category.recommendationPage
-                    ? category.recommendationPage.isPublished
-                      ? "page published"
-                      : "page draft"
-                    : "no page"}
+                  {category.keywords.length} search queries
                 </span>
                 <form action={toggleCategoryActive} className="ml-auto">
                   <input type="hidden" name="id" value={category.id} />

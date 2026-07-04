@@ -5,8 +5,6 @@ const NAV = [
   { href: "/candidates", label: "Candidates" },
   { href: "/replies", label: "Replies" },
   { href: "/categories", label: "Categories" },
-  { href: "/products", label: "Products" },
-  { href: "/pages", label: "Pages" },
 ] as const;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -20,10 +18,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             TrendCart
           </Link>
           <Link
-            href="/recommendations"
+            href="/about"
             className="ml-auto whitespace-nowrap text-sm text-zinc-400 hover:text-zinc-600 sm:order-last"
           >
-            public site ↗
+            about page ↗
           </Link>
           <nav className="-mx-4 flex w-screen gap-4 overflow-x-auto px-4 pb-1 pt-1 text-sm sm:m-0 sm:w-auto sm:p-0">
             {NAV.map((item) => (

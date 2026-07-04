@@ -31,7 +31,7 @@ export function setCountersRef(counters: Record<string, unknown>): void {
   countersRef = counters;
 }
 
-/** Upsert the heartbeat row. Never touches `paused` — that belongs to the operator. */
+/** Upsert the heartbeat row. Never touches `paused`/`autonomous` — those belong to the operator. */
 export async function flushHeartbeat(): Promise<void> {
   const data = {
     startedAt,
@@ -49,15 +49,33 @@ export async function flushHeartbeat(): Promise<void> {
   });
 }
 
-let pausedCache = { value: false, fetchedAt: 0 };
+export type OperatorFlags = {
+  /** Kill switch: all pipeline ticks stand down. */
+  paused: boolean;
+  /** Self-approval mode: high-confidence replies skip the manual queue. */
+  autonomous: boolean;
+};
 
-/** Operator kill switch, checked by evaluate/reply/poster ticks (30s cache). */
-export async function isPaused(): Promise<boolean> {
-  if (Date.now() - pausedCache.fetchedAt < 30_000) return pausedCache.value;
+let flagsCache: { value: OperatorFlags; fetchedAt: number } = {
+  value: { paused: false, autonomous: false },
+  fetchedAt: 0,
+};
+
+/** Operator-owned toggles, set by the dashboard, read every tick (30s cache). */
+export async function getOperatorFlags(): Promise<OperatorFlags> {
+  if (Date.now() - flagsCache.fetchedAt < 30_000) return flagsCache.value;
   const row = await prisma.workerHeartbeat.findUnique({
     where: { id: HEARTBEAT_ID },
-    select: { paused: true },
+    select: { paused: true, autonomous: true },
   });
-  pausedCache = { value: row?.paused ?? false, fetchedAt: Date.now() };
-  return pausedCache.value;
+  flagsCache = {
+    value: { paused: row?.paused ?? false, autonomous: row?.autonomous ?? false },
+    fetchedAt: Date.now(),
+  };
+  return flagsCache.value;
+}
+
+/** Operator kill switch, checked by evaluate/reply/poster ticks. */
+export async function isPaused(): Promise<boolean> {
+  return (await getOperatorFlags()).paused;
 }

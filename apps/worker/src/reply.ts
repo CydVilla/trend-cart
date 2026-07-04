@@ -2,7 +2,8 @@ import { prisma, ReplyStatus, type CandidateEvaluation, type Post } from "@trend
 import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
-import { isPaused } from "./heartbeat.js";
+import { getOperatorFlags } from "./heartbeat.js";
+import { getLearnedGuidelines } from "./reflect.js";
 import { validateReply } from "./validate.js";
 
 const BATCH_SIZE = 5;
@@ -19,6 +20,8 @@ const ACTIVE_STATUSES = [
 
 export type ReplyStats = {
   generated: number;
+  /** Of `generated`: how many the bot self-approved (autonomous mode). */
+  autoApproved: number;
   skipped: number;
   deferred: number;
   failed: number;
@@ -129,21 +132,42 @@ async function writeSkip(
   stats.skipped += 1;
 }
 
-/** Status for a freshly generated, validated reply — DRY_RUN is the master switch. */
-function initialStatus(): ReplyStatus {
-  if (config.bot.dryRun || config.bot.replyMode === "dry_run") return ReplyStatus.DRY_RUN;
-  if (config.bot.replyMode === "manual") return ReplyStatus.PENDING_APPROVAL;
-  return ReplyStatus.APPROVED; // auto mode — posting loop picks it up
+/**
+ * Status for a freshly generated, validated reply — DRY_RUN is the master
+ * switch. The operator's `autonomous` toggle self-approves only replies that
+ * clear the HIGHER bars (intent + link confidence, or a human-made decision);
+ * marginal ones still land in the manual queue for the operator.
+ */
+function statusFor(
+  evaluation: CandidateEvaluation,
+  link: ReplyLink,
+  autonomous: boolean,
+): { status: ReplyStatus; approvedAt: Date | null } {
+  if (config.bot.dryRun || config.bot.replyMode === "dry_run") {
+    return { status: ReplyStatus.DRY_RUN, approvedAt: null };
+  }
+  if (config.bot.replyMode === "auto") {
+    return { status: ReplyStatus.APPROVED, approvedAt: new Date() };
+  }
+  if (autonomous) {
+    const humanDecided = evaluation.model === "operator" || link.kind === "operator";
+    const confident =
+      evaluation.productIntentScore >= config.bot.autoMinIntentScore &&
+      (link.kind !== "search" || evaluation.linkConfidence >= config.bot.autoMinLinkConfidence);
+    if (humanDecided || confident) {
+      return { status: ReplyStatus.APPROVED, approvedAt: new Date() };
+    }
+    return { status: ReplyStatus.PENDING_APPROVAL, approvedAt: null }; // escalate to the human
+  }
+  return { status: ReplyStatus.PENDING_APPROVAL, approvedAt: null };
 }
 
 type ReplyLink = {
+  kind: "operator" | "search" | "category";
   url: string;
   /** Human-readable clickable text — the URL rides on it as a facet. */
   anchor: string;
-  /** FTC-clear disclosure for direct Amazon links; pages carry it on-site. */
-  suffix: string;
   categoryName: string | null;
-  productNames: string[];
 };
 
 /** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
@@ -155,49 +179,48 @@ function searchAnchor(query: string): string {
 /**
  * Pick the single link a reply will carry, by priority:
  *  1. an operator-provided link (the human already decided),
- *  2. a tagged Amazon search for the SPECIFIC product the LLM identified
- *     (a direct pointer beats a generic list page),
- *  3. the category's curated recommendation page.
+ *  2. a tagged Amazon search for the SPECIFIC product the LLM identified —
+ *     but only when its linkConfidence says the results will be relevant,
+ *  3. a tagged Amazon search for the category name (generic product-type
+ *     queries reliably land well; niche titles are the risky ones).
+ * No link the bot isn't confident in ships: null = permanent skip.
  */
 async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<ReplyLink | null> {
   // No per-reply "(affiliate link)" suffix: the account bio discloses the
   // affiliate relationship, and the anchor text names Amazon explicitly.
   if (post.operatorLinkUrl) {
     return {
+      kind: "operator",
       url: post.operatorLinkUrl,
       anchor: "this one on Amazon",
-      suffix: "",
       categoryName: null,
-      productNames: [],
     };
   }
-  if (evaluation.recommendedSearchQuery && config.site.amazonAssociateTag) {
+  if (!config.site.amazonAssociateTag) return null;
+  if (
+    evaluation.recommendedSearchQuery &&
+    evaluation.linkConfidence >= config.bot.minLinkConfidence
+  ) {
     return {
+      kind: "search",
       url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
       anchor: searchAnchor(evaluation.recommendedSearchQuery),
-      suffix: "",
       categoryName: null,
-      productNames: [],
     };
   }
   if (evaluation.recommendedCategory) {
     const category = await prisma.productCategory.findUnique({
       where: { slug: evaluation.recommendedCategory },
-      include: {
-        recommendationPage: true,
-        products: { where: { isActive: true }, take: 5 },
-      },
+      select: { name: true },
     });
-    if (category?.recommendationPage?.isPublished) {
+    if (category) {
       return {
-        url: `${config.site.publicUrl}/recommendations/${category.recommendationPage.slug}`,
-        anchor: `${category.name} picks`,
-        suffix: "",
+        kind: "category",
+        url: amazonSearchUrl(category.name.toLowerCase(), config.site.amazonAssociateTag),
+        anchor: searchAnchor(category.name.toLowerCase()),
         categoryName: category.name,
-        productNames: category.products.map((p) => p.name),
       };
     }
-    return null; // wait for the page — defer, don't burn the candidate
   }
   return null;
 }
@@ -208,7 +231,8 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
  * in the mode-appropriate status. Every permanent decision leaves a row.
  */
 export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Promise<void> {
-  if (await isPaused()) return;
+  const flags = await getOperatorFlags();
+  if (flags.paused) return;
   if (Date.now() < generationBackoffUntil) return;
 
   const due = await prisma.candidateEvaluation.findMany({
@@ -241,22 +265,28 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
 
     const link = await chooseLink(evaluation, evaluation.post);
     if (!link) {
-      stats.deferred += 1; // "page not published yet" — bounded by the expiry skip above
+      // No link the bot is confident in — a reply that links to junk is worse
+      // than silence. Permanent, auditable skip.
+      await writeSkip(
+        evaluation.postId,
+        `no confident link (query confidence ${evaluation.linkConfidence}, category ${evaluation.recommendedCategory ?? "none"})`,
+        stats,
+      );
       continue;
     }
 
-    // The display text ends with the clickable anchor (+ disclosure); the URL
-    // itself is attached as a facet at posting time, never shown raw.
-    const reserved = link.anchor.length + link.suffix.length + 1;
-    const compose = (text: string) => `${text} ${link.anchor}${link.suffix}`;
+    // The display text ends with the clickable anchor; the URL itself is
+    // attached as a facet at posting time, never shown raw.
+    const reserved = link.anchor.length + 1;
+    const compose = (text: string) => `${text} ${link.anchor}`;
     const replyInput = {
       postText: evaluation.post.text,
       categoryName: link.categoryName,
       suggestedReplyAngle: evaluation.suggestedReplyAngle,
-      productNames: link.productNames,
       textBudget: config.bot.replyMaxLength - reserved,
       isDirectRequest: evaluation.post.source === "MENTION",
       operatorNote: evaluation.post.operatorNote,
+      learnedGuidelines: config.llm.useFake ? null : await getLearnedGuidelines(),
     };
 
     let text: string;
@@ -328,15 +358,18 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
+    const { status, approvedAt } = statusFor(evaluation, link, flags.autonomous);
     await prisma.botReply.create({
       data: {
         postId: evaluation.postId,
         replyText: text,
         linkUrl: link.url,
         linkAnchor: link.anchor,
-        status: initialStatus(),
+        status,
+        approvedAt,
       },
     });
     stats.generated += 1;
+    if (status === ReplyStatus.APPROVED && flags.autonomous) stats.autoApproved += 1;
   }
 }

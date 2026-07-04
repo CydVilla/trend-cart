@@ -7,10 +7,16 @@ export type CandidateEvaluationResult = {
   recommendedCategorySlug: string | null;
   /**
    * Direct Amazon search query for a specific identifiable product (e.g. a
-   * game title someone is raving about). Used when no curated category page
+   * game title someone is raving about). Used when no curated category
    * fits but a concrete recommendation still adds value. Null otherwise.
    */
   recommendedSearchQuery: string | null;
+  /**
+   * 0–100: how confident the model is that the first page of Amazon results
+   * for recommendedSearchQuery shows the product itself or closely related
+   * same-franchise items. Below the floor, the query is never linked.
+   */
+  linkConfidence: number;
   /** When real intent exists but no category fits: what category is missing? */
   suggestedNewCategory: string | null;
   shouldReply: boolean;
@@ -54,6 +60,8 @@ export type ClassifyPostInput = {
   threadContext?: string | null;
   /** TRUSTED note from the bot's operator (e.g. what a post's image shows). */
   operatorNote?: string | null;
+  /** TRUSTED guidelines the bot distilled from past operator decisions. */
+  learnedGuidelines?: string | null;
 };
 
 export type GenerateReplyInput = {
@@ -61,8 +69,6 @@ export type GenerateReplyInput = {
   /** Null for dynamic search recommendations with no curated category. */
   categoryName: string | null;
   suggestedReplyAngle: string | null;
-  /** Product names to optionally mention (never as links). */
-  productNames: string[];
   /**
    * Character budget for the model's TEXT ONLY. The caller composes the final
    * reply as `${text} ${linkAnchor}${suffix}` with the link attached as a
@@ -73,6 +79,8 @@ export type GenerateReplyInput = {
   isDirectRequest?: boolean;
   /** TRUSTED note from the bot's operator, overrides inferences from the post. */
   operatorNote?: string | null;
+  /** TRUSTED guidelines the bot distilled from past operator decisions. */
+  learnedGuidelines?: string | null;
 };
 
 /**

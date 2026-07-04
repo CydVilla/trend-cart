@@ -9,6 +9,7 @@ import type {
 import { config } from "./config.js";
 import { findPromotionalMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
+import { getLearnedGuidelines } from "./reflect.js";
 
 const BATCH_SIZE = 3;
 /** Give up on a post after this many CONTENT-level LLM failures. */
@@ -64,11 +65,15 @@ export function applyGates(
   activeSlugs: Set<string>,
 ): CandidateEvaluationResult {
   const score = Math.min(100, Math.max(0, Math.round(result.productIntentScore)));
+  const linkConfidence = Math.min(100, Math.max(0, Math.round(result.linkConfidence ?? 0)));
   const slug =
     result.recommendedCategorySlug && activeSlugs.has(result.recommendedCategorySlug)
       ? result.recommendedCategorySlug
       : null;
   const searchQuery = sanitizeSearchQuery(result.recommendedSearchQuery);
+  /** A search query only counts as a link path when the model believes the
+   *  Amazon results will actually be relevant (same product or franchise). */
+  const confidentQuery = searchQuery !== null && linkConfidence >= config.bot.minLinkConfidence;
 
   const failedGates: string[] = [];
   if (result.safetyStatus !== "safe") failedGates.push(`safety=${result.safetyStatus}`);
@@ -76,6 +81,11 @@ export function applyGates(
     failedGates.push(`intent ${score} < ${config.bot.minProductIntentScore}`);
   }
   if (!slug && !searchQuery) failedGates.push("no category and no search query");
+  if (!slug && searchQuery && !confidentQuery) {
+    failedGates.push(
+      `link confidence ${linkConfidence} < ${config.bot.minLinkConfidence} and no category fallback`,
+    );
+  }
   if (!result.shouldReply) failedGates.push("llm declined");
 
   const shouldReply = failedGates.length === 0;
@@ -84,6 +94,7 @@ export function applyGates(
     safetyStatus: result.safetyStatus,
     recommendedCategorySlug: slug,
     recommendedSearchQuery: searchQuery,
+    linkConfidence,
     suggestedNewCategory: result.suggestedNewCategory,
     shouldReply,
     reason: shouldReply ? result.reason : `${result.reason} [gates: ${failedGates.join("; ")}]`,
@@ -312,6 +323,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       continue;
     }
 
+    const learnedGuidelines = config.llm.useFake ? null : await getLearnedGuidelines();
     const authorProfile = config.llm.useFake ? null : await fetchAuthorProfile(post.authorDid);
 
     // Sellers advertise in their bios. A promotional author bio disqualifies
@@ -353,6 +365,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       isDirectRequest: post.source === "MENTION",
       threadContext: post.contextText,
       operatorNote: post.operatorNote,
+      learnedGuidelines,
     };
 
     let raw: CandidateEvaluationResult;
@@ -394,6 +407,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
           safetyDecision: SAFETY_MAP[evaluation.safetyStatus],
           recommendedCategory: evaluation.recommendedCategorySlug,
           recommendedSearchQuery: evaluation.recommendedSearchQuery,
+          linkConfidence: evaluation.linkConfidence,
           suggestedNewCategory: evaluation.suggestedNewCategory,
           model: modelTag,
           shouldReply: evaluation.shouldReply,

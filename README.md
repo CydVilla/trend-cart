@@ -1,20 +1,21 @@
 # TrendCart
 
-A Bluesky bot + web app that watches public posts for real, product-solvable problems
-("my desk cables are a mess") and — conservatively, with manual approval — replies with a
-link to a curated recommendation page on this site. Recommendation pages link out to
-Amazon with your Associates tag.
+A Bluesky bot + web app that finds trending posts with real product intent
+("my desk cables are a mess", "deltarune is a masterpiece") and — conservatively,
+with manual approval or confidence-gated autonomy — replies with a clickable
+link to a tagged Amazon search for the thing being discussed.
 
-**Design principle: this is not a spam bot.** It is rate-limited, safety-filtered,
-dry-run by default, and prefers linking to its own recommendation pages (with affiliate
-disclosure) instead of dropping raw affiliate links into replies.
+**Design principle: this is not a spam bot.** It is rate-limited,
+safety-filtered, dry-run by default, opt-out-respecting, and never links
+anywhere it isn't confident the results are relevant. Disclosure lives in the
+account bio and on the public /about page.
 
 ## Architecture
 
 ```
 apps/
-  web/        Next.js (App Router) — dashboard + public /recommendations/[slug] pages
-  worker/     Node worker — Jetstream ingestion, evaluation pipeline, reply posting
+  web/        Next.js (App Router) — operator dashboard + public /about disclosure page
+  worker/     Node worker — search discovery, evaluation pipeline, reply posting, learning loop
 packages/
   db/         Prisma schema + shared PrismaClient
   shared/     Shared types, LLM client interface, engagement scoring, affiliate URL utils
@@ -39,10 +40,17 @@ validation → BotReply (dry_run / pending approval) → dashboard approval →
 posted to Bluesky.
 
 Reply links (one per reply, by priority): operator-provided link → tagged
-Amazon search for the specific product ("deltarune on Amazon") → the
-category's /recommendations/[slug] page. Links render as clickable anchor
-text via rich-text facets — never raw URLs. Affiliate disclosure lives in
-the account bio and the Amazon-naming anchor text.
+Amazon search for the specific product ("deltarune on Amazon", only when the
+evaluation's **link confidence** ≥ 60 that results will be relevant) → tagged
+Amazon search for the category name. No confident link → no reply. Links
+render as clickable anchor text via rich-text facets — never raw URLs.
+
+**Autonomous mode** (Overview-page toggle, off by default): the bot
+self-approves replies with intent ≥ 80 and link confidence ≥ 75 (or an
+operator directive); weaker replies still queue for manual approval.
+**Learning loop**: hourly it measures engagement on its own posted replies;
+daily one small LLM call distills your approvals/edits/rejections into
+guidelines injected into its prompts (shown on the Overview page).
 
 ## Prerequisites
 
@@ -74,7 +82,7 @@ pnpm db:seed
 
 ```bash
 pnpm dev:web      # Next.js on http://localhost:3000
-pnpm dev:worker   # Jetstream ingestion worker
+pnpm dev:worker   # discovery/evaluation/reply worker
 pnpm db:studio    # browse the database
 ```
 
@@ -90,8 +98,8 @@ heuristic client (no API calls). Evaluations are capped by
 is stored in `CandidateEvaluation`.
 
 Reply generation (Phase 5) turns approved evaluations into `BotReply` rows.
-The pipeline requires a **published** recommendation page for the category,
-enforces per-author/per-category/global cooldowns and hourly/daily caps,
+The pipeline links only where the evaluation is confident (link confidence
+gate), enforces per-author/per-category/global cooldowns and hourly/daily caps,
 validates every reply (length, exactly one link — our page, no hashtags,
 no banned phrases), and dedupes identical text. `DRY_RUN=true` is the master
 switch: rows are stored as `DRY_RUN` and nothing is ever posted. In `manual`
@@ -107,8 +115,11 @@ paste a post URL + optional trusted note + optional forced Amazon link;
 re-pasting an existing candidate resets its verdict for a fresh run),
 **Replies** (approve/reject the pending queue — cards show the clickable
 anchor and its exact link destination; the mode banner reflects the worker's
-real heartbeat, not env guesses), **Categories**, **Products**, **Pages**, and
-a worker status card on Overview with a **Pause bot** kill switch.
+real heartbeat, not env guesses; pending replies can be edited inline or
+regenerated with a direction), **Categories** (the discovery control panel —
+keywords are the Bluesky search queries), and a worker status card on
+Overview with the **Autonomous** toggle, a **Pause bot** kill switch, and a
+"What the bot has learned" card once the reflection job has run.
 `/api/health` is public and returns 500 when the worker heartbeat goes stale —
 point a free uptime pinger at it.
 
@@ -118,7 +129,7 @@ Opt-out is phrase-based ("opt out", "stop", "leave me alone") and permanent
 until the person mentions the bot again.
 
 The dashboard is protected by HTTP Basic auth whenever `DASHBOARD_PASSWORD`
-is set (see middleware.ts); public `/recommendations/*` pages and
+is set (see middleware.ts); the public `/about` page and
 `/api/health` stay open. Never deploy publicly without setting it.
 
 ## Verifying the scaffold
@@ -137,7 +148,10 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `REPLY_MODE` | `dry_run` \| `manual` (approve in dashboard) \| `auto` (off by default) |
 | `MAX_REPLIES_PER_HOUR` / `_DAY` | Hard rate limits |
 | `MIN_PRODUCT_INTENT_SCORE` | LLM intent threshold (0–100) below which the bot never replies |
-| `MIN_ENGAGEMENT_SCORE` | Trending floor — firehose posts below it are never evaluated |
+| `MIN_ENGAGEMENT_SCORE` | Trending floor — discovered posts below it are never evaluated |
+| `MIN_LINK_CONFIDENCE` | Search queries below this confidence (0–100) are never linked (default 60) |
+| `AUTO_MIN_INTENT_SCORE` | Autonomous mode self-approves only above this intent (default 80) |
+| `AUTO_MIN_LINK_CONFIDENCE` | ...and above this link confidence for search links (default 75) |
 | `EVAL_MIN_POST_AGE_MINUTES` | Maturation wait so the engagement snapshot means something |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` default (cheap); swap to an Opus model for max judgment |
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |
@@ -166,10 +180,11 @@ Every skip is recorded with a reason (`BotReply.skipReason`, `CandidateEvaluatio
 
 ## Affiliate compliance notes
 
-- Recommendation pages carry an affiliate disclosure ("As an Amazon Associate I earn
-  from qualifying purchases").
+- The public `/about` page carries the standard disclosure ("As an Amazon
+  Associate, TrendCart earns from qualifying purchases") plus opt-out
+  instructions — it's where the bot's profile link points.
 - The bot account bio discloses automation + affiliate funding; anchor text
-  names Amazon explicitly on every direct Amazon link.
+  names Amazon explicitly on every link.
 - Add the deployed site URL and the Bluesky account to your Amazon Associates
   account's list of properties.
 
@@ -185,14 +200,14 @@ heroku login
 heroku create <app-name>
 heroku addons:create heroku-postgresql:essential-0   # ~$5/mo
 heroku config:set DASHBOARD_PASSWORD=<pick-one> AMAZON_ASSOCIATE_TAG=... \
-  PUBLIC_SITE_URL=https://<app-name>.herokuapp.com DRY_RUN=true
+  DRY_RUN=true
 git push heroku main
 # one-time seed against the Heroku DB (run locally):
 DATABASE_URL="$(heroku config:get DATABASE_URL)" pnpm db:seed
 ```
 
 The dashboard is protected by HTTP Basic auth whenever `DASHBOARD_PASSWORD`
-is set (user `admin`, or override with `DASHBOARD_USER`); `/recommendations/*`
+is set (user `admin`, or override with `DASHBOARD_USER`); `/about`
 stays public. The worker dyno additionally needs `ANTHROPIC_API_KEY`,
 `BOT_ACCOUNT_HANDLE`, and `BOT_APP_PASSWORD` set before scaling it up.
 
@@ -208,7 +223,7 @@ Ranked by leverage — see git history / discussion for full rationale:
 1. **Search-based discovery.** Replace firehose+keyword matching with polling
    `app.bsky.feed.searchPosts` per category: precise, returns engagement
    counts at discovery time (making "trending" real), and far cheaper.
-2. **Site-pull over bot-push.** Make the recommendation pages a real content
+2. **(retired — ADR-0010: replies link straight to Amazon)** ~~Site-pull over bot-push.~~ Make the recommendation pages a real content
    site; add a safe second channel — the bot posting curated lists to its own
    timeline. Cold replies stay the smallest, most conservative channel.
 3. **Close the measurement loop.** `/go/[productId]` click-tracking redirects,
@@ -227,10 +242,10 @@ Ranked by leverage — see git history / discussion for full rationale:
 - [x] Phase 3 — Jetstream ingestion (filters, keyword matching, engagement rehydration)
 - [x] Phase 4 — candidate evaluation (LLM classification with server-side gates)
 - [x] Phase 5 — reply generation, validation, and Bluesky posting loop
-- [x] Phase 6 — dashboard (candidates, reply approval, categories, products, page management)
-- [x] Phase 7 — public recommendation pages (/recommendations/[slug] + index)
+- [x] Phase 6 — dashboard (candidates, reply approval, categories)
+- [x] Phase 7 — public site (now a single /about disclosure page — ADR-0010)
 - [x] Phase 8 — safety & rate limits (audited; stale-approval guard added to poster)
-- [x] Phase 9 — seed data (8 published pages, 3 products per category, idempotent)
+- [x] Phase 9 — seed data (9 categories; keywords double as search queries)
 
 ## Going live checklist
 

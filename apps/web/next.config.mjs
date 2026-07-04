@@ -19,6 +19,12 @@ const nextConfig = {
   // from node_modules at runtime, never bundled — bundling strands the
   // engine binary and crashes on hosted Linux.
   serverExternalPackages: ["@prisma/client"],
+  // The curated recommendation pages were retired (replies link straight to
+  // Amazon); any old links out in the wild land on the disclosure page.
+  redirects: async () => [
+    { source: "/recommendations", destination: "/about", permanent: true },
+    { source: "/recommendations/:slug", destination: "/about", permanent: true },
+  ],
 };
 
 export default nextConfig;

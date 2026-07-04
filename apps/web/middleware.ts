@@ -23,7 +23,8 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  // Everything except the public site, the health probe (leaks only liveness
-  // booleans), and framework assets requires auth.
-  matcher: ["/((?!recommendations|api/health|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except the public about/disclosure page, the health probe
+  // (leaks only liveness booleans), and framework assets requires auth.
+  // /recommendations stays listed so legacy links redirect instead of 401ing.
+  matcher: ["/((?!about|recommendations|api/health|_next/static|_next/image|favicon.ico).*)"],
 };

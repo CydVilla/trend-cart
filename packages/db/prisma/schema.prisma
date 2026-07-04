@@ -100,13 +100,14 @@ model Post {
   @@index([safetyStatus, productIntentScore])
 }
 
-/// Curated product categories, e.g. desk-cable-management, coffee-setup.
+/// Discovery control: each category's keywords run as Bluesky search queries,
+/// and the slug/description guide the LLM's category picks.
 model ProductCategory {
   id               String   @id @default(cuid())
   slug             String   @unique
   name             String
   description      String
-  /// Cheap pre-filter: post text must hit at least one keyword
+  /// Bluesky search queries polled each discovery cycle (first 6 used)
   keywords         String[] @default([])
   /// If any of these appear, the category does NOT match
   negativeKeywords String[] @default([])
@@ -116,49 +117,6 @@ model ProductCategory {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  products           Product[]
-  recommendationPage RecommendationPage?
-}
-
-/// Manually curated products. `url` stores the plain merchant URL;
-/// the affiliate tag (AMAZON_ASSOCIATE_TAG) is appended at render time.
-model Product {
-  id                          String  @id @default(cuid())
-  categoryId                  String
-  name                        String
-  description                 String
-  /// Human-friendly, e.g. "$15–$25"
-  priceRange                  String
-  merchant                    String  @default("amazon")
-  url                         String
-  imageUrl                    String?
-  affiliateDisclosureRequired Boolean @default(true)
-  isActive                    Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  category ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  @@index([categoryId])
-}
-
-/// Public landing page at /recommendations/[slug]. One per category.
-model RecommendationPage {
-  id               String  @id @default(cuid())
-  slug             String  @unique
-  categoryId       String  @unique
-  title            String
-  intro            String
-  /// Optional LLM-generated summary of why these products help
-  generatedSummary String?
-  isPublished      Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  category ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 }
 
 /// Every reply the bot generated — including dry runs and skips —
@@ -182,6 +140,15 @@ model BotReply {
   /// Posting retry bookkeeping (transient errors retry, they don't kill)
   attemptCount  Int       @default(0)
   nextAttemptAt DateTime?
+  /// Learning signals: engagement on OUR posted reply, and whether the
+  /// operator hand-edited the text before approving
+  replyLikeCount    Int       @default(0)
+  replyReplyCount   Int       @default(0)
+  outcomeCheckedAt  DateTime?
+  editedByOperator  Boolean   @default(false)
+  /// Original text before the operator's first edit — before/after pairs are
+  /// the strongest style signal the reflection job learns from
+  preEditText       String?
 
   createdAt DateTime @default(now())
 
@@ -206,6 +173,10 @@ model CandidateEvaluation {
   recommendedCategory String?
   /// Direct Amazon search query for dynamic recommendations (e.g. a game title)
   recommendedSearchQuery String?
+  /// 0–100: LLM's confidence that an Amazon search for the query lands on the
+  /// product or same-franchise items. Low-confidence queries never get linked.
+  /// Pre-existing rows default to 100 (they predate the gate).
+  linkConfidence         Int     @default(100)
   /// LLM's suggestion when real intent exists but no category fits
   suggestedNewCategory   String?
   /// Which model produced this verdict ("fake", "policy", or a real model id) —
@@ -242,7 +213,21 @@ model WorkerHeartbeat {
   replyMode    String
   model        String
   paused       Boolean  @default(false)
+  /// Operator toggle: bot self-approves high-confidence replies (marginal
+  /// ones still queue for manual approval). DRY_RUN overrides this.
+  autonomous   Boolean  @default(false)
   postingState String
   loops        Json
   counters     Json
+}
+
+/// Small persistent memory the bot writes for itself — currently a single
+/// "lessons" row: guidelines distilled daily from operator decisions and
+/// posted-reply outcomes, injected into the classifier and reply prompts.
+model BotMemory {
+  id        String   @id
+  content   String
+  /// What evidence produced this digest (for auditing the learning loop)
+  basis     Json?
+  updatedAt DateTime @updatedAt
 }

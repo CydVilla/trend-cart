@@ -7,7 +7,9 @@ import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
 import { AnthropicLlmClient } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
+import { outcomesTick, type OutcomeStats } from "./outcomes.js";
 import { createPoster, type PosterStats } from "./poster.js";
+import { reflectTick, type ReflectStats } from "./reflect.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
 import { generateDueReplies, type ReplyStats } from "./reply.js";
 
@@ -58,9 +60,11 @@ async function main(): Promise<void> {
   const discoverStats = newDiscoverStats();
   const rehydrateStats: RehydrateStats = { hydrated: 0, missing: 0, errors: 0 };
   const evalStats: EvaluateStats = { evaluated: 0, wouldReply: 0, rejected: 0, errors: 0 };
-  const replyStats: ReplyStats = { generated: 0, skipped: 0, deferred: 0, failed: 0 };
+  const replyStats: ReplyStats = { generated: 0, autoApproved: 0, skipped: 0, deferred: 0, failed: 0 };
   const posterStats: PosterStats = { posted: 0, postFailed: 0, disabled: false };
   const notificationStats: NotificationStats = { optOuts: 0, requests: 0, errors: 0 };
+  const outcomeStats: OutcomeStats = { checked: 0, errors: 0 };
+  const reflectStats: ReflectStats = { reflections: 0, errors: 0 };
   setCountersRef({
     discover: discoverStats,
     rehydrate: rehydrateStats,
@@ -68,6 +72,8 @@ async function main(): Promise<void> {
     reply: replyStats,
     poster: posterStats,
     notifications: notificationStats,
+    outcomes: outcomeStats,
+    reflect: reflectStats,
   });
 
   const llm: LlmClient = config.llm.useFake
@@ -103,6 +109,10 @@ async function main(): Promise<void> {
     startLoop("reply", 60_000, () => generateDueReplies(llm, replyStats)),
     startLoop("poster", 30_000, () => poster.tick()),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
+    // Learning loop: hourly outcome measurement (free public API), daily
+    // reflection (one small LLM call — reflectTick no-ops until stale).
+    startLoop("outcomes", 3_600_000, () => outcomesTick(outcomeStats)),
+    startLoop("reflect", 6 * 3_600_000, () => reflectTick(reflectStats)),
     ...(notificationListener
       ? [
           // 90s cadence: mention requests deserve a prompt answer.
@@ -129,10 +139,12 @@ async function main(): Promise<void> {
         `hydrated=${rehydrateStats.hydrated} dead=${rehydrateStats.missing} ` +
         `| evaluated=${evalStats.evaluated} wouldReply=${evalStats.wouldReply} ` +
         `rejected=${evalStats.rejected} evalErrors=${evalStats.errors} ` +
-        `| replies=${replyStats.generated} replySkips=${replyStats.skipped} ` +
+        `| replies=${replyStats.generated} autoApproved=${replyStats.autoApproved} ` +
+        `replySkips=${replyStats.skipped} ` +
         `replyDefer=${replyStats.deferred} replyFail=${replyStats.failed} ` +
         `posted=${posterStats.posted} requests=${notificationStats.requests} ` +
-        `optOuts=${notificationStats.optOuts}`,
+        `optOuts=${notificationStats.optOuts} outcomes=${outcomeStats.checked} ` +
+        `lessons=${reflectStats.reflections}`,
     );
   }, STATS_LOG_MS);
 

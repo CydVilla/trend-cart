@@ -16,6 +16,7 @@ export class FakeLlmClient implements LlmClient {
   async classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult> {
     const base = {
       recommendedSearchQuery: null,
+      linkConfidence: 0,
       suggestedNewCategory: null,
     };
     if (findSensitiveMatch(input.postText)) {
@@ -47,6 +48,7 @@ export class FakeLlmClient implements LlmClient {
         safetyStatus: "safe",
         recommendedCategorySlug: null,
         recommendedSearchQuery: input.operatorNote.split(/\s+/).slice(0, 4).join(" "),
+        linkConfidence: 90,
         shouldReply: true,
         reason: "fake: operator note provided — recommending per note",
         suggestedReplyAngle: input.operatorNote,
@@ -64,6 +66,7 @@ export class FakeLlmClient implements LlmClient {
           .split(/\s+/)
           .slice(0, 4)
           .join(" "),
+        linkConfidence: 75,
         shouldReply: true,
         reason: "fake: direct request — answering with a search recommendation",
         suggestedReplyAngle: "answer the requester directly",
@@ -95,10 +98,7 @@ export class FakeLlmClient implements LlmClient {
   async generateReply(input: GenerateReplyInput): Promise<string> {
     // Mirror the real client: return TEXT ONLY within the budget; the caller
     // composes the anchor/facet, so truncation can never chop the link off.
-    const products = input.productNames.slice(0, 3).join(", ");
-    let text = `This is usually fixable with a few ${(input.categoryName ?? "practical").toLowerCase()} pieces${
-      products ? ` — think ${products}` : ""
-    }. I put together a quick list here:`;
+    let text = `This is usually fixable with a few ${(input.categoryName ?? "practical").toLowerCase()} pieces. Solid options here:`;
     if (text.length > input.textBudget) {
       text = `${text.slice(0, Math.max(0, input.textBudget - 1)).trimEnd()}…`;
     }

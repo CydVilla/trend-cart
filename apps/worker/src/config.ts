@@ -55,7 +55,6 @@ export const config = {
   },
 
   site: {
-    publicUrl: envString("PUBLIC_SITE_URL", "http://localhost:3000"),
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
   },
 
@@ -71,6 +70,13 @@ export const config = {
   bot: {
     dryRun,
     replyMode: parseReplyMode(envString("REPLY_MODE", "manual")),
+    /* Link-quality floor: a recommended search query below this confidence is
+       never linked (the category fallback or a skip happens instead). */
+    minLinkConfidence: envInt("MIN_LINK_CONFIDENCE", 60),
+    /* Autonomous mode (dashboard toggle) self-approves only replies clearing
+       BOTH bars; anything weaker still queues for manual approval. */
+    autoMinIntentScore: envInt("AUTO_MIN_INTENT_SCORE", 80),
+    autoMinLinkConfidence: envInt("AUTO_MIN_LINK_CONFIDENCE", 75),
     maxRepliesPerHour: envInt("MAX_REPLIES_PER_HOUR", 3),
     maxRepliesPerDay: envInt("MAX_REPLIES_PER_DAY", 20),
     replyMaxLength: envInt("REPLY_MAX_LENGTH", 240),

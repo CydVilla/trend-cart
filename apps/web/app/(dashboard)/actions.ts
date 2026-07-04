@@ -45,7 +45,16 @@ export async function editReply(formData: FormData): Promise<void> {
     if (text.split(reply.linkAnchor).length - 1 !== 1) return;
     if (/https?:\/\//.test(text)) return;
   }
-  await prisma.botReply.update({ where: { id }, data: { replyText: text } });
+  await prisma.botReply.update({
+    where: { id },
+    data: {
+      replyText: text,
+      // Learning signal: keep the original once, so the reflection job can
+      // study before→after pairs of what the operator changed.
+      editedByOperator: true,
+      ...(reply.preEditText === null ? { preEditText: reply.replyText } : {}),
+    },
+  });
   revalidatePath("/replies");
 }
 
@@ -123,6 +132,22 @@ export async function toggleWorkerPaused(): Promise<void> {
   await prisma.workerHeartbeat.update({
     where: { id: "worker" },
     data: { paused: !heartbeat.paused },
+  });
+  revalidatePath("/");
+}
+
+/**
+ * Autonomous mode: the bot self-approves replies that clear the higher
+ * intent + link-confidence bars; marginal ones still queue for manual
+ * approval. DRY_RUN (env) always overrides. Worker picks the flag up
+ * within ~30s.
+ */
+export async function toggleAutonomous(): Promise<void> {
+  const heartbeat = await prisma.workerHeartbeat.findUnique({ where: { id: "worker" } });
+  if (!heartbeat) return;
+  await prisma.workerHeartbeat.update({
+    where: { id: "worker" },
+    data: { autonomous: !heartbeat.autonomous },
   });
   revalidatePath("/");
 }
@@ -323,58 +348,6 @@ export async function updateCategory(formData: FormData): Promise<void> {
   revalidatePath("/categories");
 }
 
-// ── Products ────────────────────────────────────────────────
-
-export async function createProduct(formData: FormData): Promise<void> {
-  const categoryId = str(formData, "categoryId");
-  const name = str(formData, "name");
-  const url = str(formData, "url");
-  if (!categoryId || !name || !url) return;
-  await prisma.product.create({
-    data: {
-      categoryId,
-      name,
-      url,
-      description: str(formData, "description"),
-      priceRange: str(formData, "priceRange"),
-      imageUrl: str(formData, "imageUrl") || null,
-    },
-  });
-  revalidatePath("/products");
-}
-
-export async function toggleProductActive(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  const product = await prisma.product.findUnique({ where: { id } });
-  if (!product) return;
-  await prisma.product.update({ where: { id }, data: { isActive: !product.isActive } });
-  revalidatePath("/products");
-}
-
-// ── Recommendation pages ────────────────────────────────────
-
-export async function upsertRecommendationPage(formData: FormData): Promise<void> {
-  const categoryId = str(formData, "categoryId");
-  const title = str(formData, "title");
-  const intro = str(formData, "intro");
-  if (!categoryId || !title) return;
-  const category = await prisma.productCategory.findUnique({ where: { id: categoryId } });
-  if (!category) return;
-  await prisma.recommendationPage.upsert({
-    where: { categoryId },
-    create: { categoryId, slug: category.slug, title, intro },
-    update: { title, intro },
-  });
-  revalidatePath("/pages");
-}
-
-export async function togglePagePublished(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  const page = await prisma.recommendationPage.findUnique({ where: { id } });
-  if (!page) return;
-  await prisma.recommendationPage.update({
-    where: { id },
-    data: { isPublished: !page.isPublished },
-  });
-  revalidatePath("/pages");
-}
+// Products and recommendation pages were retired 2026-07-04: replies link
+// straight to tagged Amazon searches (operator link > specific query >
+// category query), so the curated catalog and public pages served nothing.

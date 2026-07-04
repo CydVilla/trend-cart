@@ -3,6 +3,33 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-04 (later) — Autonomous mode, learning loop, link confidence
+
+### Added
+- **Autonomous mode** (ADR-0009): a dashboard toggle that lets the bot
+  approve and post its own replies — but only the confident ones (intent
+  ≥ 80 AND link confidence ≥ 75, or an operator directive); weaker replies
+  still escalate to the manual queue. Off by default, picked up by the
+  worker within 30s, always overridden by `DRY_RUN`.
+- **Self-learning**: an hourly job measures likes/replies on the bot's own
+  posted replies (free public API); a daily job (~1 small LLM call) distills
+  your approvals, rejections, hand-edits (before→after pairs), skips, and
+  reply engagement into ≤10 guidelines injected into the classifier and
+  reply prompts. Visible on the Overview page ("What the bot has learned").
+- **Link confidence** (0–100) on every evaluation: the model's confidence
+  that the Amazon results for its query show the product or same-franchise
+  items. Queries below 60 are never linked (category fallback or skip);
+  prompts now retarget un-buyable things (digital-only games, services) to
+  what Amazon actually sells (physical editions, merch, soundtracks).
+
+### Removed (ADR-0010)
+- The curated product catalog and public recommendation pages (models,
+  dashboard sections, routes, seeds): the site-page link branch effectively
+  never fired once link facets shipped — replies link straight to tagged
+  Amazon searches. Category fallback is now a tagged Amazon search for the
+  category name. The public site is a single `/about` disclosure page;
+  old `/recommendations` URLs redirect there.
+
 ## 2026-07-04 — Discovery v2: search replaces the firehose
 
 ### Changed
