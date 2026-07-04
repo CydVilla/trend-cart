@@ -3,6 +3,23 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-04 (later) — Operator guidance override
+
+### Added
+- **Operator guidance**: a dashboard-editable, free-text standing instruction
+  the bot treats as AUTHORITATIVE in every evaluation and reply — it overrides
+  the bot's own judgment and anything it learned (only the hard safety/spam
+  rules outrank it). This is the operator's direct "here's what to do" channel;
+  applied within ~2 minutes, no redeploy. The daily reflection is also given
+  the guidance as a constraint, so it can never re-learn a lesson that
+  contradicts it.
+
+### Changed
+- The classifier now treats abstract commentary/analysis that clearly alludes
+  to a specific product as a valid enthusiast candidate (what disqualifies a
+  post is having no identifiable product, not being abstract) — correcting an
+  over-generalized learned lesson.
+
 ## 2026-07-04 (later) — Autonomous mode, learning loop, link confidence
 
 ### Added

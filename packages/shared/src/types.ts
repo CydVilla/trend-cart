@@ -60,6 +60,9 @@ export type ClassifyPostInput = {
   threadContext?: string | null;
   /** TRUSTED note from the bot's operator (e.g. what a post's image shows). */
   operatorNote?: string | null;
+  /** TRUSTED standing guidance the operator set — authoritative, overrides
+   *  default judgment and learned guidelines (safety rules still apply). */
+  operatorGuidance?: string | null;
   /** TRUSTED guidelines the bot distilled from past operator decisions. */
   learnedGuidelines?: string | null;
 };
@@ -79,6 +82,9 @@ export type GenerateReplyInput = {
   isDirectRequest?: boolean;
   /** TRUSTED note from the bot's operator, overrides inferences from the post. */
   operatorNote?: string | null;
+  /** TRUSTED standing guidance the operator set — authoritative for tone and
+   *  what to recommend (overrides default judgment and learned guidelines). */
+  operatorGuidance?: string | null;
   /** TRUSTED guidelines the bot distilled from past operator decisions. */
   learnedGuidelines?: string | null;
 };

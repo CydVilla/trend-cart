@@ -3,7 +3,7 @@ import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
 import { getOperatorFlags } from "./heartbeat.js";
-import { getLearnedGuidelines } from "./reflect.js";
+import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
 import { validateReply } from "./validate.js";
 
 const BATCH_SIZE = 5;
@@ -286,6 +286,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       textBudget: config.bot.replyMaxLength - reserved,
       isDirectRequest: evaluation.post.source === "MENTION",
       operatorNote: evaluation.post.operatorNote,
+      operatorGuidance: config.llm.useFake ? null : await getOperatorGuidance(),
       learnedGuidelines: config.llm.useFake ? null : await getLearnedGuidelines(),
     };
 

@@ -153,6 +153,23 @@ export async function toggleAutonomous(): Promise<void> {
 }
 
 /**
+ * Operator standing guidance: free-text instructions the bot treats as
+ * AUTHORITATIVE in every evaluation and reply — it overrides the bot's
+ * default judgment and anything it learned, short of the hard safety/spam
+ * rules. This is the operator's direct override channel. The worker applies
+ * it within ~2 minutes; empty clears it.
+ */
+export async function updateOperatorGuidance(formData: FormData): Promise<void> {
+  const content = str(formData, "guidance").slice(0, 2000);
+  await prisma.botMemory.upsert({
+    where: { id: "operator-guidance" },
+    create: { id: "operator-guidance", content },
+    update: { content },
+  });
+  revalidatePath("/");
+}
+
+/**
  * "Test a post": fetch a real Bluesky post by URL and inject it into the
  * pipeline as a MANUAL candidate — it skips the maturation wait, gets a
  * longer expiry, and flows through evaluation/reply/approval like any other.

@@ -9,7 +9,7 @@ import type {
 import { config } from "./config.js";
 import { findPromotionalMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
-import { getLearnedGuidelines } from "./reflect.js";
+import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
 
 const BATCH_SIZE = 3;
 /** Give up on a post after this many CONTENT-level LLM failures. */
@@ -324,6 +324,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     }
 
     const learnedGuidelines = config.llm.useFake ? null : await getLearnedGuidelines();
+    const operatorGuidance = config.llm.useFake ? null : await getOperatorGuidance();
     const authorProfile = config.llm.useFake ? null : await fetchAuthorProfile(post.authorDid);
 
     // Sellers advertise in their bios. A promotional author bio disqualifies
@@ -365,6 +366,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       isDirectRequest: post.source === "MENTION",
       threadContext: post.contextText,
       operatorNote: post.operatorNote,
+      operatorGuidance,
       learnedGuidelines,
     };
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma, ReplyStatus } from "@trendcart/db";
-import { toggleAutonomous, toggleWorkerPaused } from "./actions";
+import { toggleAutonomous, toggleWorkerPaused, updateOperatorGuidance } from "./actions";
 import { Badge } from "./ui";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +64,47 @@ async function WorkerStatusCard() {
         </form>
       </div>
     </div>
+  );
+}
+
+/**
+ * The operator's direct override channel: standing instructions the bot
+ * treats as authoritative in every evaluation and reply, above anything it
+ * learned. Applied within ~2 minutes of saving.
+ */
+async function OperatorGuidanceCard() {
+  const row = await prisma.botMemory.findUnique({ where: { id: "operator-guidance" } });
+  return (
+    <details className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 text-sm" open={!row?.content}>
+      <summary className="cursor-pointer font-medium text-blue-900">
+        Operator guidance{" "}
+        <span className="font-normal text-blue-700/70">
+          — your standing instructions to the bot (overrides its own judgment)
+        </span>
+      </summary>
+      <form action={updateOperatorGuidance} className="mt-3 space-y-2">
+        <textarea
+          name="guidance"
+          rows={4}
+          defaultValue={row?.content ?? ""}
+          placeholder={
+            "e.g. It's fine to recommend a product when a post is abstract commentary, as long as a specific product is clearly being alluded to so readers know what it is. Keep replies short and never salesy."
+          }
+          className="w-full rounded border border-blue-200 bg-white px-3 py-2 font-sans text-zinc-700"
+        />
+        <div className="flex items-center gap-3">
+          <button
+            type="submit"
+            className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+          >
+            Save guidance
+          </button>
+          <span className="text-xs text-blue-700/60">
+            Applies within ~2 min · leave empty to clear · max 2000 chars
+          </span>
+        </div>
+      </form>
+    </details>
   );
 }
 
@@ -161,6 +202,7 @@ export default async function HomePage() {
           </Link>
         ))}
       </div>
+      <OperatorGuidanceCard />
       <LessonsCard />
       <p className="text-sm text-zinc-500">
         The worker discovers trending Bluesky posts, evaluates them, and queues replies. Approve
