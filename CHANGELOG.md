@@ -26,6 +26,8 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Over-long replies (the model overshooting its word budget, e.g. `309 > 240`)
   are now truncated at a word boundary and still posted with the link anchor
   intact, instead of being discarded as a validation failure.
+- Manual "Post deal now" posts bypass the global cooldown and daily cap — those
+  throttle the automated price-trigger, not the operator deliberately posting.
 
 ## 2026-07-04 (later) — Operator guidance override
 

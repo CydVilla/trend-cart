@@ -1,5 +1,5 @@
 import { AtpAgent, type AppBskyRichtextFacet } from "@atproto/api";
-import { prisma, DealPostStatus, type DealPost, type TrackedListing } from "@trendcart/db";
+import { prisma, DealPostStatus, DealSource, type DealPost, type TrackedListing } from "@trendcart/db";
 import { composeDealPost, DEAL_ANCHOR, formatMoney, isAmazonHost, validateDealText } from "@trendcart/shared";
 import { config } from "../config.js";
 import { isPaused } from "../heartbeat.js";
@@ -117,33 +117,39 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     if (stopped) return;
     if (await isPaused()) return;
 
-    // Restart-proof global gap between any two deal posts.
-    const lastPosted = await prisma.dealPost.findFirst({
-      where: { status: DealPostStatus.POSTED, postedAt: { not: null } },
-      orderBy: { postedAt: "desc" },
-      select: { postedAt: true },
-    });
-    if (
-      lastPosted?.postedAt &&
-      Date.now() - lastPosted.postedAt.getTime() < config.deals.globalCooldownMinutes * 60_000
-    ) {
-      return;
-    }
-    // Daily cap on published deals.
-    const postedToday = await prisma.dealPost.count({
-      where: { status: DealPostStatus.POSTED, postedAt: { gte: new Date(Date.now() - 24 * 3_600_000) } },
-    });
-    if (postedToday >= config.deals.maxPostsPerDay) return;
-
     const candidate = await prisma.dealPost.findFirst({
       where: {
         status: DealPostStatus.READY,
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
       },
       orderBy: { createdAt: "asc" },
-      select: { id: true },
+      select: { id: true, source: true },
     });
     if (!candidate) return;
+
+    // Manual "post deal now" posts are operator-initiated — they bypass the
+    // global throttles. Only the AUTOMATED price-trigger is rate-limited here,
+    // so a burst of auto-fires can't flood the profile.
+    if (candidate.source === DealSource.AUTOMATED) {
+      const lastPosted = await prisma.dealPost.findFirst({
+        where: { status: DealPostStatus.POSTED, postedAt: { not: null } },
+        orderBy: { postedAt: "desc" },
+        select: { postedAt: true },
+      });
+      if (
+        lastPosted?.postedAt &&
+        Date.now() - lastPosted.postedAt.getTime() < config.deals.globalCooldownMinutes * 60_000
+      ) {
+        return;
+      }
+      const postedToday = await prisma.dealPost.count({
+        where: {
+          status: DealPostStatus.POSTED,
+          postedAt: { gte: new Date(Date.now() - 24 * 3_600_000) },
+        },
+      });
+      if (postedToday >= config.deals.maxPostsPerDay) return;
+    }
 
     // CLAIM before any network call — count===1 makes publishing exactly-once.
     const claim = await prisma.dealPost.updateMany({
