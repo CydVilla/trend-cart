@@ -37,6 +37,18 @@ captured on first edit), candidate skips, reply engagement, opt-outs — into
 prompts as a trusted-but-advisory block. Server-side gates stay
 authoritative; lessons refine judgment, never loosen rules.
 
+**Operator guidance (the override channel).** Because inferred lessons can
+over-generalize (an early run learned "abstract commentary → skip" from the
+operator's skips, when the real rule was "abstract *with no identifiable
+product* → skip"), the operator gets a direct, authoritative channel: a
+free-text `BotMemory` row edited from the Overview page, injected into every
+classify/reply prompt as `<operator_guidance>` — above the bot's default
+judgment and above the learned lessons, below only the hard safety/spam
+rules. The daily reflection is also handed the guidance and told never to
+produce a lesson that contradicts it, so the same skip history can't
+re-teach the wrong rule. Applied within ~2 minutes, no redeploy. Untrusted
+post text is sanitized so it can't forge either trusted block.
+
 ## Consequences
 - The operator can turn autonomy on knowing the bot only acts alone on its
   most confident calls and escalates the rest — and can watch what it has
