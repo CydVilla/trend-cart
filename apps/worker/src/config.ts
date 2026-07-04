@@ -22,6 +22,8 @@ function parseReplyMode(raw: string): ReplyMode {
 }
 
 const useFakeLlm = envBool("USE_FAKE_LLM", false);
+const paApiAccessKey = envString("PA_API_ACCESS_KEY", "");
+const paApiSecretKey = envString("PA_API_SECRET_KEY", "");
 let dryRun = envBool("DRY_RUN", true);
 // Fail-safe: heuristic fake verdicts must never post to real people. A
 // leftover USE_FAKE_LLM=true forces dry-run rather than trusting env-var
@@ -84,5 +86,45 @@ export const config = {
     authorCooldownHours: envInt("AUTHOR_COOLDOWN_HOURS", 168),
     categoryCooldownMinutes: envInt("CATEGORY_COOLDOWN_MINUTES", 120),
     globalReplyCooldownMinutes: envInt("GLOBAL_REPLY_COOLDOWN_MINUTES", 10),
+  },
+
+  /* Deal tracker: standalone deal-alert posts to the bot's own profile.
+     Whole feature ships dark behind DEALS_ENABLED; DRY_RUN still gates all
+     posting. Caps are deliberately tighter than replies — a standalone promo
+     post on the bot's profile is more spam-prone than a contextual reply. */
+  deals: {
+    enabled: envBool("DEALS_ENABLED", false),
+    checkIntervalMs: envInt("DEAL_CHECK_INTERVAL_MS", 60_000),
+    /* Minimum gap before the same listing is re-polled. */
+    listingRecheckMs: envInt("DEAL_LISTING_RECHECK_MS", 900_000),
+    /* Soft daily PA-API cap, well under Amazon's 8640/day hard limit. */
+    maxPaApiCallsPerDay: envInt("DEAL_MAX_PA_API_CALLS_PER_DAY", 4_000),
+    /* A listing auto-deactivates after this many consecutive poll failures. */
+    maxConsecutiveErrors: envInt("DEAL_MAX_CONSECUTIVE_ERRORS", 5),
+    listingErrorBackoffHours: envInt("DEAL_LISTING_ERROR_BACKOFF_HOURS", 6),
+    /* Re-arm hysteresis: re-arm only when price > target*(1+pct/100). */
+    rearmBufferPct: envInt("DEAL_REARM_BUFFER_PCT", 3),
+    /* Minimum gap between posts for the SAME listing (restart-proof). */
+    perListingCooldownHours: envInt("DEAL_PER_LISTING_COOLDOWN_HOURS", 168),
+    /* Global caps on standalone deal posts. */
+    maxPostsPerDay: envInt("DEAL_MAX_POSTS_PER_DAY", 3),
+    globalCooldownMinutes: envInt("DEAL_GLOBAL_COOLDOWN_MINUTES", 60),
+    /* Amazon price-freshness: never post a price snapshot older than this. */
+    maxPriceAgeHours: envInt("DEAL_MAX_PRICE_AGE_HOURS", 1),
+    postMaxLength: envInt("DEAL_POST_MAX_LENGTH", 300),
+    paapiBaseBackoffMs: envInt("DEAL_PAAPI_BASE_BACKOFF_MS", 60_000),
+    paapiMaxBackoffMs: envInt("DEAL_PAAPI_MAX_BACKOFF_MS", 3_600_000),
+  },
+
+  /* Amazon Product Advertising API 5.0 credentials. When either key is
+     absent the deal-check loop stands down and only the manual path runs. */
+  paapi: {
+    accessKey: paApiAccessKey,
+    secretKey: paApiSecretKey,
+    partnerTag: envString("PA_API_PARTNER_TAG", "") || envString("AMAZON_ASSOCIATE_TAG", ""),
+    marketplace: envString("PA_API_MARKETPLACE", "www.amazon.com"),
+    host: envString("PA_API_HOST", "webservices.amazon.com"),
+    region: envString("PA_API_REGION", "us-east-1"),
+    enabled: Boolean(paApiAccessKey && paApiSecretKey),
   },
 } as const;

@@ -43,6 +43,16 @@ export default function AboutPage() {
         </section>
 
         <section>
+          <h2 className="text-lg font-semibold">Deal alerts</h2>
+          <p className="mt-1">
+            TrendCart also posts occasional deal alerts for a small watchlist of products. Each
+            one is labeled <strong>#ad</strong> in the post itself. Any price shown was accurate
+            as of the time stated in the post and is <em>subject to change</em> — always confirm
+            the current price on Amazon before buying.
+          </p>
+        </section>
+
+        <section>
           <h2 className="text-lg font-semibold">Don&apos;t want replies?</h2>
           <p className="mt-1">
             Reply to the bot with <em>&ldquo;opt out&rdquo;</em> (or &ldquo;stop replying&rdquo;) and it will never

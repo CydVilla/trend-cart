@@ -5,6 +5,7 @@ const NAV = [
   { href: "/candidates", label: "Candidates" },
   { href: "/replies", label: "Replies" },
   { href: "/categories", label: "Categories" },
+  { href: "/deals", label: "Deals" },
 ] as const;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {

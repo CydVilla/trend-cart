@@ -231,3 +231,123 @@ model BotMemory {
   basis     Json?
   updatedAt DateTime @updatedAt
 }
+
+// ── Deal tracker ────────────────────────────────────────────
+// Operator-curated watchlist of Amazon listings; when a tracked item's price
+// drops to/below its target the bot posts a standalone deal alert to its own
+// profile. See docs/adr/0011-deal-tracker.md.
+
+/// Per-listing re-arm state. ARMED = eligible to fire; DISARMED = fired,
+/// waiting for the price to rise back above target before it can fire again;
+/// FIRED = momentary exactly-once claim between the price trigger and the
+/// DealPost row being created (a recovery sweep resets a stranded FIRED).
+enum DealArmState {
+  ARMED
+  DISARMED
+  FIRED
+}
+
+/// DealPost lifecycle — the exact analog of ReplyStatus. PENDING = fired,
+/// awaiting copy generation; READY = has post text, claimable by the deal
+/// poster (manual rows start here); POSTING = exactly-once claim; DRY_RUN =
+/// would-post record written when DRY_RUN is on (never published).
+enum DealPostStatus {
+  PENDING
+  READY
+  POSTING
+  POSTED
+  SKIPPED
+  FAILED
+  DRY_RUN
+}
+
+/// How a deal post was triggered.
+enum DealSource {
+  AUTOMATED
+  MANUAL
+}
+
+/// One watched Amazon listing plus its persisted detection state.
+model TrackedListing {
+  id          String @id @default(cuid())
+  /// 10-char ASIN extracted from the operator URL.
+  asin        String
+  /// Marketplace host the ASIN/price belong to (prices are marketplace-specific).
+  marketplace String @default("www.amazon.com")
+  /// Canonical, tag-FREE product URL. The affiliate tag is applied at
+  /// queue/post time via withAffiliateTag, never stored here.
+  productUrl  String
+  /// Operator-set display title, used verbatim in post copy.
+  title       String
+  /// Optional Amazon-hosted image (linked live at post time, never re-hosted).
+  imageUrl    String?
+  /// Fire threshold in integer cents (49999 = $499.99). No floats — the
+  /// price comparison must be exact.
+  targetPriceCents Int
+  /// ISO-4217 currency the target is denominated in.
+  currency    String @default("USD")
+  /// Operator on/off switch. Inactive rows are never polled and never posted.
+  isActive    Boolean @default(true)
+
+  // ── detection state (written by the worker / manual action, not CRUD) ──
+  armState             DealArmState @default(ARMED)
+  lastPriceCents       Int?
+  lastPriceAsOf        DateTime?
+  /// Price that fired the last post — identical-price dedup compares to this.
+  lastPostedPriceCents Int?
+  lastCheckedAt        DateTime?
+  lastAvailability     String?
+  lastCheckError       String?
+  /// When the bot last POSTED a deal (not stamped under DRY_RUN) — feeds the
+  /// per-listing cooldown, restart-proof.
+  lastPostedAt         DateTime?
+  /// Provenance of lastPrice: "PAAPI" | "MANUAL".
+  source               String @default("MANUAL")
+  /// Consecutive poll failures; auto-deactivates the row at the configured cap.
+  consecutiveErrors    Int @default(0)
+  /// Backoff gate: the poll query skips this row until now >= nextCheckAt.
+  nextCheckAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dealPosts DealPost[]
+
+  @@unique([asin, marketplace])
+  @@index([isActive, armState, nextCheckAt])
+}
+
+/// One deal alert — the audit + publish-queue ledger (analog of BotReply).
+model DealPost {
+  id        String         @id @default(cuid())
+  listingId String
+  listing   TrackedListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  status    DealPostStatus @default(PENDING)
+  source    DealSource     @default(AUTOMATED)
+  /// Price that fired this post, frozen at fire time (cents).
+  salePriceCents   Int
+  /// Snapshot of the target at fire time (cents).
+  targetPriceCents Int
+  /// Reference/"was" price for the savings line, when known (cents).
+  wasPriceCents    Int?
+  currency         String @default("USD")
+  /// "as of" time shown in the post (Amazon price-freshness compliance),
+  /// snapshotted so later listing edits can't change what was advertised.
+  priceAsOf        DateTime
+  /// Tag-enforced affiliate link, snapshotted at queue time.
+  linkUrl          String
+  /// Frozen post copy; must contain a disclosure token before POSTING.
+  postText         String?
+  /// AT URI once POSTED.
+  postUri          String?
+  skipReason       String?
+  attemptCount     Int @default(0)
+  nextAttemptAt    DateTime?
+  postedAt         DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([listingId])
+  @@index([status, createdAt])
+  @@index([createdAt])
+}

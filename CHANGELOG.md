@@ -3,6 +3,28 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-04 (later) — Deal tracker + reply length fix
+
+### Added
+- **Deal tracker** (ADR-0011): a manual watchlist of Amazon listings, each
+  with a target price. When a tracked item drops to/below its target the bot
+  posts a standalone deal alert to its own profile — affiliate link on a
+  clickable anchor, an in-post `#ad` disclosure, and an "as of <time>; price
+  subject to change" qualifier. One sale = one post (re-arm hysteresis).
+  - **Two paths**: automated polling via Amazon PA-API 5.0 (`DEALS_ENABLED` +
+    `PA_API_*` keys), and a manual "Post deal now" dashboard fallback that
+    needs no API keys. New **Deals** dashboard page manages the watchlist,
+    target prices, and manual posting.
+  - Ships dark behind `DEALS_ENABLED`; DRY_RUN still gates all posting.
+    PA-API requests are SigV4-signed with Node crypto (verified against AWS's
+    published test vector). Tight caps: 3 posts/day, 7-day per-listing
+    cooldown, 60-min global gap, 1-hour price-freshness ceiling.
+
+### Fixed
+- Over-long replies (the model overshooting its word budget, e.g. `309 > 240`)
+  are now truncated at a word boundary and still posted with the link anchor
+  intact, instead of being discarded as a validation failure.
+
 ## 2026-07-04 (later) — Operator guidance override
 
 ### Added

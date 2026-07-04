@@ -177,6 +177,27 @@ function searchAnchor(query: string): string {
 }
 
 /**
+ * Deterministically trim an over-long reply body so `${body}… ${anchor}` fits
+ * the length cap, cutting at a word boundary. The anchor (and its facet) are
+ * always preserved — length is reserved for them first.
+ */
+export function truncateReplyToFit(body: string, anchor: string, maxLength: number): string {
+  const clean = body
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Reserve room for a leading space, the ellipsis, and " " + anchor.
+  const budget = maxLength - anchor.length - 2;
+  if (budget <= 0) return `${anchor}`; // pathological; validator will reject
+  if (clean.length <= budget) return `${clean} ${anchor}`;
+  let cut = clean.slice(0, budget);
+  const lastSpace = cut.lastIndexOf(" ");
+  if (lastSpace > budget * 0.6) cut = cut.slice(0, lastSpace);
+  cut = cut.replace(/[\s.,;:!?—-]+$/, "").trimEnd();
+  return `${cut}… ${anchor}`;
+}
+
+/**
  * Pick the single link a reply will carry, by priority:
  *  1. an operator-provided link (the human already decided),
  *  2. a tagged Amazon search for the SPECIFIC product the LLM identified —
@@ -290,9 +311,9 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       learnedGuidelines: config.llm.useFake ? null : await getLearnedGuidelines(),
     };
 
-    let text: string;
+    let body: string;
     try {
-      text = compose(await llm.generateReply(replyInput));
+      body = await llm.generateReply(replyInput);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (isTransientError(error)) {
@@ -313,23 +334,37 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
+    let text = compose(body);
     let validation = validateReply(text, link.anchor, config.bot.replyMaxLength);
     if (!validation.ok) {
       // One retry with a tighter budget — over-length is the common failure.
       try {
-        const retryText = compose(
-          await llm.generateReply({
-            ...replyInput,
-            textBudget: replyInput.textBudget - 30,
-          }),
-        );
+        const retryBody = await llm.generateReply({
+          ...replyInput,
+          textBudget: replyInput.textBudget - 30,
+        });
+        const retryText = compose(retryBody);
         const retryValidation = validateReply(retryText, link.anchor, config.bot.replyMaxLength);
         if (retryValidation.ok) {
           text = retryText;
           validation = retryValidation;
+        } else {
+          body = retryBody; // shorter body is the better base for truncation
         }
       } catch {
-        // fall through to the FAILED row with the original validation reason
+        // fall through to the truncation fallback / FAILED row
+      }
+    }
+    // Length-only safety net: the model overshot its word budget twice. Rather
+    // than discard a good candidate, truncate the body at a word boundary so a
+    // valid reply still goes out. Only rescues length failures — a banned
+    // phrase or stray URL still (correctly) fails below.
+    if (!validation.ok && validation.reason.startsWith("too long")) {
+      const truncated = truncateReplyToFit(body, link.anchor, config.bot.replyMaxLength);
+      const truncatedValidation = validateReply(truncated, link.anchor, config.bot.replyMaxLength);
+      if (truncatedValidation.ok) {
+        text = truncated;
+        validation = truncatedValidation;
       }
     }
     if (!validation.ok) {

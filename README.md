@@ -128,6 +128,25 @@ recommendation reply (still safety-evaluated, rate-capped, and approval-gated).
 Opt-out is phrase-based ("opt out", "stop", "leave me alone") and permanent
 until the person mentions the bot again.
 
+### Deal tracker
+
+The **Deals** page manages a manual watchlist of Amazon listings, each with a
+target price. When a tracked item drops to/below its target, the bot posts a
+standalone deal alert to its own profile — the affiliate link on a clickable
+anchor, an in-post `#ad` disclosure, and an "as of &lt;time&gt;; price subject to
+change" qualifier. One sale = one post (it re-arms only after the price rises
+back above target). Two paths feed the same poster:
+
+- **Automated** (`DEALS_ENABLED=true` + `PA_API_*` keys): the worker polls
+  Amazon's Product Advertising API and fires when the price hits the target.
+  PA-API needs an approved Associate account (3 qualifying sales in 180 days).
+- **Manual** ("Post deal now" on a listing): you enter the sale price and it
+  queues a post immediately — no API keys required.
+
+The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
+posting. Caps are deliberately tighter than replies (3 posts/day, 7-day
+per-listing cooldown, 60-min global gap, 1-hour price freshness).
+
 The dashboard is protected by HTTP Basic auth whenever `DASHBOARD_PASSWORD`
 is set (see middleware.ts); the public `/about` page and
 `/api/health` stay open. Never deploy publicly without setting it.
@@ -156,6 +175,9 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` default (cheap); swap to an Opus model for max judgment |
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |
 | `BOT_APP_PASSWORD` | Bluesky **app password** (never your real password) |
+| `DEALS_ENABLED` | Master switch for the deal tracker's worker loops (default false) |
+| `PA_API_ACCESS_KEY` / `PA_API_SECRET_KEY` | Amazon Product Advertising API 5.0 keys — enable automated price polling (manual path works without them) |
+| `PA_API_PARTNER_TAG` | PA-API PartnerTag; defaults to `AMAZON_ASSOCIATE_TAG` |
 
 ## Safety model
 

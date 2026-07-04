@@ -35,6 +35,23 @@ export function replyStatusTone(status: string): Tone {
   return "zinc";
 }
 
+export function dealPostTone(status: string): Tone {
+  if (status === "POSTED") return "green";
+  if (status === "POSTING") return "blue";
+  if (status === "READY" || status === "PENDING" || status === "DRY_RUN") return "amber";
+  if (status === "FAILED") return "red";
+  return "zinc";
+}
+
+export function armStateTone(state: string): Tone {
+  if (state === "ARMED") return "green";
+  if (state === "FIRED") return "blue";
+  return "zinc";
+}
+
+/** Integer cents → localized currency string; re-exported for pages. */
+export { formatMoney } from "@trendcart/shared";
+
 export function formatDate(date: Date): string {
   return date.toLocaleString("en-US", {
     month: "short",
