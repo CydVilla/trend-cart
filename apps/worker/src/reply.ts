@@ -160,11 +160,13 @@ function searchAnchor(query: string): string {
  *  3. the category's curated recommendation page.
  */
 async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<ReplyLink | null> {
+  // No per-reply "(affiliate link)" suffix: the account bio discloses the
+  // affiliate relationship, and the anchor text names Amazon explicitly.
   if (post.operatorLinkUrl) {
     return {
       url: post.operatorLinkUrl,
       anchor: "this one on Amazon",
-      suffix: " (affiliate link)",
+      suffix: "",
       categoryName: null,
       productNames: [],
     };
@@ -173,7 +175,7 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
     return {
       url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
       anchor: searchAnchor(evaluation.recommendedSearchQuery),
-      suffix: " (affiliate link)",
+      suffix: "",
       categoryName: null,
       productNames: [],
     };
@@ -212,10 +214,10 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
   const due = await prisma.candidateEvaluation.findMany({
     where: {
       shouldReply: true,
-      // ALLOWLIST the exact model tag this run produces — fake verdicts,
-      // policy rows, legacy pre-migration "unknown" rows, and verdicts from
-      // other model configurations can never drive this pipeline.
-      model: config.llm.useFake ? "fake" : config.llm.model,
+      // ALLOWLIST: this run's model tag plus "operator" directives — fake
+      // verdicts, policy rows, legacy "unknown" rows, and verdicts from other
+      // model configurations can never drive this pipeline.
+      model: { in: config.llm.useFake ? ["fake", "operator"] : [config.llm.model, "operator"] },
       post: { replies: { none: {} }, deadAt: null },
     },
     include: { post: true },

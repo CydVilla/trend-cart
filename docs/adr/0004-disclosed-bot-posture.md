@@ -1,6 +1,10 @@
 # ADR-0004: Disclosed bot with in-reply affiliate disclosure
 
-**Status:** Accepted (reversed the original design)
+**Status:** Accepted (reversed the original design). **Amended 2026-07-03:**
+the per-reply "(affiliate link)" suffix was removed by operator decision —
+disclosure now lives at the account level (bio) and in the anchor text
+naming Amazon. Trade-off acknowledged: in-feed readers don't see bios, so
+this leans on the FTC's tolerance for platform-level disclosure.
 
 ## Context
 The original prompts instructed the model to sound human and banned

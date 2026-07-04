@@ -29,6 +29,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.109.1
+        version: 0.109.1(zod@4.4.3)
       '@prisma/client':
         specifier: ^6.5.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)

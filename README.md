@@ -40,8 +40,8 @@ posted to Bluesky.
 Reply links (one per reply, by priority): operator-provided link → tagged
 Amazon search for the specific product ("deltarune on Amazon") → the
 category's /recommendations/[slug] page. Links render as clickable anchor
-text via rich-text facets — never raw URLs — with "(affiliate link)"
-disclosure on direct Amazon links.
+text via rich-text facets — never raw URLs. Affiliate disclosure lives in
+the account bio and the Amazon-naming anchor text.
 
 ## Prerequisites
 
@@ -166,8 +166,8 @@ Every skip is recorded with a reason (`BotReply.skipReason`, `CandidateEvaluatio
 
 - Recommendation pages carry an affiliate disclosure ("As an Amazon Associate I earn
   from qualifying purchases").
-- Direct Amazon links in replies carry an in-reply "(affiliate link)" suffix,
-  and the bot account's bio discloses automation + affiliate funding.
+- The bot account bio discloses automation + affiliate funding; anchor text
+  names Amazon explicitly on every direct Amazon link.
 - Add the deployed site URL and the Bluesky account to your Amazon Associates
   account's list of properties.
 

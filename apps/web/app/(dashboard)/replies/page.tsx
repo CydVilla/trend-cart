@@ -1,5 +1,5 @@
 import { prisma, ReplyStatus } from "@trendcart/db";
-import { approveReply, rejectReply } from "../actions";
+import { approveReply, editReply, refineReply, rejectReply } from "../actions";
 import { Badge, EmptyState, SectionHeading, bskyPostUrl, formatDate, replyStatusTone, truncate } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -109,6 +109,47 @@ export default async function RepliesPage() {
                     </button>
                   </form>
                 </div>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs text-zinc-500">
+                    Edit or refine before approving
+                  </summary>
+                  <form action={editReply} className="mt-2 space-y-1">
+                    <input type="hidden" name="id" value={reply.id} />
+                    <textarea
+                      name="text"
+                      rows={3}
+                      defaultValue={reply.replyText}
+                      className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="submit"
+                        className="rounded border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                      >
+                        Save edit
+                      </button>
+                      {reply.linkAnchor && (
+                        <span className="text-xs text-zinc-400">
+                          keep &ldquo;{reply.linkAnchor}&rdquo; in the text — it stays the clickable link
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                  <form action={refineReply} className="mt-2 flex gap-2">
+                    <input type="hidden" name="id" value={reply.id} />
+                    <input
+                      name="instruction"
+                      placeholder='Direction for the bot, e.g. "mention the 75th anniversary" — regenerates the text'
+                      className="flex-1 rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded bg-zinc-900 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
+                    >
+                      Regenerate
+                    </button>
+                  </form>
+                </details>
               </div>
             );
           })}

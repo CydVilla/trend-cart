@@ -13,23 +13,29 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   return (
     <>
       <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
+        {/* Mobile: logo + public link on row one, horizontally-scrollable nav
+            on row two. ≥sm: everything on a single row. */}
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 sm:flex-nowrap">
           <Link href="/" className="text-lg font-semibold">
             TrendCart
           </Link>
-          <nav className="flex gap-4 text-sm">
+          <Link
+            href="/recommendations"
+            className="ml-auto whitespace-nowrap text-sm text-zinc-400 hover:text-zinc-600 sm:order-last"
+          >
+            public site ↗
+          </Link>
+          <nav className="-mx-4 flex w-screen gap-4 overflow-x-auto px-4 pb-1 pt-1 text-sm sm:m-0 sm:w-auto sm:p-0">
             {NAV.map((item) => (
-              <Link key={item.href} href={item.href} className="text-zinc-600 hover:text-zinc-900">
+              <Link
+                key={item.href}
+                href={item.href}
+                className="whitespace-nowrap text-zinc-600 hover:text-zinc-900"
+              >
                 {item.label}
               </Link>
             ))}
           </nav>
-          <Link
-            href="/recommendations"
-            className="ml-auto text-sm text-zinc-400 hover:text-zinc-600"
-          >
-            public site ↗
-          </Link>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>

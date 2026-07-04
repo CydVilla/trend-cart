@@ -20,6 +20,10 @@ const MAX_EVALS_PER_AUTHOR_PER_DAY = 2;
 
 const GETPROFILE_URL = "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile";
 
+/** Cheap "is this post actually asking for something" heuristic. */
+const INTENT_MARKERS =
+  /\?|recommend|\brecs?\b|suggest|any good|looking for|which (one|should)|help( me)?\b|advice|worth (it|buying)|should i (get|buy)|need a\b|in the market for/i;
+
 export type EvaluateStats = {
   evaluated: number;
   wouldReply: number;
@@ -173,28 +177,38 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   if (budget <= 0) return;
 
   const maturedBefore = new Date(now - config.llm.evalMinPostAgeMinutes * 60_000);
-  const due = await prisma.post.findMany({
-    where: {
-      safetyStatus: SafetyStatus.PENDING,
-      deadAt: null,
-      lastHydratedAt: { not: null },
-      createdAt: { gte: new Date(now - 24 * 3_600_000) },
-      evaluations: { none: {} },
-      // Solicited/injected posts evaluate immediately; firehose posts must
-      // BOTH mature and clear the trending floor — recent AND actually liked.
-      // Posts still below the floor keep waiting (they may still be rising)
-      // and simply expire unevaluated if they never catch on: zero LLM spend.
-      OR: [
-        { source: { in: ["MANUAL", "MENTION"] } },
-        {
-          indexedAt: { lte: maturedBefore },
-          engagementScore: { gte: config.llm.minEngagementScore },
-        },
-      ],
-    },
-    orderBy: { engagementScore: "desc" },
-    take: Math.min(BATCH_SIZE, budget),
+  const baseWhere = {
+    safetyStatus: SafetyStatus.PENDING,
+    deadAt: null,
+    lastHydratedAt: { not: null },
+    createdAt: { gte: new Date(now - 24 * 3_600_000) },
+    evaluations: { none: {} },
+  } as const;
+  const batchLimit = Math.min(BATCH_SIZE, budget);
+  // Solicited/injected posts go FIRST (a low-engagement mention must never
+  // starve behind trending firehose posts), then trending candidates —
+  // which must BOTH mature and clear the floor: recent AND actually liked.
+  // Below-floor posts keep waiting (they may still be rising) and expire
+  // unevaluated if they never catch on: zero LLM spend.
+  const solicited = await prisma.post.findMany({
+    where: { ...baseWhere, source: { in: ["MANUAL", "MENTION"] } },
+    orderBy: { indexedAt: "asc" },
+    take: batchLimit,
   });
+  const firehose =
+    solicited.length < batchLimit
+      ? await prisma.post.findMany({
+          where: {
+            ...baseWhere,
+            source: "FIREHOSE",
+            indexedAt: { lte: maturedBefore },
+            engagementScore: { gte: config.llm.minEngagementScore },
+          },
+          orderBy: { engagementScore: "desc" },
+          take: batchLimit - solicited.length,
+        })
+      : [];
+  const due = [...solicited, ...firehose];
   if (due.length === 0) return;
 
   const categories: CategoryContext[] = await prisma.productCategory.findMany({
@@ -215,7 +229,9 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
             rawInput: { operatorNote: post.operatorNote } as Prisma.InputJsonValue,
             productIntentScore: 100,
             safetyDecision: SafetyStatus.SAFE,
-            model: modelTag, // consumed by this run's reply pipeline
+            // "operator" survives model switches — the reply pipeline
+            // allowlists it alongside the current model tag.
+            model: "operator",
             shouldReply: true,
             reason: "operator directive (link provided)",
             suggestedReplyAngle: post.operatorNote,
@@ -228,6 +244,35 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       ]);
       stats.evaluated += 1;
       stats.wouldReply += 1;
+      continue;
+    }
+
+    // Low-signal gate: a firehose STATEMENT (no question / no ask) must show
+    // outsized engagement to justify LLM spend; posts actually asking for
+    // recommendations evaluate at the normal floor. Solicited and injected
+    // posts never hit this.
+    if (
+      post.source === "FIREHOSE" &&
+      !INTENT_MARKERS.test(post.text) &&
+      post.engagementScore < config.llm.minEngagementScore * 3
+    ) {
+      await prisma.$transaction([
+        prisma.candidateEvaluation.create({
+          data: {
+            postId: post.id,
+            rawInput: {} as Prisma.InputJsonValue,
+            productIntentScore: 0,
+            safetyDecision: SafetyStatus.UNCERTAIN,
+            model: "policy",
+            shouldReply: false,
+            reason: `low signal: no intent markers and engagement ${post.engagementScore} < ${config.llm.minEngagementScore * 3}`,
+          },
+        }),
+        prisma.post.update({
+          where: { id: post.id },
+          data: { safetyStatus: SafetyStatus.UNCERTAIN },
+        }),
+      ]);
       continue;
     }
 
@@ -325,6 +370,11 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       continue;
     }
 
+    // Operator note is intent: if the LLM approved but gave no angle, the
+    // note itself is the angle the reply should take.
+    if (post.operatorNote && raw.shouldReply && !raw.suggestedReplyAngle) {
+      raw.suggestedReplyAngle = post.operatorNote;
+    }
     const evaluation = applyGates(raw, activeSlugs);
     await prisma.$transaction([
       prisma.candidateEvaluation.create({

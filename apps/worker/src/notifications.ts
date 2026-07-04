@@ -16,8 +16,17 @@ import { config } from "./config.js";
 
 export type NotificationStats = { optOuts: number; requests: number; errors: number };
 
-const OPT_OUT_RE =
-  /\b(opt.?out|stop|leave me alone|go away|unsubscribe|don'?t (?:reply|contact|tag|@) ?(?:me|us)?|never (?:reply|contact|tag))\b/i;
+/** Explicit, directed opt-out phrases — safe to honor from any interaction. */
+const STRONG_OPT_OUT_RE =
+  /\b(opt.?out|unsubscribe|leave me alone|stop (?:replying|tagging|contacting|messaging|following)|do(?:n'?t| not) (?:ever )?(?:reply|contact|tag|@) ?(?:me|us|to me)?|never (?:reply|contact|tag))\b/i;
+/** Bare imperatives ("stop", "go away") count only as a short, direct reply
+ *  to the bot — not inside longer posts ("can't stop playing this game"). */
+const WEAK_OPT_OUT_RE = /^\s*(please\s+)?(stop|go away|leave)\s*[.!]*\s*$/i;
+
+function isOptOut(reason: string, text: string): boolean {
+  if (STRONG_OPT_OUT_RE.test(text)) return true;
+  return reason === "reply" && text.length <= 40 && WEAK_OPT_OUT_RE.test(text);
+}
 
 const GETPOSTS_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts";
 
@@ -27,7 +36,10 @@ type NotificationRecord = {
   reply?: { root?: ReplyRef; parent?: ReplyRef };
 };
 
-async function fetchPostText(uri: string): Promise<string | null> {
+/** Fetch a parent post's text and ITS true thread root from the AppView. */
+async function fetchParent(
+  uri: string,
+): Promise<{ text: string | null; rootRef: ReplyRef | null } | null> {
   try {
     const url = new URL(GETPOSTS_URL);
     url.searchParams.append("uris", uri);
@@ -37,9 +49,14 @@ async function fetchPostText(uri: string): Promise<string | null> {
     });
     if (!response.ok) return null;
     const body = (await response.json()) as {
-      posts?: Array<{ uri: string; record?: { text?: string } }>;
+      posts?: Array<{
+        uri: string;
+        record?: { text?: string; reply?: { root?: ReplyRef } };
+      }>;
     };
-    return body.posts?.[0]?.record?.text ?? null;
+    const post = body.posts?.[0];
+    if (!post) return null;
+    return { text: post.record?.text ?? null, rootRef: post.record?.reply?.root ?? null };
   } catch {
     return null;
   }
@@ -64,10 +81,22 @@ export function createNotificationListener(
       });
       agent = candidate;
     }
-    const response = await agent.listNotifications({ limit: 50 });
+    // Paginate so a burst (>50 notifications between ticks) can't silently
+    // drop opt-outs or requests; process OLDEST-FIRST so a later opt-out is
+    // never erased by an earlier mention.
+    let response = await agent.listNotifications({ limit: 50 });
+    const collected = [...response.data.notifications];
+    for (let page = 0; page < 3; page++) {
+      const oldest = response.data.notifications.at(-1);
+      const cursor = response.data.cursor;
+      if (!cursor || !oldest || new Date(oldest.indexedAt) <= lastSeen) break;
+      response = await agent.listNotifications({ limit: 50, cursor });
+      collected.push(...response.data.notifications);
+    }
+    collected.sort((a, b) => new Date(a.indexedAt).getTime() - new Date(b.indexedAt).getTime());
     let newest = lastSeen;
 
-    for (const notification of response.data.notifications) {
+    for (const notification of collected) {
       const at = new Date(notification.indexedAt);
       if (at <= lastSeen) continue;
       if (at > newest) newest = at;
@@ -78,7 +107,7 @@ export function createNotificationListener(
       // Opt-out phrases win over everything, in any interaction type.
       if (
         ["reply", "mention", "quote"].includes(notification.reason) &&
-        OPT_OUT_RE.test(text)
+        isOptOut(notification.reason, text)
       ) {
         await prisma.authorOptOut.upsert({
           where: { did: notification.author.did },
@@ -97,13 +126,13 @@ export function createNotificationListener(
       if (!text.trim()) continue;
 
       // Tagged under someone else's post → pull the parent for context and
-      // thread our reply into the existing conversation.
+      // thread our reply into the existing conversation. The thread ROOT is
+      // derived from the PARENT's own record (not the mention's claim), so a
+      // crafted mention can't steer our reply into an unrelated thread.
       const parentRef = record?.reply?.parent ?? null;
-      const rootRef = record?.reply?.root ?? null;
-      const contextText = parentRef ? await fetchPostText(parentRef.uri) : null;
-
-      // Asking again is explicit re-consent.
-      await prisma.authorOptOut.deleteMany({ where: { did: notification.author.did } });
+      const parent = parentRef ? await fetchParent(parentRef.uri) : null;
+      const contextText = parent?.text ?? null;
+      const rootRef = parent ? (parent.rootRef ?? parentRef) : null;
 
       const created = await prisma.post.createMany({
         data: [
@@ -125,6 +154,12 @@ export function createNotificationListener(
         skipDuplicates: true,
       });
       if (created.count > 0) {
+        // A GENUINELY NEW mention is explicit re-consent — but only clear
+        // opt-outs recorded BEFORE it (never erase a newer revocation, and
+        // never on restart-replayed duplicates, where count === 0).
+        await prisma.authorOptOut.deleteMany({
+          where: { did: notification.author.did, createdAt: { lt: at } },
+        });
         stats.requests += 1;
         console.log(`[mentions] request from @${notification.author.handle}: "${text.slice(0, 80)}"`);
       }
