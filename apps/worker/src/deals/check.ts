@@ -81,6 +81,10 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
     stats.checked += 1;
     const currencyOk = !item.currency || item.currency === listing.currency;
     const priceCents = currencyOk ? item.priceCents : null;
+    // Fire at/below the alert price if set, else at any drop below full price.
+    const effectiveTarget = listing.targetPriceCents ?? listing.fullPriceCents ?? 0;
+    // % reference: the operator's full price wins over Amazon's list price.
+    const wasPriceCents = listing.fullPriceCents ?? item.wasPriceCents ?? null;
 
     const data: Record<string, unknown> = {
       consecutiveErrors: 0,
@@ -96,20 +100,22 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
     // hysteresis buffer, so a price hovering around target doesn't flap.
     let armState = listing.armState;
     if (armState === DealArmState.DISARMED && priceCents != null) {
-      const rearmThreshold = Math.ceil(
-        listing.targetPriceCents * (1 + config.deals.rearmBufferPct / 100),
-      );
+      const rearmThreshold = Math.ceil(effectiveTarget * (1 + config.deals.rearmBufferPct / 100));
       if (priceCents > rearmThreshold) {
         armState = DealArmState.ARMED;
         data.armState = DealArmState.ARMED;
       }
     }
 
+    // Fire when armed, buyable, at/below the threshold — AND, when a full price
+    // is set, strictly below it, so an item sitting at its normal price (no
+    // real discount) never posts.
     const canFire =
       armState === DealArmState.ARMED &&
       item.available &&
       priceCents != null &&
-      priceCents <= listing.targetPriceCents;
+      priceCents <= effectiveTarget &&
+      (listing.fullPriceCents == null || priceCents < listing.fullPriceCents);
     if (!canFire) {
       await prisma.trackedListing.update({ where: { id: listing.id }, data });
       return;
@@ -164,7 +170,7 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
     const composed = composeDealPost({
       title: listing.title,
       salePriceCents: priceCents,
-      wasPriceCents: item.wasPriceCents,
+      wasPriceCents,
       currency: listing.currency,
       priceAsOf: now,
       linkUrl,
@@ -182,8 +188,8 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
         source: DealSource.AUTOMATED,
         status,
         salePriceCents: priceCents,
-        targetPriceCents: listing.targetPriceCents,
-        wasPriceCents: item.wasPriceCents ?? null,
+        targetPriceCents: effectiveTarget,
+        wasPriceCents,
         currency: listing.currency,
         priceAsOf: now,
         linkUrl,

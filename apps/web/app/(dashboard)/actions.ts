@@ -404,9 +404,12 @@ export async function addTrackedListing(formData: FormData): Promise<void> {
   if (!tag) return; // never store a bare (untagged) affiliate link
   const url = str(formData, "url");
   const title = str(formData, "title");
+  const fullCents = parseCents(str(formData, "fullPrice"));
   const targetCents = parseCents(str(formData, "targetPrice"));
   const asin = extractAsin(url);
-  if (!title || !asin || targetCents === null || targetCents <= 0) return;
+  // Need a title, a valid ASIN, and at least one usable price (full or alert).
+  const effective = targetCents ?? fullCents;
+  if (!title || !asin || effective === null || effective <= 0) return;
 
   // Marketplace from the pasted host (prices are marketplace-specific).
   let marketplace = "www.amazon.com";
@@ -430,24 +433,41 @@ export async function addTrackedListing(formData: FormData): Promise<void> {
 
   await prisma.trackedListing.upsert({
     where: { asin_marketplace: { asin, marketplace } },
-    create: { asin, marketplace, productUrl, title, imageUrl, targetPriceCents: targetCents },
-    update: { title, targetPriceCents: targetCents, productUrl, ...(imageUrl ? { imageUrl } : {}) },
+    create: {
+      asin,
+      marketplace,
+      productUrl,
+      title,
+      imageUrl,
+      fullPriceCents: fullCents,
+      targetPriceCents: targetCents,
+    },
+    update: {
+      title,
+      productUrl,
+      fullPriceCents: fullCents,
+      targetPriceCents: targetCents,
+      ...(imageUrl ? { imageUrl } : {}),
+    },
   });
   revalidatePath("/deals");
 }
 
-export async function updateTargetPrice(formData: FormData): Promise<void> {
+export async function updateListingPricing(formData: FormData): Promise<void> {
   const id = str(formData, "id");
+  const fullCents = parseCents(str(formData, "fullPrice"));
   const targetCents = parseCents(str(formData, "targetPrice"));
-  if (!id || targetCents === null || targetCents <= 0) return;
+  const effective = targetCents ?? fullCents;
+  if (!id || effective === null || effective <= 0) return; // need at least one price
   const listing = await prisma.trackedListing.findUnique({ where: { id } });
   if (!listing) return;
-  // If the last known price sits above the new target, re-arm so the next drop
-  // fires; clear the dedup memory so a prior identical price can post again.
-  const rearm = listing.lastPriceCents != null && listing.lastPriceCents > targetCents;
+  // If the last known price sits above the new threshold, re-arm so the next
+  // drop fires; clear the dedup memory so a prior identical price can re-post.
+  const rearm = listing.lastPriceCents != null && listing.lastPriceCents > effective;
   await prisma.trackedListing.update({
     where: { id },
     data: {
+      fullPriceCents: fullCents,
       targetPriceCents: targetCents,
       ...(rearm ? { armState: DealArmState.ARMED, lastPostedPriceCents: null } : {}),
     },
@@ -530,10 +550,12 @@ export async function postDealNow(formData: FormData): Promise<void> {
   } catch {
     return;
   }
+  // The % discount is computed against the operator's full price (their
+  // stated normal value), shown as the "was" price.
   const composed = composeDealPost({
     title: listing.title,
     salePriceCents: saleCents,
-    wasPriceCents: null,
+    wasPriceCents: listing.fullPriceCents,
     currency: listing.currency,
     priceAsOf,
     linkUrl,
@@ -541,6 +563,7 @@ export async function postDealNow(formData: FormData): Promise<void> {
   });
   if ("error" in composed) return;
 
+  const effectiveTarget = listing.targetPriceCents ?? listing.fullPriceCents ?? saleCents;
   const dryRun = await workerInDryRun();
   await prisma.$transaction([
     prisma.dealPost.create({
@@ -549,7 +572,8 @@ export async function postDealNow(formData: FormData): Promise<void> {
         source: DealSource.MANUAL,
         status: dryRun ? DealPostStatus.DRY_RUN : DealPostStatus.READY,
         salePriceCents: saleCents,
-        targetPriceCents: listing.targetPriceCents,
+        targetPriceCents: effectiveTarget,
+        wasPriceCents: listing.fullPriceCents,
         currency: listing.currency,
         priceAsOf,
         linkUrl,

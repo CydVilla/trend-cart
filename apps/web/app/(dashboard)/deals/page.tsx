@@ -5,7 +5,7 @@ import {
   postDealNow,
   requestCheckNow,
   toggleListingActive,
-  updateTargetPrice,
+  updateListingPricing,
 } from "../actions";
 import {
   Badge,
@@ -48,9 +48,9 @@ export default async function DealsPage() {
       <h1 className="mb-1 text-2xl font-bold">Deal tracker</h1>
       <p className="mb-4 text-sm text-zinc-500">
         Watch specific Amazon listings and post a standalone deal alert to the bot&apos;s own
-        profile when the price drops to/below your target. One sale = one post (it re-arms only
-        after the price rises back above target). Every post carries your affiliate link and an
-        in-post <code>#ad</code> disclosure.
+        profile when the price drops below the full price you set — with the % off shown against
+        it. One sale = one post (it re-arms only after the price climbs back up). Every post
+        carries your affiliate link and an in-post <code>#ad</code> disclosure.
       </p>
 
       {!DEALS_ENABLED && (
@@ -93,7 +93,7 @@ export default async function DealsPage() {
               className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
             />
           </label>
-          <label className="block">
+          <label className="block md:col-span-2">
             <span className="text-xs font-medium uppercase text-zinc-500">Title (shown in post)</span>
             <input
               name="title"
@@ -103,12 +103,22 @@ export default async function DealsPage() {
             />
           </label>
           <label className="block">
-            <span className="text-xs font-medium uppercase text-zinc-500">Target price ($)</span>
+            <span className="text-xs font-medium uppercase text-zinc-500">Full price ($)</span>
+            <input
+              name="fullPrice"
+              inputMode="decimal"
+              placeholder="499.99"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">
+              Alert price ($, optional)
+            </span>
             <input
               name="targetPrice"
-              required
               inputMode="decimal"
-              placeholder="399.99"
+              placeholder="any drop below full"
               className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
             />
           </label>
@@ -123,6 +133,11 @@ export default async function DealsPage() {
             />
           </label>
         </div>
+        <p className="text-xs text-zinc-500">
+          Set the <strong>full price</strong> to post on any drop below it, with the % off shown
+          against it. Add an <strong>alert price</strong> only if you want to hold out for a
+          steeper discount (post at or below that instead).
+        </p>
         <button
           type="submit"
           className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
@@ -137,8 +152,11 @@ export default async function DealsPage() {
       ) : (
         <div className="space-y-3">
           {listings.map((listing) => {
+            const threshold = listing.targetPriceCents ?? listing.fullPriceCents ?? null;
             const belowTarget =
-              listing.lastPriceCents != null && listing.lastPriceCents <= listing.targetPriceCents;
+              listing.lastPriceCents != null &&
+              threshold != null &&
+              listing.lastPriceCents <= threshold;
             return (
               <details key={listing.id} className="rounded-lg border border-zinc-200 bg-white">
                 <summary className="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -155,8 +173,10 @@ export default async function DealsPage() {
                         : "no price yet"}
                     </span>
                     <span className="text-zinc-400">
-                      {" "}
-                      / target {formatMoney(listing.targetPriceCents, listing.currency)}
+                      {listing.fullPriceCents != null &&
+                        ` / full ${formatMoney(listing.fullPriceCents, listing.currency)}`}
+                      {listing.targetPriceCents != null &&
+                        ` · alert ${formatMoney(listing.targetPriceCents, listing.currency)}`}
                     </span>
                   </span>
                   {listing.lastPriceAsOf && (
@@ -176,24 +196,42 @@ export default async function DealsPage() {
 
                 <div className="space-y-4 border-t border-zinc-100 p-4 text-sm">
                   <div className="flex flex-wrap items-end gap-3">
-                    <form action={updateTargetPrice} className="flex items-end gap-2">
+                    <form action={updateListingPricing} className="flex items-end gap-2">
                       <input type="hidden" name="id" value={listing.id} />
                       <label className="block">
+                        <span className="text-xs font-medium uppercase text-zinc-500">Full ($)</span>
+                        <input
+                          name="fullPrice"
+                          inputMode="decimal"
+                          defaultValue={
+                            listing.fullPriceCents != null
+                              ? (listing.fullPriceCents / 100).toFixed(2)
+                              : ""
+                          }
+                          className="mt-1 w-24 rounded border border-zinc-300 px-2 py-1.5"
+                        />
+                      </label>
+                      <label className="block">
                         <span className="text-xs font-medium uppercase text-zinc-500">
-                          Target ($)
+                          Alert ($)
                         </span>
                         <input
                           name="targetPrice"
                           inputMode="decimal"
-                          defaultValue={(listing.targetPriceCents / 100).toFixed(2)}
-                          className="mt-1 w-28 rounded border border-zinc-300 px-2 py-1.5"
+                          placeholder="optional"
+                          defaultValue={
+                            listing.targetPriceCents != null
+                              ? (listing.targetPriceCents / 100).toFixed(2)
+                              : ""
+                          }
+                          className="mt-1 w-24 rounded border border-zinc-300 px-2 py-1.5"
                         />
                       </label>
                       <button
                         type="submit"
                         className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                       >
-                        Save target
+                        Save prices
                       </button>
                     </form>
                     <form action={toggleListingActive}>

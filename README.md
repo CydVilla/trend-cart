@@ -131,11 +131,12 @@ until the person mentions the bot again.
 ### Deal tracker
 
 The **Deals** page manages a manual watchlist of Amazon listings, each with a
-target price. When a tracked item drops to/below its target, the bot posts a
-standalone deal alert to its own profile — the affiliate link on a clickable
-anchor, an in-post `#ad` disclosure, and an "as of &lt;time&gt;; price subject to
-change" qualifier. One sale = one post (it re-arms only after the price rises
-back above target). Two paths feed the same poster:
+full (normal) price and an optional stricter alert price. When a tracked item
+drops below its full price — or at/below the alert price, if set — the bot
+posts a standalone deal alert to its own profile with the **% off the full
+price**, the affiliate link on a clickable anchor, an in-post `#ad` disclosure,
+and an "as of &lt;time&gt;; price subject to change" qualifier. One sale = one
+post (it re-arms only after the price climbs back up). Two paths feed the same poster:
 
 - **Automated** (`DEALS_ENABLED=true` + `PA_API_*` keys): the worker polls
   Amazon's Product Advertising API and fires when the price hits the target.

@@ -30,9 +30,13 @@ tag enforcement).
   exactly-once (ARMED→FIRED claim) into a `DealPost`. `dealPost` publishes
   READY rows as standalone `app.bsky.feed.post`s with the link on a fixed
   anchor facet, a `#ad` tag facet, and an optional external card.
-- **Target price + re-arm hysteresis.** Fire when price ≤ target; disarm; re-arm
-  only when price rises above `target*(1+DEAL_REARM_BUFFER_PCT/100)`. One sale =
-  one post; identical-price dedup and a per-listing cooldown back it up.
+- **Full price + optional alert price.** Each listing has a `fullPriceCents`
+  (the normal value — the % discount is computed against it, and the listing
+  fires on ANY drop below it) and an optional stricter `targetPriceCents` (fire
+  only at/below this). The fire threshold is `targetPriceCents ?? fullPriceCents`;
+  the full-price guard blocks a post when the item sits at its normal price
+  (no real discount). Re-arm hysteresis (rise above `threshold*(1+buffer)`),
+  identical-price dedup, and a per-listing cooldown keep it to one post per sale.
 - **Two data paths, one queue.** Automated (PA-API) and manual ("Post deal now"
   in the dashboard — operator supplies the sale price, no API needed) both
   create `DealPost`s consumed by the same poster. When PA-API keys are absent

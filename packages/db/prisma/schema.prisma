@@ -281,10 +281,14 @@ model TrackedListing {
   title       String
   /// Optional Amazon-hosted image (linked live at post time, never re-hosted).
   imageUrl    String?
-  /// Fire threshold in integer cents (49999 = $499.99). No floats — the
-  /// price comparison must be exact.
-  targetPriceCents Int
-  /// ISO-4217 currency the target is denominated in.
+  /// The item's normal/full price in integer cents (49999 = $499.99). When
+  /// set, the % discount in the post is computed against this, and the listing
+  /// posts on ANY drop below it (unless a stricter targetPriceCents narrows it).
+  fullPriceCents   Int?
+  /// Optional stricter alert threshold in cents: only post at/below this. Null
+  /// = post on any drop below fullPriceCents. At least one of the two is set.
+  targetPriceCents Int?
+  /// ISO-4217 currency the prices are denominated in.
   currency    String @default("USD")
   /// Operator on/off switch. Inactive rows are never polled and never posted.
   isActive    Boolean @default(true)
