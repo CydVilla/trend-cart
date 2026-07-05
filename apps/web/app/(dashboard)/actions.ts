@@ -177,10 +177,10 @@ export async function updateOperatorGuidance(formData: FormData): Promise<void> 
 }
 
 /**
- * Operator edits the bot's learned lessons directly. Saving marks them
- * operator-curated so the daily reflection stops overwriting them (the
- * operator's version is final); clearing the box deletes the row and resumes
- * auto-learning on the next reflection.
+ * Operator edits the bot's learned lessons directly. Auto-learning keeps
+ * running: the next daily reflection PRESERVES this edited version (and won't
+ * re-add anything removed) while still appending genuinely new lessons.
+ * Clearing the box removes them; the bot re-derives from scratch next cycle.
  */
 export async function updateLessons(formData: FormData): Promise<void> {
   const content = str(formData, "lessons").slice(0, 4000);
@@ -189,8 +189,8 @@ export async function updateLessons(formData: FormData): Promise<void> {
   } else {
     await prisma.botMemory.upsert({
       where: { id: "lessons" },
-      create: { id: "lessons", content, basis: { curatedByOperator: true } },
-      update: { content, basis: { curatedByOperator: true } },
+      create: { id: "lessons", content, basis: { operatorEditedAt: new Date().toISOString() } },
+      update: { content, basis: { operatorEditedAt: new Date().toISOString() } },
     });
   }
   revalidatePath("/");

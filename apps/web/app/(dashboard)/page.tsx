@@ -119,20 +119,19 @@ async function OperatorGuidanceCard() {
 
 /**
  * What the daily reflection distilled from the operator's decisions — directly
- * editable. Saving marks the lessons operator-curated, which pauses the
- * auto-learning overwrite so hand-edits stick; clearing resumes it.
+ * editable. Auto-learning keeps running: the next reflection preserves the
+ * operator's edits (and won't re-add what they removed) while still appending
+ * genuinely new lessons.
  */
 async function LessonsCard() {
   const lessons = await prisma.botMemory.findUnique({ where: { id: "lessons" } });
-  const basis = (lessons?.basis ?? null) as { curatedByOperator?: boolean } | null;
-  const curated = basis?.curatedByOperator === true;
   return (
     <details className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="font-medium">What the bot has learned</span>
         <span className="text-xs text-zinc-400">
           {lessons
-            ? `${curated ? "edited by you" : "auto-distilled from your approvals, edits & rejections"} · ${formatDate(lessons.updatedAt)}`
+            ? `updated from your approvals, edits & rejections · ${formatDate(lessons.updatedAt)}`
             : "nothing distilled yet"}
         </span>
       </summary>
@@ -152,9 +151,9 @@ async function LessonsCard() {
             Save lessons
           </SubmitButton>
           <span className="text-xs text-zinc-400">
-            {curated
-              ? "You've edited these — auto-learning is paused so your version sticks. Clear the box to resume it."
-              : "Edit or delete any line. Saving pauses auto-learning so your edits aren't overwritten; the operator guidance above still outranks these."}
+            Edit or delete any line that doesn&apos;t make sense. The bot keeps learning and builds
+            on your version — it won&apos;t drop what you keep or re-add what you remove. The
+            operator guidance above outranks these.
           </span>
         </div>
       </form>

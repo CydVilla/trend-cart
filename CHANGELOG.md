@@ -46,10 +46,11 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   <time>" confirmation (it used to collapse itself on save, so there was no
   feedback that it worked).
 - **The bot's learned lessons are now directly editable** on the Overview
-  page — edit or delete any line you disagree with. Saving marks them
-  operator-curated, which **pauses the daily auto-learning from overwriting
-  them**; clearing the box resumes it. The operator guidance still outranks
-  the lessons everywhere.
+  page — edit or delete any line you disagree with. Auto-learning keeps
+  running: the daily reflection now *revises* the lessons instead of
+  rewriting them from scratch — it preserves your edits, won't re-add
+  anything you removed, and only appends genuinely new lessons. The operator
+  guidance still outranks the lessons everywhere.
 
 ## 2026-07-04 (later) — Operator guidance override
 
