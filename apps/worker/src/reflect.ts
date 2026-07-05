@@ -78,6 +78,10 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
   if (config.llm.useFake || !config.llm.anthropicApiKey) return;
 
   const existing = await prisma.botMemory.findUnique({ where: { id: LESSONS_ID } });
+  // The operator hand-edited the lessons — their version is final; don't
+  // overwrite it. (They resume auto-learning by clearing the box.)
+  const existingBasis = (existing?.basis ?? null) as { curatedByOperator?: boolean } | null;
+  if (existingBasis?.curatedByOperator === true) return;
   if (existing && Date.now() - existing.updatedAt.getTime() < REFRESH_MS) return;
 
   const since = new Date(Date.now() - EVIDENCE_WINDOW_MS);

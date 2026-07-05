@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { prisma, ReplyStatus } from "@trendcart/db";
-import { toggleAutonomous, toggleWorkerPaused, updateOperatorGuidance } from "./actions";
-import { Badge } from "./ui";
+import {
+  toggleAutonomous,
+  toggleWorkerPaused,
+  updateLessons,
+  updateOperatorGuidance,
+} from "./actions";
+import { Badge, formatDate } from "./ui";
 
 export const dynamic = "force-dynamic";
 
@@ -75,21 +80,26 @@ async function WorkerStatusCard() {
 async function OperatorGuidanceCard() {
   const row = await prisma.botMemory.findUnique({ where: { id: "operator-guidance" } });
   return (
-    <details className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 text-sm" open={!row?.content}>
-      <summary className="cursor-pointer font-medium text-blue-900">
-        Operator guidance{" "}
-        <span className="font-normal text-blue-700/70">
-          — your standing instructions to the bot (overrides its own judgment)
+    <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 text-sm">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="font-medium text-blue-900">Operator guidance</span>
+        <span className="text-xs font-normal text-blue-700/70">
+          — standing instructions the bot obeys above anything it learned
         </span>
-      </summary>
-      <form action={updateOperatorGuidance} className="mt-3 space-y-2">
+        {row?.content ? (
+          <span className="ml-auto text-xs font-medium text-blue-700/70">
+            ✓ saved {formatDate(row.updatedAt)}
+          </span>
+        ) : (
+          <span className="ml-auto text-xs text-blue-700/50">not set</span>
+        )}
+      </div>
+      <form action={updateOperatorGuidance} className="space-y-2">
         <textarea
           name="guidance"
-          rows={4}
+          rows={5}
           defaultValue={row?.content ?? ""}
-          placeholder={
-            "e.g. It's fine to recommend a product when a post is abstract commentary, as long as a specific product is clearly being alluded to so readers know what it is. Keep replies short and never salesy."
-          }
+          placeholder="e.g. When someone is enthusiastic about a specific game, book, or product, recommend that exact thing — that's the point. Keep replies short and never salesy."
           className="w-full rounded border border-blue-200 bg-white px-3 py-2 font-sans text-zinc-700"
         />
         <div className="flex items-center gap-3">
@@ -104,25 +114,52 @@ async function OperatorGuidanceCard() {
           </span>
         </div>
       </form>
-    </details>
+    </div>
   );
 }
 
-/** What the daily reflection job distilled from the operator's decisions. */
+/**
+ * What the daily reflection distilled from the operator's decisions — directly
+ * editable. Saving marks the lessons operator-curated, which pauses the
+ * auto-learning overwrite so hand-edits stick; clearing resumes it.
+ */
 async function LessonsCard() {
   const lessons = await prisma.botMemory.findUnique({ where: { id: "lessons" } });
-  if (!lessons) return null;
+  const basis = (lessons?.basis ?? null) as { curatedByOperator?: boolean } | null;
+  const curated = basis?.curatedByOperator === true;
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
-      <div className="mb-2 flex items-baseline gap-2">
+    <details className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
+      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="font-medium">What the bot has learned</span>
         <span className="text-xs text-zinc-400">
-          from your approvals, edits &amp; rejections · refreshed{" "}
-          {lessons.updatedAt.toLocaleDateString("en-US")}
+          {lessons
+            ? `${curated ? "edited by you" : "auto-distilled from your approvals, edits & rejections"} · ${formatDate(lessons.updatedAt)}`
+            : "nothing distilled yet"}
         </span>
-      </div>
-      <pre className="whitespace-pre-wrap font-sans text-zinc-600">{lessons.content}</pre>
-    </div>
+      </summary>
+      <form action={updateLessons} className="mt-3 space-y-2">
+        <textarea
+          name="lessons"
+          rows={10}
+          defaultValue={lessons?.content ?? ""}
+          placeholder="Guidelines the bot distills from your decisions appear here — one per line. Edit or delete any you disagree with."
+          className="w-full rounded border border-zinc-200 bg-white px-3 py-2 font-mono text-xs text-zinc-600"
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="submit"
+            className="rounded border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+          >
+            Save lessons
+          </button>
+          <span className="text-xs text-zinc-400">
+            {curated
+              ? "You've edited these — auto-learning is paused so your version sticks. Clear the box to resume it."
+              : "Edit or delete any line. Saving pauses auto-learning so your edits aren't overwritten; the operator guidance above still outranks these."}
+          </span>
+        </div>
+      </form>
+    </details>
   );
 }
 

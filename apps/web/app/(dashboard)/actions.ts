@@ -177,6 +177,26 @@ export async function updateOperatorGuidance(formData: FormData): Promise<void> 
 }
 
 /**
+ * Operator edits the bot's learned lessons directly. Saving marks them
+ * operator-curated so the daily reflection stops overwriting them (the
+ * operator's version is final); clearing the box deletes the row and resumes
+ * auto-learning on the next reflection.
+ */
+export async function updateLessons(formData: FormData): Promise<void> {
+  const content = str(formData, "lessons").slice(0, 4000);
+  if (!content) {
+    await prisma.botMemory.deleteMany({ where: { id: "lessons" } });
+  } else {
+    await prisma.botMemory.upsert({
+      where: { id: "lessons" },
+      create: { id: "lessons", content, basis: { curatedByOperator: true } },
+      update: { content, basis: { curatedByOperator: true } },
+    });
+  }
+  revalidatePath("/");
+}
+
+/**
  * "Test a post": fetch a real Bluesky post by URL and inject it into the
  * pipeline as a MANUAL candidate — it skips the maturation wait, gets a
  * longer expiry, and flows through evaluation/reply/approval like any other.

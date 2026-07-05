@@ -29,6 +29,18 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-05 — Editable learnings, clearer guidance save
+
+### Changed
+- The **operator guidance** card is now always-visible with a "✓ saved
+  <time>" confirmation (it used to collapse itself on save, so there was no
+  feedback that it worked).
+- **The bot's learned lessons are now directly editable** on the Overview
+  page — edit or delete any line you disagree with. Saving marks them
+  operator-curated, which **pauses the daily auto-learning from overwriting
+  them**; clearing the box resumes it. The operator guidance still outranks
+  the lessons everywhere.
+
 ## 2026-07-04 (later) — Operator guidance override
 
 ### Added
