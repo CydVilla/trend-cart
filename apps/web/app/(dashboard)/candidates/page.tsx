@@ -1,5 +1,6 @@
 import { prisma } from "@trendcart/db";
 import { injectPost, skipPost } from "../actions";
+import { SubmitButton } from "../submit-button";
 import { Badge, EmptyState, formatDate, bskyPostUrl, replyStatusTone, safetyTone, truncate } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -29,12 +30,12 @@ export default async function CandidatesPage() {
             placeholder="Inject or override: paste a bsky.app post URL (re-pasting an existing candidate resets its verdict)"
             className="flex-1 rounded border border-zinc-300 px-3 py-1.5 text-sm"
           />
-          <button
-            type="submit"
+          <SubmitButton
+            pendingLabel="Running…"
             className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
           >
             Run
-          </button>
+          </SubmitButton>
         </div>
         <div className="flex gap-2">
           <input
@@ -134,12 +135,12 @@ export default async function CandidatesPage() {
                       {!reply && (
                         <form action={skipPost}>
                           <input type="hidden" name="postId" value={post.id} />
-                          <button
-                            type="submit"
+                          <SubmitButton
+                            pendingLabel="Skipping…"
                             className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                           >
                             Skip
-                          </button>
+                          </SubmitButton>
                         </form>
                       )}
                     </td>

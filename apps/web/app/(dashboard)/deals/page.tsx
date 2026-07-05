@@ -7,6 +7,7 @@ import {
   toggleListingActive,
   updateListingPricing,
 } from "../actions";
+import { SubmitButton } from "../submit-button";
 import {
   Badge,
   EmptyState,
@@ -138,12 +139,12 @@ export default async function DealsPage() {
           against it. Add an <strong>alert price</strong> only if you want to hold out for a
           steeper discount (post at or below that instead).
         </p>
-        <button
-          type="submit"
+        <SubmitButton
+          pendingLabel="Tracking…"
           className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
         >
           Track listing
-        </button>
+        </SubmitButton>
       </form>
 
       <SectionHeading>Watchlist ({listings.length})</SectionHeading>
@@ -227,40 +228,37 @@ export default async function DealsPage() {
                           className="mt-1 w-24 rounded border border-zinc-300 px-2 py-1.5"
                         />
                       </label>
-                      <button
-                        type="submit"
+                      <SubmitButton
+                        pendingLabel="Saving…"
                         className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                       >
                         Save prices
-                      </button>
+                      </SubmitButton>
                     </form>
                     <form action={toggleListingActive}>
                       <input type="hidden" name="id" value={listing.id} />
-                      <button
-                        type="submit"
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
-                      >
+                      <SubmitButton className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100">
                         {listing.isActive ? "Pause" : "Activate"}
-                      </button>
+                      </SubmitButton>
                     </form>
                     <form action={requestCheckNow}>
                       <input type="hidden" name="id" value={listing.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         title="Ask the worker to re-poll on its next tick (needs PA-API keys)"
+                        pendingLabel="Queuing…"
                         className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
                       >
                         Check now
-                      </button>
+                      </SubmitButton>
                     </form>
                     <form action={deleteListing}>
                       <input type="hidden" name="id" value={listing.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
+                        pendingLabel="Deleting…"
                         className="rounded border border-red-300 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50"
                       >
                         Delete
-                      </button>
+                      </SubmitButton>
                     </form>
                   </div>
 
@@ -291,12 +289,12 @@ export default async function DealsPage() {
                         className="mt-1 rounded border border-blue-200 px-2 py-1.5"
                       />
                     </label>
-                    <button
-                      type="submit"
+                    <SubmitButton
+                      pendingLabel="Posting…"
                       className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
                     >
                       Post deal now
-                    </button>
+                    </SubmitButton>
                     <span className="text-xs text-blue-700/70">
                       Queues a standalone #ad post now — works without PA-API. Price must be under{" "}
                       {MAX_PRICE_AGE_HOURS}h old.

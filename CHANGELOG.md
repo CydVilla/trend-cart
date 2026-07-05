@@ -29,6 +29,16 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-05 — Button loading states
+
+### Changed
+- Every dashboard action button now shows an inline spinner and disables
+  itself while its server action runs (approve/reject/edit/regenerate a
+  reply, save guidance/lessons, track/post/save/delete a deal, run/skip a
+  candidate, save a category, and the worker toggles) — so slow actions like
+  "Regenerate" (an LLM call) give clear in-progress feedback and can't be
+  double-clicked.
+
 ## 2026-07-05 — Editable learnings, clearer guidance save
 
 ### Changed

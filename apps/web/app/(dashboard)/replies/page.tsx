@@ -1,5 +1,6 @@
 import { prisma, ReplyStatus } from "@trendcart/db";
 import { approveReply, editReply, refineReply, rejectReply } from "../actions";
+import { SubmitButton } from "../submit-button";
 import { Badge, EmptyState, SectionHeading, bskyPostUrl, formatDate, replyStatusTone, truncate } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -92,21 +93,21 @@ export default async function RepliesPage() {
                 <div className="mt-3 flex gap-2">
                   <form action={approveReply}>
                     <input type="hidden" name="id" value={reply.id} />
-                    <button
-                      type="submit"
+                    <SubmitButton
+                      pendingLabel="Approving…"
                       className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
                     >
                       Approve
-                    </button>
+                    </SubmitButton>
                   </form>
                   <form action={rejectReply}>
                     <input type="hidden" name="id" value={reply.id} />
-                    <button
-                      type="submit"
+                    <SubmitButton
+                      pendingLabel="Rejecting…"
                       className="rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
                     >
                       Reject
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
                 <details className="mt-3">
@@ -122,12 +123,12 @@ export default async function RepliesPage() {
                       className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
                     />
                     <div className="flex items-center gap-2">
-                      <button
-                        type="submit"
+                      <SubmitButton
+                        pendingLabel="Saving…"
                         className="rounded border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                       >
                         Save edit
-                      </button>
+                      </SubmitButton>
                       {reply.linkAnchor && (
                         <span className="text-xs text-zinc-400">
                           keep &ldquo;{reply.linkAnchor}&rdquo; in the text — it stays the clickable link
@@ -142,12 +143,12 @@ export default async function RepliesPage() {
                       placeholder='Direction for the bot, e.g. "mention the 75th anniversary" — regenerates the text'
                       className="flex-1 rounded border border-zinc-300 px-2 py-1.5 text-sm"
                     />
-                    <button
-                      type="submit"
+                    <SubmitButton
+                      pendingLabel="Regenerating…"
                       className="rounded bg-zinc-900 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
                     >
                       Regenerate
-                    </button>
+                    </SubmitButton>
                   </form>
                 </details>
               </div>

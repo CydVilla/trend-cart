@@ -6,6 +6,7 @@ import {
   updateLessons,
   updateOperatorGuidance,
 } from "./actions";
+import { SubmitButton } from "./submit-button";
 import { Badge, formatDate } from "./ui";
 
 export const dynamic = "force-dynamic";
@@ -43,21 +44,19 @@ async function WorkerStatusCard() {
       </span>
       <div className="ml-auto flex items-center gap-2">
         <form action={toggleAutonomous}>
-          <button
-            type="submit"
+          <SubmitButton
+            title="Self-approve replies with intent ≥ 80 and link confidence ≥ 75; weaker ones still queue for you. DRY_RUN overrides."
             className={`rounded px-3 py-1 text-xs font-medium ${
               heartbeat.autonomous
                 ? "bg-amber-500 text-white hover:bg-amber-600"
                 : "border border-zinc-300 text-zinc-600 hover:bg-zinc-50"
             }`}
-            title="Self-approve replies with intent ≥ 80 and link confidence ≥ 75; weaker ones still queue for you. DRY_RUN overrides."
           >
             {heartbeat.autonomous ? "Autonomous: ON" : "Autonomous: off"}
-          </button>
+          </SubmitButton>
         </form>
         <form action={toggleWorkerPaused}>
-          <button
-            type="submit"
+          <SubmitButton
             className={`rounded px-3 py-1 text-xs font-medium ${
               heartbeat.paused
                 ? "bg-emerald-600 text-white hover:bg-emerald-700"
@@ -65,7 +64,7 @@ async function WorkerStatusCard() {
             }`}
           >
             {heartbeat.paused ? "Resume bot" : "Pause bot"}
-          </button>
+          </SubmitButton>
         </form>
       </div>
     </div>
@@ -103,12 +102,12 @@ async function OperatorGuidanceCard() {
           className="w-full rounded border border-blue-200 bg-white px-3 py-2 font-sans text-zinc-700"
         />
         <div className="flex items-center gap-3">
-          <button
-            type="submit"
+          <SubmitButton
+            pendingLabel="Saving…"
             className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
           >
             Save guidance
-          </button>
+          </SubmitButton>
           <span className="text-xs text-blue-700/60">
             Applies within ~2 min · leave empty to clear · max 2000 chars
           </span>
@@ -146,12 +145,12 @@ async function LessonsCard() {
           className="w-full rounded border border-zinc-200 bg-white px-3 py-2 font-mono text-xs text-zinc-600"
         />
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
+          <SubmitButton
+            pendingLabel="Saving…"
             className="rounded border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
           >
             Save lessons
-          </button>
+          </SubmitButton>
           <span className="text-xs text-zinc-400">
             {curated
               ? "You've edited these — auto-learning is paused so your version sticks. Clear the box to resume it."

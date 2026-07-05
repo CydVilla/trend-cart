@@ -1,5 +1,6 @@
 import { prisma } from "@trendcart/db";
 import { toggleCategoryActive, updateCategory } from "../actions";
+import { SubmitButton } from "../submit-button";
 import { Badge, EmptyState } from "../ui";
 
 export const dynamic = "force-dynamic";
@@ -37,12 +38,9 @@ export default async function CategoriesPage() {
                 </span>
                 <form action={toggleCategoryActive} className="ml-auto">
                   <input type="hidden" name="id" value={category.id} />
-                  <button
-                    type="submit"
-                    className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                  >
+                  <SubmitButton className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100">
                     {category.isActive ? "Deactivate" : "Activate"}
-                  </button>
+                  </SubmitButton>
                 </form>
               </summary>
               <form action={updateCategory} className="space-y-3 border-t border-zinc-100 p-4 text-sm">
@@ -87,12 +85,12 @@ export default async function CategoriesPage() {
                     />
                   </label>
                 </div>
-                <button
-                  type="submit"
+                <SubmitButton
+                  pendingLabel="Saving…"
                   className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
                 >
                   Save
-                </button>
+                </SubmitButton>
               </form>
             </details>
           ))}
