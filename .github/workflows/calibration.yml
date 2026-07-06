@@ -42,7 +42,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: claude-haiku-4-5
-        run: pnpm --filter @trendcart/worker calibrate | tee calibration-report.md
+        run: pnpm --filter @trendcart/worker --silent calibrate | tee calibration-report.md
 
       - name: File the report as an issue
         env:
