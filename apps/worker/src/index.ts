@@ -6,6 +6,7 @@ import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
+import { insightsTick, type InsightsStats } from "./insights.js";
 import { AnthropicLlmClient } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
@@ -67,6 +68,7 @@ async function main(): Promise<void> {
   const notificationStats: NotificationStats = { optOuts: 0, requests: 0, errors: 0 };
   const outcomeStats: OutcomeStats = { checked: 0, errors: 0 };
   const reflectStats: ReflectStats = { reflections: 0, errors: 0 };
+  const insightsStats: InsightsStats = { reports: 0, errors: 0 };
   const dealCheckStats: DealCheckStats = { checked: 0, fired: 0, deferred: 0, errors: 0, backoffs: 0 };
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
   setCountersRef({
@@ -78,6 +80,7 @@ async function main(): Promise<void> {
     notifications: notificationStats,
     outcomes: outcomeStats,
     reflect: reflectStats,
+    insights: insightsStats,
     dealCheck: dealCheckStats,
     dealPost: dealPostStats,
   });
@@ -128,6 +131,8 @@ async function main(): Promise<void> {
     // reflection (one small LLM call — reflectTick no-ops until stale).
     startLoop("outcomes", 3_600_000, () => outcomesTick(outcomeStats)),
     startLoop("reflect", 6 * 3_600_000, () => reflectTick(reflectStats)),
+    // Daily funnel/insights report (one small LLM call — no-ops until stale).
+    startLoop("insights", 6 * 3_600_000, () => insightsTick(insightsStats)),
     // Deal tracker loops (only when enabled + preconditions met).
     ...(dealChecker
       ? [startLoop("dealCheck", config.deals.checkIntervalMs, () => dealChecker.tick())]

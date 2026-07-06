@@ -29,6 +29,19 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-05 — Insights report (funnel analytics)
+
+### Added
+- **Insights** dashboard page + a daily worker report. Computes the pipeline
+  funnel (discovered → cleared the engagement floor → evaluated → judged
+  worth-replying → posted), the per-category output, skip reasons, and
+  posted-reply engagement — so it's clear where candidates are lost. A daily
+  LLM pass turns the numbers into a plain-English summary plus 3–6 concrete,
+  ranked recommendations (which categories to cut, which thresholds to
+  change) stored in `BotMemory("insights")` and shown at the top of the page.
+  Shared `computeFunnel()` lives in `@trendcart/db` so the live dashboard and
+  the report read identical numbers.
+
 ## 2026-07-05 — Button loading states
 
 ### Changed

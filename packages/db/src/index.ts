@@ -22,3 +22,6 @@ if (process.env.NODE_ENV !== "production") {
 
 // Re-export generated model types and enums (Post, ProductCategory, SafetyStatus, ...)
 export * from "@prisma/client";
+
+// Funnel analytics (dashboard + insights report)
+export * from "./analytics";
