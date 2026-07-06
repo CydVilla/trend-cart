@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 const TONES = {
@@ -79,6 +80,72 @@ export function EmptyState({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-6 text-center text-sm text-zinc-500">
       {children}
+    </div>
+  );
+}
+
+/** Row of sort chips; the active one is highlighted. Server-side links. */
+export function SortBar({
+  options,
+  current,
+  hrefFor,
+}: {
+  options: { key: string; label: string }[];
+  current: string;
+  hrefFor: (key: string) => string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-sm">
+      <span className="text-xs uppercase text-zinc-400">Sort</span>
+      {options.map((o) => (
+        <Link
+          key={o.key}
+          href={hrefFor(o.key)}
+          className={`rounded-full border px-2.5 py-0.5 text-xs ${
+            current === o.key
+              ? "border-zinc-800 bg-zinc-900 font-medium text-white"
+              : "border-zinc-300 text-zinc-600 hover:bg-zinc-100"
+          }`}
+        >
+          {o.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+/** Prev/next pagination footer; hidden when everything fits on one page. */
+export function Pagination({
+  page,
+  totalPages,
+  totalCount,
+  hrefFor,
+}: {
+  page: number;
+  totalPages: number;
+  totalCount: number;
+  hrefFor: (page: number) => string;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="mt-3 flex items-center justify-between text-sm">
+      {page > 1 ? (
+        <Link href={hrefFor(page - 1)} className="text-zinc-600 underline hover:text-zinc-900">
+          ← Prev
+        </Link>
+      ) : (
+        <span className="text-zinc-300">← Prev</span>
+      )}
+      <span className="text-xs text-zinc-400">
+        Page {page} of {totalPages} · {totalCount} total
+      </span>
+      {page < totalPages ? (
+        <Link href={hrefFor(page + 1)} className="text-zinc-600 underline hover:text-zinc-900">
+          Next →
+        </Link>
+      ) : (
+        <span className="text-zinc-300">Next →</span>
+      )}
     </div>
   );
 }

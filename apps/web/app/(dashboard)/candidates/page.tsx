@@ -1,20 +1,67 @@
-import { prisma } from "@trendcart/db";
+import { prisma, type Prisma } from "@trendcart/db";
 import { injectPost, skipPost } from "../actions";
 import { SubmitButton } from "../submit-button";
-import { Badge, EmptyState, formatDate, bskyPostUrl, replyStatusTone, safetyTone, truncate } from "../ui";
+import {
+  Badge,
+  EmptyState,
+  Pagination,
+  SortBar,
+  formatDate,
+  bskyPostUrl,
+  replyStatusTone,
+  safetyTone,
+  truncate,
+} from "../ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function CandidatesPage() {
-  const posts = await prisma.post.findMany({
-    // Trending first: the page mirrors the evaluation queue's priorities.
+const PAGE_SIZE = 50;
+
+const SORTS: Record<string, { label: string; orderBy: Prisma.PostOrderByWithRelationInput[] }> = {
+  engagement: {
+    label: "Engagement",
+    // Trending first: mirrors the evaluation queue's priorities.
     orderBy: [{ engagementScore: "desc" }, { createdAt: "desc" }],
-    take: 50,
+  },
+  newest: {
+    label: "Newest",
+    orderBy: [{ indexedAt: "desc" }],
+  },
+  intent: {
+    label: "Intent score",
+    orderBy: [{ productIntentScore: { sort: "desc", nulls: "last" } }, { engagementScore: "desc" }],
+  },
+  discovered: {
+    label: "Recently found",
+    orderBy: [{ createdAt: "desc" }],
+  },
+};
+
+export default async function CandidatesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const sortKey = typeof params.sort === "string" && params.sort in SORTS ? params.sort : "engagement";
+  const totalCount = await prisma.post.count();
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const rawPage = Number(typeof params.page === "string" ? params.page : "1");
+  const page = Math.min(totalPages, Math.max(1, Number.isFinite(rawPage) ? Math.floor(rawPage) : 1));
+
+  const posts = await prisma.post.findMany({
+    orderBy: SORTS[sortKey]!.orderBy,
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
     include: {
       evaluations: { orderBy: { createdAt: "desc" }, take: 1 },
       replies: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
+
+  // Sorting resets to page 1; paging preserves the sort.
+  const sortHref = (key: string): string => `/candidates?sort=${key}`;
+  const pageHref = (p: number): string => `/candidates?sort=${sortKey}&page=${p}`;
 
   return (
     <div>
@@ -50,6 +97,13 @@ export default async function CandidatesPage() {
           />
         </div>
       </form>
+      <div className="mb-3">
+        <SortBar
+          options={Object.entries(SORTS).map(([key, s]) => ({ key, label: s.label }))}
+          current={sortKey}
+          hrefFor={sortHref}
+        />
+      </div>
       {posts.length === 0 ? (
         <EmptyState>
           No candidates yet — run <code>pnpm dev:worker</code> and posts matching category
@@ -151,6 +205,7 @@ export default async function CandidatesPage() {
           </table>
         </div>
       )}
+      <Pagination page={page} totalPages={totalPages} totalCount={totalCount} hrefFor={pageHref} />
     </div>
   );
 }

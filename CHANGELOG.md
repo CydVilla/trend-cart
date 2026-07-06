@@ -29,6 +29,15 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-06 — Candidates sort + pagination
+
+### Added
+- **Candidates page**: sort chips (Engagement / Newest / Intent score /
+  Recently found) and pagination (50 per page, prev/next with totals) — the
+  full 800+ candidate pool is now browsable instead of only the top 50.
+- **Replies page**: Recent activity is paginated (30 per page), so the
+  posted-reply history stays reachable as autonomous volume grows.
+
 ## 2026-07-06 — Rate posted replies (operator feedback loop)
 
 ### Added

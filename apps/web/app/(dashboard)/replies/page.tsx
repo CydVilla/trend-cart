@@ -1,11 +1,33 @@
 import { prisma, ReplyStatus } from "@trendcart/db";
 import { approveReply, editReply, rateReply, refineReply, rejectReply } from "../actions";
 import { SubmitButton } from "../submit-button";
-import { Badge, EmptyState, SectionHeading, bskyPostUrl, formatDate, replyStatusTone, truncate } from "../ui";
+import {
+  Badge,
+  EmptyState,
+  Pagination,
+  SectionHeading,
+  bskyPostUrl,
+  formatDate,
+  replyStatusTone,
+  truncate,
+} from "../ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function RepliesPage() {
+const PAGE_SIZE = 30;
+
+export default async function RepliesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const recentWhere = { status: { not: ReplyStatus.PENDING_APPROVAL } } as const;
+  const recentCount = await prisma.botReply.count({ where: recentWhere });
+  const totalPages = Math.max(1, Math.ceil(recentCount / PAGE_SIZE));
+  const rawPage = Number(typeof params.page === "string" ? params.page : "1");
+  const page = Math.min(totalPages, Math.max(1, Number.isFinite(rawPage) ? Math.floor(rawPage) : 1));
+
   const [pending, recent] = await Promise.all([
     prisma.botReply.findMany({
       where: { status: ReplyStatus.PENDING_APPROVAL },
@@ -13,10 +35,11 @@ export default async function RepliesPage() {
       orderBy: { createdAt: "asc" },
     }),
     prisma.botReply.findMany({
-      where: { status: { not: ReplyStatus.PENDING_APPROVAL } },
+      where: recentWhere,
       include: { post: true },
       orderBy: { createdAt: "desc" },
-      take: 30,
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
     }),
   ]);
 
@@ -271,6 +294,12 @@ export default async function RepliesPage() {
           </table>
         </div>
       )}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        totalCount={recentCount}
+        hrefFor={(p) => `/replies?page=${p}`}
+      />
     </div>
   );
 }
