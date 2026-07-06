@@ -29,6 +29,18 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-06 — Weekly calibration workflow + CI
+
+### Added
+- **Weekly calibration** (GitHub Actions, Mondays + manual trigger): replays
+  operator-labeled posts — 👍/👎 ratings, dashboard rejections, manual-era
+  approvals — through the CURRENT classifier brain (prompt + lessons +
+  guidance + gates) and files the drift report as a GitHub issue: agreement
+  %, would-reply-but-you-said-no, would-skip-but-you-approved. The learning
+  loop mutates prompts daily; this is the regression check against known
+  judgment (~$0.15/run). Result also lands in `BotMemory("calibration")`.
+- **CI** on push/PR: typecheck, lint, web build.
+
 ## 2026-07-06 — Candidates sort + pagination
 
 ### Added
