@@ -1,0 +1,55 @@
+name: Weekly calibration
+
+# Replays operator-labeled posts (ratings, rejections, approvals) through the
+# CURRENT classifier brain (prompt + lessons + guidance + gates) and files the
+# drift report as a GitHub issue. The bot's prompts mutate daily via the
+# learning loop — this is the regression check against known-good judgment.
+#
+# Secrets required: DATABASE_URL (Heroku Postgres — re-set it if Heroku
+# rotates credentials), ANTHROPIC_API_KEY. Cost: ~40 Haiku calls (~$0.15).
+
+on:
+  schedule:
+    - cron: "0 14 * * 1" # Mondays 14:00 UTC (~9-10am ET)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @trendcart/db exec prisma generate
+
+      - name: Run calibration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: claude-haiku-4-5
+        run: pnpm --filter @trendcart/worker calibrate | tee calibration-report.md
+
+      - name: File the report as an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Calibration report — $(date -u +%Y-%m-%d)"
+          gh issue create --title "$TITLE" --body-file calibration-report.md --label calibration \
+            || gh issue create --title "$TITLE" --body-file calibration-report.md
