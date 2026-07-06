@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   lines.push(
     flips.length === 0
       ? `No disagreements — the learning loop is still aligned with your decisions.`
-      : `If the flips look wrong to you, tighten via Operator guidance (authoritative) or edit the lessons on the Overview page; if the flips look RIGHT, your taste has evolved — rate more replies so the labels catch up.`,
+      : `Operator approvals and ratings are ground truth — a flip is always the bot's miss, never a "label error". Fix via Operator guidance (authoritative) or the lessons editor on the Overview page.`,
   );
 
   const report = lines.join("\n");

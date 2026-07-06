@@ -29,7 +29,9 @@ jobs:
         run: pnpm -r typecheck
 
       - name: Lint
-        run: pnpm -r lint
+        # The lint script lives at the repo ROOT (eslint.config.mjs covers the
+        # whole monorepo) — `-r` would look only in workspace packages.
+        run: pnpm lint
 
       - name: Build web
         # Dummy DB URL: next build only needs the env var to exist, pages are
