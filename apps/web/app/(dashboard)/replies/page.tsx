@@ -1,5 +1,5 @@
 import { prisma, ReplyStatus } from "@trendcart/db";
-import { approveReply, editReply, refineReply, rejectReply } from "../actions";
+import { approveReply, editReply, rateReply, refineReply, rejectReply } from "../actions";
 import { SubmitButton } from "../submit-button";
 import { Badge, EmptyState, SectionHeading, bskyPostUrl, formatDate, replyStatusTone, truncate } from "../ui";
 
@@ -169,6 +169,7 @@ export default async function RepliesPage() {
                 <th className="px-3 py-2">Reply / reason</th>
                 <th className="px-3 py-2">Post</th>
                 <th className="px-3 py-2">When</th>
+                <th className="px-3 py-2">Your verdict</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -200,6 +201,68 @@ export default async function RepliesPage() {
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-xs text-zinc-400">
                       {formatDate(reply.createdAt)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {reply.status === ReplyStatus.POSTED && (
+                        <div className="min-w-40">
+                          <div className="flex items-center gap-1">
+                            <form action={rateReply}>
+                              <input type="hidden" name="id" value={reply.id} />
+                              <input type="hidden" name="rating" value="up" />
+                              <SubmitButton
+                                title="Good reply — do more like this (feeds the bot's learning)"
+                                className={`rounded border px-2 py-0.5 text-sm ${
+                                  reply.operatorRating === "up"
+                                    ? "border-emerald-400 bg-emerald-100"
+                                    : "border-zinc-200 hover:bg-zinc-100"
+                                }`}
+                              >
+                                👍
+                              </SubmitButton>
+                            </form>
+                            <form action={rateReply}>
+                              <input type="hidden" name="id" value={reply.id} />
+                              <input type="hidden" name="rating" value="down" />
+                              <SubmitButton
+                                title="Bad reply — avoid this (feeds the bot's learning)"
+                                className={`rounded border px-2 py-0.5 text-sm ${
+                                  reply.operatorRating === "down"
+                                    ? "border-red-400 bg-red-100"
+                                    : "border-zinc-200 hover:bg-zinc-100"
+                                }`}
+                              >
+                                👎
+                              </SubmitButton>
+                            </form>
+                          </div>
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-xs text-zinc-400 underline decoration-dotted">
+                              {reply.operatorFeedback ? "note ✓" : "+ note"}
+                            </summary>
+                            <form action={rateReply} className="mt-1.5 space-y-1">
+                              <input type="hidden" name="id" value={reply.id} />
+                              <input
+                                type="hidden"
+                                name="rating"
+                                value={reply.operatorRating ?? "down"}
+                              />
+                              <textarea
+                                name="feedback"
+                                rows={2}
+                                defaultValue={reply.operatorFeedback ?? ""}
+                                placeholder="Why? e.g. wrong product, too salesy, post wasn't a fit…"
+                                className="w-48 rounded border border-zinc-200 px-2 py-1 text-xs"
+                              />
+                              <SubmitButton
+                                pendingLabel="Saving…"
+                                className="block rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-600 hover:bg-zinc-100"
+                              >
+                                Save note
+                              </SubmitButton>
+                            </form>
+                          </details>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

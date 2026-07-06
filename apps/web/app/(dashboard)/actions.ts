@@ -120,6 +120,32 @@ export async function refineReply(formData: FormData): Promise<void> {
   revalidatePath("/replies");
 }
 
+/**
+ * Post-hoc verdict on a POSTED reply — the operator's feedback channel for
+ * autonomously posted replies. Rating ("up"/"down") plus an optional note;
+ * both feed the nightly reflection (lessons) and the insights report.
+ * Clicking the already-selected rating clears it.
+ */
+export async function rateReply(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  const rating = str(formData, "rating");
+  const feedback = str(formData, "feedback").slice(0, 500);
+  if (!id || (rating !== "up" && rating !== "down")) return;
+  const reply = await prisma.botReply.findUnique({
+    where: { id },
+    select: { status: true, operatorRating: true },
+  });
+  if (!reply || reply.status !== ReplyStatus.POSTED) return;
+  const clearing = reply.operatorRating === rating && !feedback;
+  await prisma.botReply.update({
+    where: { id },
+    data: clearing
+      ? { operatorRating: null, operatorFeedback: null, ratedAt: null }
+      : { operatorRating: rating, ...(feedback ? { operatorFeedback: feedback } : {}), ratedAt: new Date() },
+  });
+  revalidatePath("/replies");
+}
+
 export async function rejectReply(formData: FormData): Promise<void> {
   const id = str(formData, "id");
   if (!id) return;

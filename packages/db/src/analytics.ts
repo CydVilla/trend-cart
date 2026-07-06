@@ -42,6 +42,8 @@ export type FunnelReport = {
   skipReasons: { reason: string; count: number }[];
   categories: CategoryStat[];
   engagement: { postedCount: number; likes: number; replies: number };
+  /** Post-hoc operator verdicts on POSTED replies (autonomous feedback loop). */
+  operatorRatings: { up: number; down: number; withFeedback: number };
 };
 
 /** Normalize a skip reason to its stable prefix (drops the variable tail). */
@@ -92,7 +94,7 @@ export async function computeFunnel(
       where: { ...evalWhen, shouldReply: true },
     }),
   ]);
-  const [postedReplies, engagementAgg] = await Promise.all([
+  const [postedReplies, engagementAgg, ratedUp, ratedDown, ratedWithFeedback] = await Promise.all([
     prisma.botReply.findMany({
       where: { ...replyWhen, status: "POSTED" },
       select: { post: { select: { evaluations: { where: { shouldReply: true }, select: { recommendedCategory: true }, take: 1 } } } },
@@ -102,6 +104,9 @@ export async function computeFunnel(
       _sum: { replyLikeCount: true, replyReplyCount: true },
       _count: true,
     }),
+    prisma.botReply.count({ where: { ...replyWhen, operatorRating: "up" } }),
+    prisma.botReply.count({ where: { ...replyWhen, operatorRating: "down" } }),
+    prisma.botReply.count({ where: { ...replyWhen, operatorFeedback: { not: null } } }),
   ]);
 
   const replyCount = (status: string): number =>
@@ -152,5 +157,6 @@ export async function computeFunnel(
       likes: engagementAgg._sum.replyLikeCount ?? 0,
       replies: engagementAgg._sum.replyReplyCount ?? 0,
     },
+    operatorRatings: { up: ratedUp, down: ratedDown, withFeedback: ratedWithFeedback },
   };
 }

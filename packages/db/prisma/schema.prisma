@@ -149,6 +149,12 @@ model BotReply {
   /// Original text before the operator's first edit — before/after pairs are
   /// the strongest style signal the reflection job learns from
   preEditText       String?
+  /// Post-hoc operator verdict on a POSTED reply ("up" | "down") — the main
+  /// feedback channel for autonomously posted replies
+  operatorRating    String?
+  /// Optional free-text note explaining the rating (fed to reflection/insights)
+  operatorFeedback  String?
+  ratedAt           DateTime?
 
   createdAt DateTime @default(now())
 

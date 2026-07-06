@@ -29,7 +29,7 @@ const LessonsSchema = z.object({
   lessons: z.array(z.string()).max(14),
 });
 
-const REFLECT_SYSTEM = `You maintain the self-improvement notes for TrendCart, a disclosed Bluesky bot that replies to posts with Amazon product recommendations. Its operator manually approves, edits, or rejects the bot's draft replies; you are shown that feedback, how posted replies performed, and the CURRENT guidelines (which the operator may have hand-edited).
+const REFLECT_SYSTEM = `You maintain the self-improvement notes for TrendCart, a disclosed Bluesky bot that replies to posts with Amazon product recommendations. Its operator approves, edits, or rejects draft replies, and rates already-POSTED replies up/down (often with a note explaining why — since the bot posts autonomously, these post-hoc ratings are their most direct feedback; weigh them heaviest). You are shown that feedback, how posted replies performed, and the CURRENT guidelines (which the operator may have hand-edited).
 
 REVISE the current guidelines — do not rewrite them from scratch. Rules:
 - PRESERVE the operator's current guidelines: keep each one (you may lightly reword for clarity, but keep its intent and the operator's wording where they clearly chose it).
@@ -89,7 +89,7 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
 
   const since = new Date(Date.now() - EVIDENCE_WINDOW_MS);
 
-  const [rejected, edited, manualSkips, posted, optOuts] = await Promise.all([
+  const [rejected, edited, manualSkips, posted, optOuts, rated] = await Promise.all([
     prisma.botReply.findMany({
       where: {
         status: ReplyStatus.SKIPPED,
@@ -122,12 +122,31 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
       take: 12,
     }),
     prisma.authorOptOut.count({ where: { createdAt: { gte: since } } }),
+    prisma.botReply.findMany({
+      where: { operatorRating: { not: null }, ratedAt: { gte: since } },
+      include: { post: { select: { text: true } } },
+      orderBy: { ratedAt: "desc" },
+      take: 12,
+    }),
   ]);
 
-  const signals = rejected.length + edited.length + manualSkips.length + posted.length;
+  const signals =
+    rejected.length + edited.length + manualSkips.length + posted.length + rated.length;
   if (signals < MIN_SIGNALS) return;
 
   const sections: string[] = [];
+  if (rated.length > 0) {
+    // Post-hoc verdicts on POSTED replies — the operator's judgment of what
+    // the bot did autonomously. The strongest, most direct signal available.
+    sections.push(
+      `OPERATOR-RATED posted replies (their explicit verdict; notes are their own words — weigh these heaviest):\n${rated
+        .map(
+          (r) =>
+            `- ${r.operatorRating === "up" ? "GOOD 👍" : "BAD 👎"}${r.operatorFeedback ? ` (note: "${clip(r.operatorFeedback, 160)}")` : ""}\n  post: "${clip(r.post.text, 120)}"\n  reply: "${clip(r.replyText, 160)}"`,
+        )
+        .join("\n")}`,
+    );
+  }
   if (rejected.length > 0) {
     sections.push(
       `REJECTED by operator (drafted reply was refused):\n${rejected
@@ -197,6 +216,7 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
     edited: edited.length,
     manualSkips: manualSkips.length,
     postedSampled: posted.length,
+    rated: rated.length,
     optOuts,
     operatorGuidanceApplied: guidance !== null,
   };

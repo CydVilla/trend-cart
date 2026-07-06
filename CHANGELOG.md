@@ -29,6 +29,19 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-06 — Rate posted replies (operator feedback loop)
+
+### Added
+- **👍/👎 on posted replies** (Replies page, "Your verdict" column) with an
+  optional written note — the operator's feedback channel for replies the bot
+  posted autonomously. Clicking the same thumb again clears it.
+- Ratings + notes feed **both learning loops**: the nightly reflection treats
+  them as the heaviest-weighted evidence when revising the bot's lessons, and
+  the daily insights report gets the verdict counts plus the actual notes —
+  a rising down-rate now drives "tighten thresholds/discovery"
+  recommendations even when volume looks good. Verdict tallies also show on
+  the Insights page.
+
 ## 2026-07-05 (later) — Broader discovery, eased caps (still low-cost)
 
 ### Changed

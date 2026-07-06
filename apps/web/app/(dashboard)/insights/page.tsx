@@ -153,6 +153,12 @@ export default async function InsightsPage() {
             {funnel.engagement.likes} likes · {funnel.engagement.replies} replies across{" "}
             {funnel.engagement.postedCount} posts
           </div>
+          <div className="mt-1 text-xs text-zinc-500">
+            Your verdicts: 👍 {funnel.operatorRatings.up} · 👎 {funnel.operatorRatings.down}
+            {funnel.operatorRatings.withFeedback > 0 &&
+              ` · ${funnel.operatorRatings.withFeedback} with notes`}{" "}
+            <span className="text-zinc-400">(rate posted replies on the Replies page)</span>
+          </div>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
           <div className="font-medium">Why replies were skipped</div>
