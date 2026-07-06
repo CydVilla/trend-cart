@@ -29,6 +29,25 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-05 (later) — Broader discovery, eased caps (still low-cost)
+
+### Changed
+- **Discovery broadened a lot**: every category's keywords reworked into
+  enthusiast-style Bluesky search queries (what actually converts), six new
+  categories added (books, anime & figures, board games/TTRPG, retro gaming,
+  LEGO, headphones/audio), kitchen pivoted to gear, desk-cable to desk
+  setups. 15 active categories × 8 polled queries ≈ 116 free searches per
+  15-min cycle (was 54).
+- **Caps eased**: evals 15→30/hr (the real cost lever — hard ceiling ≈
+  $2/day on Haiku, realistically well under $1), category cooldown 120→45m,
+  author cooldown 72→48h, replies 5→6/hr and 20→30/day.
+- **Low-signal gate softened**: statement posts (no question) now need 2×
+  the engagement floor instead of 3× — enthusiast posts are usually
+  statements, and they're the bot's best candidates. New
+  `LOW_SIGNAL_MULTIPLIER` env (default 2).
+- The engagement floor (10), Haiku model, per-author eval cap, and all
+  safety gates are unchanged — quality and cost ceilings stay.
+
 ## 2026-07-05 — Insights report (funnel analytics)
 
 ### Added

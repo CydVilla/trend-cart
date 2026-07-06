@@ -16,7 +16,9 @@ import { findPromotionalMatch, findSensitiveMatch } from "./filters.js";
  */
 
 const RESULTS_PER_QUERY = 10;
-const MAX_QUERIES_PER_CATEGORY = 6;
+/** Searches are free (Bluesky API) — the eval budget, not query count, is the
+ *  cost ceiling. 8 queries × ~15 categories every 15m is well under limits. */
+const MAX_QUERIES_PER_CATEGORY = 8;
 
 export type DiscoverStats = {
   queries: number;

@@ -54,6 +54,10 @@ export const config = {
        (likes + 3*reposts + 2*replies + 3*quotes) after maturing, or the LLM
        never sees it. Mentions and manual injections are exempt. */
     minEngagementScore: envInt("MIN_ENGAGEMENT_SCORE", 10),
+    /* Low-signal gate: a STATEMENT post (no question / no ask) needs
+       floor × this multiplier engagement to justify LLM spend. Enthusiast
+       posts are usually statements, so keep this modest. */
+    lowSignalMultiplier: envInt("LOW_SIGNAL_MULTIPLIER", 2),
   },
 
   site: {

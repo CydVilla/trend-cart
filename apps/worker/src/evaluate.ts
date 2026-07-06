@@ -273,7 +273,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     if (
       (post.source === "FIREHOSE" || post.source === "SEARCH") &&
       !INTENT_MARKERS.test(post.text) &&
-      post.engagementScore < config.llm.minEngagementScore * 3
+      post.engagementScore < config.llm.minEngagementScore * config.llm.lowSignalMultiplier
     ) {
       await prisma.$transaction([
         prisma.candidateEvaluation.create({
@@ -284,7 +284,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
             safetyDecision: SafetyStatus.UNCERTAIN,
             model: "policy",
             shouldReply: false,
-            reason: `low signal: no intent markers and engagement ${post.engagementScore} < ${config.llm.minEngagementScore * 3}`,
+            reason: `low signal: no intent markers and engagement ${post.engagementScore} < ${config.llm.minEngagementScore * config.llm.lowSignalMultiplier}`,
           },
         }),
         prisma.post.update({
