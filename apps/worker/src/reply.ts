@@ -41,7 +41,9 @@ async function checkReplyPolicy(post: Post, categorySlug: string | null): Promis
   const now = Date.now();
 
   if (post.deadAt) return { action: "skip", reason: "post was deleted" };
-  const solicited = post.source === "MENTION";
+  // Solicited = the operator (inject form) or the author (mention) explicitly
+  // asked — exempt from author/category cooldowns; a human chose this post.
+  const solicited = post.source === "MENTION" || post.source === "MANUAL";
 
   // Replying to old posts reads as necro-spam. Operator-injected posts get a
   // longer window — a human explicitly chose them.
@@ -256,19 +258,41 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
   if (flags.paused) return;
   if (Date.now() < generationBackoffUntil) return;
 
-  const due = await prisma.candidateEvaluation.findMany({
+  const dueWhere = {
+    shouldReply: true,
+    // ALLOWLIST: this run's model tag plus "operator" directives — fake
+    // verdicts, policy rows, legacy "unknown" rows, and verdicts from other
+    // model configurations can never drive this pipeline.
+    model: { in: config.llm.useFake ? ["fake", "operator"] : [config.llm.model, "operator"] },
+  } as const;
+  // Operator-provided/solicited candidates jump the reply queue — a fresh
+  // injection must not wait behind a backlog of trending evaluations.
+  const solicitedDue = await prisma.candidateEvaluation.findMany({
     where: {
-      shouldReply: true,
-      // ALLOWLIST: this run's model tag plus "operator" directives — fake
-      // verdicts, policy rows, legacy "unknown" rows, and verdicts from other
-      // model configurations can never drive this pipeline.
-      model: { in: config.llm.useFake ? ["fake", "operator"] : [config.llm.model, "operator"] },
-      post: { replies: { none: {} }, deadAt: null },
+      ...dueWhere,
+      post: { replies: { none: {} }, deadAt: null, source: { in: ["MANUAL", "MENTION"] } },
     },
     include: { post: true },
     orderBy: { createdAt: "asc" },
     take: BATCH_SIZE,
   });
+  const trendingDue =
+    solicitedDue.length < BATCH_SIZE
+      ? await prisma.candidateEvaluation.findMany({
+          where: {
+            ...dueWhere,
+            post: {
+              replies: { none: {} },
+              deadAt: null,
+              source: { notIn: ["MANUAL", "MENTION"] },
+            },
+          },
+          include: { post: true },
+          orderBy: { createdAt: "asc" },
+          take: BATCH_SIZE - solicitedDue.length,
+        })
+      : [];
+  const due = [...solicitedDue, ...trendingDue];
 
   for (const evaluation of due) {
     // Policy runs FIRST so the 24h/7d expiry always writes a terminal SKIPPED

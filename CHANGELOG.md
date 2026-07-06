@@ -29,6 +29,16 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-06 — Manual candidates get true end-to-end priority
+
+### Changed
+- Candidates you provide (inject form) and mentions now jump every stage,
+  not just batch ordering: they **bypass the hourly eval budget** (their
+  volume is operator-bounded), **jump the reply-generation queue** ahead of
+  the trending backlog, **post first** in the poster queue, and MANUAL
+  injections are now exempt from the author/category cooldowns (like
+  mentions — a human chose the post). Global reply caps still apply.
+
 ## 2026-07-06 — Weekly calibration workflow + CI
 
 ### Added

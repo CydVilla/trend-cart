@@ -185,7 +185,6 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     where: { createdAt: { gte: hourAgo } },
   });
   const budget = config.llm.maxEvalsPerHour - recentEvals;
-  if (budget <= 0) return;
 
   const maturedBefore = new Date(now - config.llm.evalMinPostAgeMinutes * 60_000);
   const baseWhere = {
@@ -195,19 +194,24 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     createdAt: { gte: new Date(now - 24 * 3_600_000) },
     evaluations: { none: {} },
   } as const;
-  const batchLimit = Math.min(BATCH_SIZE, budget);
-  // Solicited/injected posts go FIRST (a low-engagement mention must never
-  // starve behind trending firehose posts), then trending candidates —
-  // which must BOTH mature and clear the floor: recent AND actually liked.
-  // Below-floor posts keep waiting (they may still be rising) and expire
-  // unevaluated if they never catch on: zero LLM spend.
+  // Solicited/injected posts go FIRST and BYPASS the hourly eval budget: the
+  // operator explicitly provided them (inject form / mention), their volume
+  // is operator-bounded, and they must never starve behind trending posts
+  // that already ate the budget. Trending only spends what budget remains.
   const solicited = await prisma.post.findMany({
     where: { ...baseWhere, source: { in: ["MANUAL", "MENTION"] } },
     orderBy: { indexedAt: "asc" },
-    take: batchLimit,
+    take: BATCH_SIZE,
   });
+  const trendingTake = Math.max(
+    0,
+    Math.min(BATCH_SIZE - solicited.length, budget - solicited.length),
+  );
+  // Trending candidates must BOTH mature and clear the floor: recent AND
+  // actually liked. Below-floor posts keep waiting (they may still be
+  // rising) and expire unevaluated if they never catch on: zero LLM spend.
   const trending =
-    solicited.length < batchLimit
+    trendingTake > 0
       ? await prisma.post.findMany({
           where: {
             ...baseWhere,
@@ -224,7 +228,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
             ],
           },
           orderBy: { engagementScore: "desc" },
-          take: batchLimit - solicited.length,
+          take: trendingTake,
         })
       : [];
   const due = [...solicited, ...trending];

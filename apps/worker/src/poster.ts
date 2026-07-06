@@ -123,14 +123,23 @@ export function createPoster(stats: PosterStats): Poster {
       return;
     }
 
-    const candidate = await prisma.botReply.findFirst({
-      where: {
-        status: ReplyStatus.APPROVED,
-        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
-      },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
+    // Operator-provided/solicited replies post first; trending fills in after.
+    const attemptDue = { OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }] };
+    const candidate =
+      (await prisma.botReply.findFirst({
+        where: {
+          status: ReplyStatus.APPROVED,
+          ...attemptDue,
+          post: { source: { in: ["MANUAL", "MENTION"] } },
+        },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      })) ??
+      (await prisma.botReply.findFirst({
+        where: { status: ReplyStatus.APPROVED, ...attemptDue },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      }));
     if (!candidate) return;
 
     // CLAIM before any network call — the count===1 guard makes posting
