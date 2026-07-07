@@ -3,6 +3,29 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-07 — RSS deal suggestions: the no-PA-API bridge
+
+### Added
+- **RSS deal suggestions** (ADR-0013): the worker polls deal-site RSS feeds
+  (Deals page → "Deal RSS sources"; Slickdeals frontpage seeded in two lanes:
+  **tech & electronics** and **pop-culture apparel** — clothing only when tied
+  to a TV/movie/game/fandom franchise) and extracts Amazon items, including
+  links hidden inside deal-site redirect params. The source's affiliate tag
+  never survives: product URLs are rebuilt canonically from the ASIN.
+  - **Two-stage lane gate**: keyword include/exclude prefilter, then one
+    deterministic LLM judgment per headline against the source's plain-words
+    lane criteria (verdict stored for audit; keyword-only mode without an API
+    key; per-tick LLM budget).
+  - **Prices stay human-attested**: the parsed price is shown as a hint only
+    ("seen at ~$39.99"); the operator checks the live Amazon page, confirms
+    the price (+ optional reg. price for the % off), and the post queues
+    through the manual path — so nothing PA-API can't verify is ever
+    advertised unattested, and the freshness ceiling holds. Dismiss ends a
+    suggestion; unactioned ones auto-expire after 48h; per-ASIN dedup,
+    cooldown, and the ban switch all apply.
+  - Works with **zero Amazon API keys** — this is the bridge to the 3
+    qualifying sales that unlock PA-API automation.
+
 ## 2026-07-07 — Deal feeds: Wario64-style sale discovery
 
 ### Added

@@ -89,6 +89,23 @@ export type GenerateReplyInput = {
   learnedGuidelines?: string | null;
 };
 
+/** One RSS deal headline judged against a suggestion source's topical lane. */
+export type JudgeSuggestionInput = {
+  /** Raw RSS item title — UNTRUSTED external text. */
+  itemTitle: string;
+  /** The source's plain-words criteria for what belongs in its lane. */
+  topic: string;
+};
+
+/** Topical-gate verdict for one deal suggestion (advisory; stored for audit). */
+export type SuggestionVerdict = {
+  matches: boolean;
+  /** 0–100: how confidently the item fits the lane. */
+  confidence: number;
+  /** One short line for the audit trail. */
+  reason: string;
+};
+
 /**
  * Provider-agnostic LLM interface. Implementations: AnthropicLlmClient,
  * FakeLlmClient. Keeping this narrow makes it trivial to swap or mock.
@@ -96,4 +113,5 @@ export type GenerateReplyInput = {
 export interface LlmClient {
   classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult>;
   generateReply(input: GenerateReplyInput): Promise<string>;
+  judgeDealSuggestion(input: JudgeSuggestionInput): Promise<SuggestionVerdict>;
 }

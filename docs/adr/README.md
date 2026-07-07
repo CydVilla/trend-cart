@@ -17,3 +17,4 @@ made. Format: Status / Context / Decision / Consequences.
 | [0010](0010-retire-site-catalog.md) | Retire product catalog + public pages; direct Amazon links only | Accepted |
 | [0011](0011-deal-tracker.md) | Deal tracker: target-price alerts as standalone profile posts | Accepted |
 | [0012](0012-deal-feed-discovery.md) | Deal feeds: Wario64-style sale discovery on the bot's profile | Accepted |
+| [0013](0013-rss-deal-suggestions.md) | RSS deal suggestions: human-attested prices before PA-API exists | Accepted |

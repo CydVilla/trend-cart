@@ -1,19 +1,26 @@
-import { prisma, DealPostStatus, ListingOrigin } from "@trendcart/db";
-import { PAAPI_SEARCH_INDEXES } from "@trendcart/shared";
+import { prisma, DealPostStatus, ListingOrigin, SuggestionStatus } from "@trendcart/db";
+import { PAAPI_SEARCH_INDEXES, cleanDealTitle } from "@trendcart/shared";
 import {
   addTrackedListing,
   approveDealPost,
   createDealFeed,
+  createSuggestionSource,
   deleteDealFeed,
   deleteListing,
+  deleteSuggestionSource,
+  dismissSuggestion,
+  fetchSuggestionSourceNow,
   postDealNow,
+  queueSuggestedDeal,
   rejectDealPost,
   requestCheckNow,
   runDealFeedNow,
   toggleDealFeedActive,
   toggleListingActive,
+  toggleSuggestionSourceActive,
   updateDealFeed,
   updateListingPricing,
+  updateSuggestionSource,
 } from "../actions";
 import { SubmitButton } from "../submit-button";
 import {
@@ -46,7 +53,7 @@ function pctOff(saleCents: number, wasCents: number | null): number | null {
 }
 
 export default async function DealsPage() {
-  const [listings, discovered, feeds, pendingApproval, recent, heartbeat] = await Promise.all([
+  const [listings, discovered, feeds, suggestionSources, suggestions, pendingApproval, recent, heartbeat] = await Promise.all([
     prisma.trackedListing.findMany({
       where: { origin: ListingOrigin.WATCHLIST },
       orderBy: { createdAt: "desc" },
@@ -59,6 +66,13 @@ export default async function DealsPage() {
       include: { _count: { select: { dealPosts: true } } },
     }),
     prisma.dealFeed.findMany({ orderBy: { createdAt: "asc" } }),
+    prisma.dealSuggestionSource.findMany({ orderBy: { createdAt: "asc" } }),
+    prisma.dealSuggestion.findMany({
+      where: { status: SuggestionStatus.NEW },
+      include: { source: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
     prisma.dealPost.findMany({
       where: { status: DealPostStatus.PENDING_APPROVAL },
       include: { listing: { select: { title: true, asin: true } }, feed: { select: { name: true } } },
@@ -179,6 +193,117 @@ export default async function DealsPage() {
                         className="rounded border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-50"
                       >
                         Reject
+                      </SubmitButton>
+                    </form>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* RSS-suggested deals: the no-PA-API path. Operator attests the price. */}
+      {suggestions.length > 0 && (
+        <>
+          <SectionHeading>Suggested deals ({suggestions.length})</SectionHeading>
+          <p className="-mt-2 mb-3 text-xs text-zinc-500">
+            Found in your deal RSS sources — <strong>no PA-API needed</strong>. Open the deal,
+            check the price on Amazon, then confirm it here to queue a post (the parsed price is
+            only a hint). Unactioned suggestions expire on their own.
+          </p>
+          <div className="mb-8 space-y-3">
+            {suggestions.map((s) => {
+              const verdict = s.gateVerdict as { confidence?: number; reason?: string } | null;
+              return (
+                <div key={s.id} className="rounded-lg border border-zinc-200 bg-white p-4">
+                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                    <Badge tone="blue">SUGGESTED</Badge>
+                    <span className="font-medium text-zinc-700">{s.title}</span>
+                  </div>
+                  <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                    <code>{s.asin}</code>
+                    {s.hintPriceCents != null && (
+                      <span>seen at ~{formatMoney(s.hintPriceCents, "USD")}</span>
+                    )}
+                    <span>via {s.source.name}</span>
+                    {verdict?.confidence != null && <span>lane fit {verdict.confidence}%</span>}
+                    <span>{formatDate(s.createdAt)}</span>
+                    <a
+                      href={s.productUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline"
+                    >
+                      check on Amazon ↗
+                    </a>
+                    {s.sourceUrl && (
+                      <a
+                        href={s.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline"
+                      >
+                        deal thread ↗
+                      </a>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <form
+                      action={queueSuggestedDeal}
+                      className="flex grow flex-wrap items-end gap-2 rounded border border-blue-200 bg-blue-50/40 p-3"
+                    >
+                      <input type="hidden" name="id" value={s.id} />
+                      <label className="block grow basis-64">
+                        <span className="text-xs font-medium uppercase text-blue-800">
+                          Post title
+                        </span>
+                        <input
+                          name="title"
+                          required
+                          defaultValue={cleanDealTitle(s.title)}
+                          className="mt-1 w-full rounded border border-blue-200 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-medium uppercase text-blue-800">
+                          Confirmed price ($)
+                        </span>
+                        <input
+                          name="salePrice"
+                          inputMode="decimal"
+                          required
+                          defaultValue={
+                            s.hintPriceCents != null ? (s.hintPriceCents / 100).toFixed(2) : ""
+                          }
+                          className="mt-1 w-28 rounded border border-blue-200 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-medium uppercase text-blue-800">
+                          Reg. price ($, opt.)
+                        </span>
+                        <input
+                          name="fullPrice"
+                          inputMode="decimal"
+                          placeholder="for % off"
+                          className="mt-1 w-28 rounded border border-blue-200 px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <SubmitButton
+                        pendingLabel="Queuing…"
+                        className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                      >
+                        Queue post
+                      </SubmitButton>
+                    </form>
+                    <form action={dismissSuggestion}>
+                      <input type="hidden" name="id" value={s.id} />
+                      <SubmitButton
+                        pendingLabel="Dismissing…"
+                        className="rounded border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-100"
+                      >
+                        Dismiss
                       </SubmitButton>
                     </form>
                   </div>
@@ -441,6 +566,226 @@ export default async function DealsPage() {
                   </form>
                   <form action={deleteDealFeed}>
                     <input type="hidden" name="id" value={feed.id} />
+                    <SubmitButton
+                      pendingLabel="Deleting…"
+                      className="rounded border border-red-300 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50"
+                    >
+                      Delete
+                    </SubmitButton>
+                  </form>
+                </div>
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+
+      {/* RSS suggestion sources — work before PA-API keys exist */}
+      <SectionHeading>Deal RSS sources ({suggestionSources.length})</SectionHeading>
+      <p className="-mt-2 mb-3 text-xs text-zinc-500">
+        Deal-site RSS feeds (e.g. Slickdeals) the worker reads for Amazon items —{" "}
+        <strong>works without PA-API keys</strong>. Each source keeps one topical lane: an LLM
+        judges every headline against the lane description, keyword filters run first, and
+        matches land above as suggestions for you to confirm. Nothing posts without you.
+      </p>
+
+      <form
+        action={createSuggestionSource}
+        className="mb-4 space-y-3 rounded-lg border border-zinc-200 bg-white p-4"
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">Source name</span>
+            <input
+              name="name"
+              required
+              placeholder="Tech & electronics (Slickdeals)"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">RSS URL</span>
+            <input
+              name="url"
+              required
+              placeholder="https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block md:col-span-2">
+            <span className="text-xs font-medium uppercase text-zinc-500">
+              Lane — what belongs here, in plain words
+            </span>
+            <textarea
+              name="topic"
+              required
+              rows={2}
+              placeholder="Clothing tied to TV, movie, video game, or pop-culture fandoms: graphic tees, hoodies… Plain unbranded clothing does NOT match."
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">
+              Include keywords (optional, comma-separated)
+            </span>
+            <input
+              name="includeKeywords"
+              placeholder="shirt, tee, hoodie — headline must contain one"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">
+              Exclude keywords (optional)
+            </span>
+            <input
+              name="excludeKeywords"
+              placeholder="refurbished, renewed"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">Min price ($)</span>
+            <input
+              name="minPrice"
+              inputMode="decimal"
+              placeholder="optional"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium uppercase text-zinc-500">Max price ($)</span>
+            <input
+              name="maxPrice"
+              inputMode="decimal"
+              placeholder="optional"
+              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+            />
+          </label>
+        </div>
+        <SubmitButton
+          pendingLabel="Saving…"
+          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+        >
+          Add source
+        </SubmitButton>
+      </form>
+
+      {suggestionSources.length === 0 ? (
+        <EmptyState>No RSS sources yet — add one above to get suggestions without PA-API.</EmptyState>
+      ) : (
+        <div className="mb-8 space-y-3">
+          {suggestionSources.map((source) => (
+            <details key={source.id} className="rounded-lg border border-zinc-200 bg-white">
+              <summary className="flex flex-wrap items-center gap-2 px-4 py-3">
+                <span className="font-medium">{source.name}</span>
+                <Badge tone={source.isActive ? "green" : "zinc"}>
+                  {source.isActive ? "active" : "paused"}
+                </Badge>
+                <span className="text-xs text-zinc-400">
+                  {source.lastFetchedAt
+                    ? `last fetch ${formatDate(source.lastFetchedAt)} — ${source.lastItemCount} items, ${source.lastQueuedCount} suggested`
+                    : "never fetched"}
+                </span>
+                {source.lastFetchError && (
+                  <span className="text-xs text-red-600">{source.lastFetchError}</span>
+                )}
+              </summary>
+              <div className="space-y-3 border-t border-zinc-100 p-4 text-sm">
+                <form action={updateSuggestionSource} className="grid gap-3 md:grid-cols-2">
+                  <input type="hidden" name="id" value={source.id} />
+                  <label className="block md:col-span-2">
+                    <span className="text-xs font-medium uppercase text-zinc-500">RSS URL</span>
+                    <input
+                      name="url"
+                      defaultValue={source.url}
+                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+                    />
+                  </label>
+                  <label className="block md:col-span-2">
+                    <span className="text-xs font-medium uppercase text-zinc-500">Lane</span>
+                    <textarea
+                      name="topic"
+                      rows={2}
+                      defaultValue={source.topic}
+                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium uppercase text-zinc-500">
+                      Include keywords
+                    </span>
+                    <input
+                      name="includeKeywords"
+                      defaultValue={source.includeKeywords.join(", ")}
+                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium uppercase text-zinc-500">
+                      Exclude keywords
+                    </span>
+                    <input
+                      name="excludeKeywords"
+                      defaultValue={source.excludeKeywords.join(", ")}
+                      className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-medium uppercase text-zinc-500">
+                      Min / max price ($)
+                    </span>
+                    <span className="mt-1 flex gap-2">
+                      <input
+                        name="minPrice"
+                        inputMode="decimal"
+                        defaultValue={
+                          source.minPriceCents != null
+                            ? (source.minPriceCents / 100).toFixed(2)
+                            : ""
+                        }
+                        className="w-full rounded border border-zinc-300 px-2 py-1.5"
+                      />
+                      <input
+                        name="maxPrice"
+                        inputMode="decimal"
+                        defaultValue={
+                          source.maxPriceCents != null
+                            ? (source.maxPriceCents / 100).toFixed(2)
+                            : ""
+                        }
+                        className="w-full rounded border border-zinc-300 px-2 py-1.5"
+                      />
+                    </span>
+                  </label>
+                  <div className="flex items-end">
+                    <SubmitButton
+                      pendingLabel="Saving…"
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Save source
+                    </SubmitButton>
+                  </div>
+                </form>
+                <div className="flex flex-wrap gap-2">
+                  <form action={fetchSuggestionSourceNow}>
+                    <input type="hidden" name="id" value={source.id} />
+                    <SubmitButton
+                      title="Fetch this feed on the worker's next tick"
+                      pendingLabel="Queuing…"
+                      className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+                    >
+                      Fetch now
+                    </SubmitButton>
+                  </form>
+                  <form action={toggleSuggestionSourceActive}>
+                    <input type="hidden" name="id" value={source.id} />
+                    <SubmitButton className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100">
+                      {source.isActive ? "Pause" : "Activate"}
+                    </SubmitButton>
+                  </form>
+                  <form action={deleteSuggestionSource}>
+                    <input type="hidden" name="id" value={source.id} />
                     <SubmitButton
                       pendingLabel="Deleting…"
                       className="rounded border border-red-300 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50"
