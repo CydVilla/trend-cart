@@ -3,6 +3,7 @@ import {
   DealArmState,
   DealPostStatus,
   DealSource,
+  ListingOrigin,
   type TrackedListing,
 } from "@trendcart/db";
 import { canonicalAmazonUrl, composeDealPost, withAffiliateTag } from "@trendcart/shared";
@@ -175,6 +176,7 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
       priceAsOf: now,
       linkUrl,
       maxLength: config.deals.postMaxLength,
+      style: config.deals.postStyle,
     });
     const dryRun = config.bot.dryRun;
     const status = dryRun
@@ -194,6 +196,7 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
         priceAsOf: now,
         linkUrl,
         postText: "error" in composed ? null : composed.text,
+        linkAnchor: "error" in composed ? null : composed.anchor,
       },
     });
     await prisma.trackedListing.update({
@@ -219,6 +222,9 @@ export function createDealChecker(stats: DealCheckStats): DealChecker {
     const due = await prisma.trackedListing.findMany({
       where: {
         isActive: true,
+        // DISCOVERED rows are dedup state written by the feed loop — polling
+        // them would burn the GetItems budget on items nobody watches.
+        origin: ListingOrigin.WATCHLIST,
         marketplace: config.paapi.marketplace, // v1: only the configured marketplace
         armState: { in: [DealArmState.ARMED, DealArmState.DISARMED] },
         OR: [{ nextCheckAt: null }, { nextCheckAt: { lte: new Date() } }],

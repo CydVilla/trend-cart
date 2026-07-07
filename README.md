@@ -130,23 +130,39 @@ until the person mentions the bot again.
 
 ### Deal tracker
 
-The **Deals** page manages a manual watchlist of Amazon listings, each with a
-full (normal) price and an optional stricter alert price. When a tracked item
-drops below its full price — or at/below the alert price, if set — the bot
-posts a standalone deal alert to its own profile with the **% off the full
-price**, the affiliate link on a clickable anchor, an in-post `#ad` disclosure,
-and an "as of &lt;time&gt;; price subject to change" qualifier. One sale = one
-post (it re-arms only after the price climbs back up). Two paths feed the same poster:
+The **Deals** page runs the bot's own-profile deal channel. Posts default to a
+terse, Wario64-style format where the price phrase itself is the clickable
+affiliate link (`DEAL_POST_STYLE=classic` restores the old copy):
 
-- **Automated** (`DEALS_ENABLED=true` + `PA_API_*` keys): the worker polls
-  Amazon's Product Advertising API and fires when the price hits the target.
-  PA-API needs an approved Associate account (3 qualifying sales in 180 days).
+> Razer BlackShark V2 X Gaming Headset is **$39.99 on Amazon** (33% off,
+> reg. $59.99) #ad
+> (price as of Jul 6, 9:04 PM UTC — subject to change)
+
+Three paths feed the same exactly-once poster:
+
+- **Deal feeds** (ADR-0012, `DEALS_ENABLED=true` + `PA_API_*` keys): saved
+  Amazon searches — keywords, category, minimum % off, price band, review
+  floors, sold-by-Amazon toggle — that the worker polls via PA-API SearchItems
+  for products **currently on sale**. "On sale" means a real strikethrough
+  (the offer sits below Amazon's own list price), re-verified server-side.
+  Discovered deals queue for your approval on the Deals page and auto-expire
+  when their price snapshot goes stale; set `DEAL_FEED_AUTOPOST=true` to post
+  without approval. They spend their own daily budget
+  (`DEAL_FEED_MAX_POSTS_PER_DAY`, default 2) inside the global cap, and a
+  per-ASIN cooldown/dedup row keeps any item from reposting within 7 days —
+  pause one in "Discovered by feeds" to ban it permanently.
+- **Watchlist** (same keys): specific listings with a full (normal) price and
+  an optional stricter alert price; the worker polls prices and fires when a
+  tracked item drops below its threshold. One sale = one post (it re-arms only
+  after the price climbs back up).
 - **Manual** ("Post deal now" on a listing): you enter the sale price and it
   queues a post immediately — no API keys required.
 
+PA-API needs an approved Associate account (3 qualifying sales in 180 days).
 The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
-posting. Caps are deliberately tighter than replies (3 posts/day, 7-day
-per-listing cooldown, 60-min global gap, 1-hour price freshness).
+posting. Caps default deliberately tighter than replies (3 posts/day, 7-day
+per-listing cooldown, 60-min global gap, 1-hour price freshness) — see
+`.env.example` for the raise-the-caps recipe once you trust the feed.
 
 The dashboard is protected by HTTP Basic auth whenever `DASHBOARD_PASSWORD`
 is set (see middleware.ts); the public `/about` page and
@@ -177,8 +193,11 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |
 | `BOT_APP_PASSWORD` | Bluesky **app password** (never your real password) |
 | `DEALS_ENABLED` | Master switch for the deal tracker's worker loops (default false) |
-| `PA_API_ACCESS_KEY` / `PA_API_SECRET_KEY` | Amazon Product Advertising API 5.0 keys — enable automated price polling (manual path works without them) |
+| `PA_API_ACCESS_KEY` / `PA_API_SECRET_KEY` | Amazon Product Advertising API 5.0 keys — enable deal feeds + automated price polling (manual path works without them) |
 | `PA_API_PARTNER_TAG` | PA-API PartnerTag; defaults to `AMAZON_ASSOCIATE_TAG` |
+| `DEAL_POST_STYLE` | `wario` (default, terse deal-account copy) \| `classic` |
+| `DEAL_FEED_AUTOPOST` | `true` = feed-discovered deals post without approval (default false) |
+| `DEAL_FEED_MAX_POSTS_PER_DAY` | Daily budget for feed-discovered posts (default 2) |
 
 ## Safety model
 

@@ -39,7 +39,14 @@ export function replyStatusTone(status: string): Tone {
 export function dealPostTone(status: string): Tone {
   if (status === "POSTED") return "green";
   if (status === "POSTING") return "blue";
-  if (status === "READY" || status === "PENDING" || status === "DRY_RUN") return "amber";
+  if (
+    status === "READY" ||
+    status === "PENDING" ||
+    status === "PENDING_APPROVAL" ||
+    status === "DRY_RUN"
+  ) {
+    return "amber";
+  }
   if (status === "FAILED") return "red";
   return "zinc";
 }
