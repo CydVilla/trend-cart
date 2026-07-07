@@ -3,11 +3,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma, DealArmState, DealPostStatus, DealSource, ReplyStatus, SafetyStatus } from "@trendcart/db";
 import {
+  PAAPI_SEARCH_INDEXES,
   canonicalAmazonUrl,
   composeDealPost,
   extractAsin,
   isAmazonHost,
   parseCents,
+  parseDealPostStyle,
   withAffiliateTag,
 } from "@trendcart/shared";
 import { revalidatePath } from "next/cache";
@@ -606,6 +608,7 @@ export async function postDealNow(formData: FormData): Promise<void> {
     priceAsOf,
     linkUrl,
     maxLength: DEAL_POST_MAX_LENGTH,
+    style: parseDealPostStyle(process.env.DEAL_POST_STYLE),
   });
   if ("error" in composed) return;
 
@@ -624,6 +627,7 @@ export async function postDealNow(formData: FormData): Promise<void> {
         priceAsOf,
         linkUrl,
         postText: composed.text,
+        linkAnchor: composed.anchor,
       },
     }),
     prisma.trackedListing.update({
@@ -638,5 +642,136 @@ export async function postDealNow(formData: FormData): Promise<void> {
       },
     }),
   ]);
+  revalidatePath("/deals");
+}
+
+// ── Deal feeds (Wario64-style sale discovery) ───────────────
+
+/** Bounded positive int from a form field; null when absent/invalid. */
+function intField(formData: FormData, name: string, min: number, max: number): number | null {
+  const raw = str(formData, name);
+  if (!raw) return null;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value < min || value > max) return null;
+  return value;
+}
+
+/** Shared parse/validate for the create + update feed forms. */
+function feedFields(formData: FormData): {
+  keywords: string;
+  searchIndex: string;
+  minSavingPercent: number;
+  minPriceCents: number | null;
+  maxPriceCents: number | null;
+  minReviewCount: number;
+  minReviewRating: number;
+  amazonOnly: boolean;
+} | null {
+  const keywords = str(formData, "keywords");
+  const searchIndex = str(formData, "searchIndex");
+  const minSavingPercent = intField(formData, "minSavingPercent", 1, 90);
+  if (!keywords || minSavingPercent === null) return null;
+  // An unknown SearchIndex would 400 every SearchItems call for the feed.
+  if (!(PAAPI_SEARCH_INDEXES as readonly string[]).includes(searchIndex)) return null;
+  const minPriceCents = parseCents(str(formData, "minPrice"));
+  const maxPriceCents = parseCents(str(formData, "maxPrice"));
+  if (minPriceCents != null && maxPriceCents != null && maxPriceCents < minPriceCents) return null;
+  return {
+    keywords,
+    searchIndex,
+    minSavingPercent,
+    minPriceCents,
+    maxPriceCents,
+    minReviewCount: intField(formData, "minReviewCount", 0, 1_000_000) ?? 0,
+    minReviewRating: intField(formData, "minReviewRating", 0, 4) ?? 0,
+    amazonOnly: formData.get("amazonOnly") === "on",
+  };
+}
+
+export async function createDealFeed(formData: FormData): Promise<void> {
+  const name = str(formData, "name");
+  const fields = feedFields(formData);
+  if (!name || !fields) return;
+  // Upsert by name so re-submitting the form edits instead of erroring.
+  await prisma.dealFeed.upsert({
+    where: { name },
+    create: { name, ...fields },
+    update: fields,
+  });
+  revalidatePath("/deals");
+}
+
+export async function updateDealFeed(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  const fields = feedFields(formData);
+  if (!id || !fields) return;
+  await prisma.dealFeed.update({ where: { id }, data: fields }).catch(() => {});
+  revalidatePath("/deals");
+}
+
+export async function toggleDealFeedActive(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  const feed = await prisma.dealFeed.findUnique({ where: { id } });
+  if (!feed) return;
+  await prisma.dealFeed.update({ where: { id }, data: { isActive: !feed.isActive } });
+  revalidatePath("/deals");
+}
+
+export async function deleteDealFeed(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  // DealPost.feedId is SetNull on delete — history survives, unattributed.
+  await prisma.dealFeed.delete({ where: { id } }).catch(() => {});
+  revalidatePath("/deals");
+}
+
+/** Make the feed due immediately (the worker picks it up within a minute). */
+export async function runDealFeedNow(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  await prisma.dealFeed.updateMany({
+    where: { id, isActive: true },
+    data: { lastRunAt: null, lastRunError: null },
+  });
+  revalidatePath("/deals");
+}
+
+/**
+ * Approve a feed-discovered deal. Deals are perishable: a price snapshot
+ * older than the freshness ceiling can never be advertised, so approving a
+ * stale one closes it out instead of queuing a post the poster would refuse.
+ */
+export async function approveDealPost(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  const deal = await prisma.dealPost.findUnique({ where: { id } });
+  if (!deal || deal.status !== DealPostStatus.PENDING_APPROVAL) return;
+  if (Date.now() - deal.priceAsOf.getTime() > DEAL_MAX_PRICE_AGE_HOURS * 3_600_000) {
+    await prisma.dealPost.updateMany({
+      where: { id, status: DealPostStatus.PENDING_APPROVAL },
+      data: {
+        status: DealPostStatus.SKIPPED,
+        skipReason: "price snapshot went stale awaiting approval",
+      },
+    });
+    revalidatePath("/deals");
+    return;
+  }
+  const dryRun = await workerInDryRun();
+  // updateMany guards the status so a double-click or race can't re-approve.
+  await prisma.dealPost.updateMany({
+    where: { id, status: DealPostStatus.PENDING_APPROVAL },
+    data: { status: dryRun ? DealPostStatus.DRY_RUN : DealPostStatus.READY },
+  });
+  revalidatePath("/deals");
+}
+
+export async function rejectDealPost(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  await prisma.dealPost.updateMany({
+    where: { id, status: DealPostStatus.PENDING_APPROVAL },
+    data: { status: DealPostStatus.SKIPPED, skipReason: "rejected by operator" },
+  });
   revalidatePath("/deals");
 }

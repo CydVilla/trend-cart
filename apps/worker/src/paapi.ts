@@ -2,7 +2,8 @@ import { createHash, createHmac } from "node:crypto";
 import { config } from "./config.js";
 
 /**
- * Amazon Product Advertising API 5.0 — GetItems client.
+ * Amazon Product Advertising API 5.0 — GetItems (watchlist price polling) +
+ * SearchItems (deal-feed discovery) client.
  *
  * SigV4 is hand-signed (Node crypto) rather than pulled from a heavy,
  * often-stale SDK: the signing core is verifiable against AWS's published
@@ -15,8 +16,18 @@ import { config } from "./config.js";
  */
 
 const SERVICE = "ProductAdvertisingAPI";
-const PATH = "/paapi5/getitems";
-const TARGET = "com.amazon.paapi5.v1.ProductAdvertisingAPIv1.GetItems";
+/** Each PA-API operation = its own path + x-amz-target pair. */
+const OPS = {
+  GetItems: {
+    path: "/paapi5/getitems",
+    target: "com.amazon.paapi5.v1.ProductAdvertisingAPIv1.GetItems",
+  },
+  SearchItems: {
+    path: "/paapi5/searchitems",
+    target: "com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems",
+  },
+} as const;
+type PaapiOp = keyof typeof OPS;
 const RESOURCES = [
   "ItemInfo.Title",
   "Images.Primary.Large",
@@ -25,6 +36,9 @@ const RESOURCES = [
   "Offers.Listings.Availability.Message",
   "Offers.Listings.Condition",
 ];
+/** Search additionally pulls review data for the feed quality floors. Amazon
+ *  omits these fields for many items — the gates only apply when present. */
+const SEARCH_RESOURCES = [...RESOURCES, "CustomerReviews.Count", "CustomerReviews.StarRating"];
 const MIN_GAP_MS = 1_100; // headroom under Amazon's 1 TPS floor
 const MAX_RETRIES = 3;
 
@@ -37,10 +51,29 @@ export type PaapiItem = {
   imageUrl: string | null;
   available: boolean;
   currency: string | null;
+  reviewCount: number | null;
+  reviewRating: number | null;
+};
+
+/** One deal-feed search — mirrors the SearchItems request surface we use. */
+export type SearchItemsParams = {
+  keywords: string;
+  searchIndex: string;
+  minSavingPercent: number;
+  /** PA-API expects prices in the lowest currency denomination (cents). */
+  minPriceCents?: number | null;
+  maxPriceCents?: number | null;
+  /** 1–4: only items rated above this many stars. */
+  minReviewRating?: number | null;
+  /** true → Merchant=Amazon (third-party strikethroughs are often inflated). */
+  amazonOnly?: boolean;
+  /** 1–10; each page is one API call returning up to 10 items. */
+  itemPage?: number;
 };
 
 export type PaapiClient = {
   getItemsByAsin: (asins: string[]) => Promise<Map<string, PaapiItem>>;
+  searchItems: (params: SearchItemsParams) => Promise<PaapiItem[]>;
 };
 
 /** Thrown on 401/403 — bad keys or an unapproved Associate account. The caller
@@ -66,6 +99,7 @@ function mapItem(it: Record<string, unknown>): PaapiItem {
     ASIN?: string;
     ItemInfo?: { Title?: { DisplayValue?: string } };
     Images?: { Primary?: { Large?: { URL?: string } } };
+    CustomerReviews?: { Count?: number; StarRating?: { Value?: number } };
     Offers?: {
       Listings?: Array<{
         Price?: { Amount?: number; Currency?: string; Savings?: { Amount?: number } };
@@ -91,6 +125,8 @@ function mapItem(it: Record<string, unknown>): PaapiItem {
     imageUrl: item.Images?.Primary?.Large?.URL ?? null,
     available,
     currency: listing?.Price?.Currency ?? null,
+    reviewCount: item.CustomerReviews?.Count ?? null,
+    reviewRating: item.CustomerReviews?.StarRating?.Value ?? null,
   };
 }
 
@@ -148,10 +184,11 @@ export function sigv4Signature(
 }
 
 /**
- * Build the SigV4 Authorization header + amz-date for a GetItems POST.
+ * Build the SigV4 Authorization header + amz-date for a PA-API POST.
  * Exported for the signing test.
  */
-export function signGetItems(
+export function signPaapiRequest(
+  op: PaapiOp,
   body: string,
   now: Date,
   creds: { accessKey: string; secretKey: string; host: string; region: string },
@@ -162,7 +199,7 @@ export function signGetItems(
     "content-encoding": "amz-1.0",
     host: creds.host,
     "x-amz-date": amzDate,
-    "x-amz-target": TARGET,
+    "x-amz-target": OPS[op].target,
   };
   const signedHeaders = Object.keys(headers).sort().join(";");
   const canonicalHeaders = Object.keys(headers)
@@ -171,7 +208,7 @@ export function signGetItems(
     .join("");
   const canonicalRequest = [
     "POST",
-    PATH,
+    OPS[op].path,
     "",
     canonicalHeaders,
     signedHeaders,
@@ -189,12 +226,19 @@ export function signGetItems(
   return { authorization, amzDate };
 }
 
-async function callGetItems(asins: string[]): Promise<Map<string, PaapiItem>> {
+/** Kept for the signing test's published-vector check. */
+export function signGetItems(
+  body: string,
+  now: Date,
+  creds: { accessKey: string; secretKey: string; host: string; region: string },
+): { authorization: string; amzDate: string } {
+  return signPaapiRequest("GetItems", body, now, creds);
+}
+
+/** POST one PA-API operation with retry/backoff; returns the parsed JSON. */
+async function callPaapi(op: PaapiOp, requestBody: Record<string, unknown>): Promise<unknown> {
   const body = JSON.stringify({
-    ItemIds: asins,
-    ItemIdType: "ASIN",
-    Condition: "New",
-    Resources: RESOURCES,
+    ...requestBody,
     PartnerTag: config.paapi.partnerTag,
     PartnerType: "Associates",
     Marketplace: config.paapi.marketplace,
@@ -207,11 +251,11 @@ async function callGetItems(asins: string[]): Promise<Map<string, PaapiItem>> {
   };
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
-    const { authorization, amzDate } = signGetItems(body, new Date(), creds);
+    const { authorization, amzDate } = signPaapiRequest(op, body, new Date(), creds);
     callsToday += 1;
     let response: Response;
     try {
-      response = await fetch(`https://${creds.host}${PATH}`, {
+      response = await fetch(`https://${creds.host}${OPS[op].path}`, {
         method: "POST",
         headers: {
           authorization,
@@ -219,7 +263,7 @@ async function callGetItems(asins: string[]): Promise<Map<string, PaapiItem>> {
           "content-type": "application/json; charset=utf-8",
           host: creds.host,
           "x-amz-date": amzDate,
-          "x-amz-target": TARGET,
+          "x-amz-target": OPS[op].target,
         },
         body,
         signal: AbortSignal.timeout(15_000),
@@ -243,17 +287,45 @@ async function callGetItems(asins: string[]): Promise<Map<string, PaapiItem>> {
       await sleep(2_000 * 2 ** attempt);
       continue;
     }
-    const json = (await response.json().catch(() => ({}))) as {
-      ItemsResult?: { Items?: Array<Record<string, unknown>> };
-    };
-    const out = new Map<string, PaapiItem>();
-    for (const raw of json.ItemsResult?.Items ?? []) {
-      const mapped = mapItem(raw);
-      if (mapped.asin) out.set(mapped.asin, mapped);
-    }
-    return out; // ASINs absent from the map = not found (Errors[]) → caller handles
+    return await response.json().catch(() => ({}));
   }
   throw new PaapiTransientError("PA-API exhausted retries");
+}
+
+async function callGetItems(asins: string[]): Promise<Map<string, PaapiItem>> {
+  const json = (await callPaapi("GetItems", {
+    ItemIds: asins,
+    ItemIdType: "ASIN",
+    Condition: "New",
+    Resources: RESOURCES,
+  })) as { ItemsResult?: { Items?: Array<Record<string, unknown>> } };
+  const out = new Map<string, PaapiItem>();
+  for (const raw of json.ItemsResult?.Items ?? []) {
+    const mapped = mapItem(raw);
+    if (mapped.asin) out.set(mapped.asin, mapped);
+  }
+  return out; // ASINs absent from the map = not found (Errors[]) → caller handles
+}
+
+async function callSearchItems(params: SearchItemsParams): Promise<PaapiItem[]> {
+  const json = (await callPaapi("SearchItems", {
+    Keywords: params.keywords,
+    SearchIndex: params.searchIndex,
+    // Server-side sale filter: only items discounted at least this % off the
+    // list price. The discovery gates re-verify — never trust it alone.
+    MinSavingPercent: params.minSavingPercent,
+    ...(params.minPriceCents ? { MinPrice: params.minPriceCents } : {}),
+    ...(params.maxPriceCents ? { MaxPrice: params.maxPriceCents } : {}),
+    ...(params.minReviewRating ? { MinReviewsRating: params.minReviewRating } : {}),
+    Merchant: params.amazonOnly === false ? "All" : "Amazon",
+    Availability: "Available",
+    Condition: "New",
+    ItemCount: 10,
+    ItemPage: params.itemPage ?? 1,
+    SortBy: "Featured",
+    Resources: SEARCH_RESOURCES,
+  })) as { SearchResult?: { Items?: Array<Record<string, unknown>> } };
+  return (json.SearchResult?.Items ?? []).map(mapItem).filter((item) => item.asin);
 }
 
 /** Returns null when credentials are absent — the deal checker then stands
@@ -272,6 +344,13 @@ export function createPaapiClient(): PaapiClient | null {
         for (const [asin, item] of result) merged.set(asin, item);
       }
       return merged;
+    },
+    async searchItems(params: SearchItemsParams): Promise<PaapiItem[]> {
+      if (!underDailyCap()) {
+        console.warn("[paapi] daily call cap reached — skipping search this tick");
+        return [];
+      }
+      return schedule(() => callSearchItems(params));
     },
   };
 }

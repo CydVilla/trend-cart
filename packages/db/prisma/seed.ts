@@ -202,6 +202,43 @@ const categories: CategorySeed[] = [
   },
 ];
 
+/**
+ * Starter deal feeds for the Wario64-style discovery loop (create-only:
+ * dashboard edits survive re-runs). Harmless until DEALS_ENABLED + PA-API
+ * keys exist — the discovery loop stands down without them.
+ */
+type FeedSeed = {
+  name: string;
+  keywords: string;
+  searchIndex: string;
+  minSavingPercent: number;
+  minPriceCents: number;
+};
+
+const dealFeeds: FeedSeed[] = [
+  {
+    name: "Video game deals",
+    keywords: "video games",
+    searchIndex: "VideoGames",
+    minSavingPercent: 25,
+    minPriceCents: 1500,
+  },
+  {
+    name: "Tech deals",
+    keywords: "electronics",
+    searchIndex: "Electronics",
+    minSavingPercent: 30,
+    minPriceCents: 2000,
+  },
+  {
+    name: "LEGO deals",
+    keywords: "lego set",
+    searchIndex: "ToysAndGames",
+    minSavingPercent: 20,
+    minPriceCents: 2000,
+  },
+];
+
 async function main(): Promise<void> {
   for (const c of categories) {
     await prisma.productCategory.upsert({
@@ -218,6 +255,16 @@ async function main(): Promise<void> {
     console.log(`  upserted category: ${c.slug}`);
   }
   console.log(`Seeded ${categories.length} categories (keywords double as Bluesky search queries).`);
+
+  for (const f of dealFeeds) {
+    await prisma.dealFeed.upsert({
+      where: { name: f.name },
+      create: { ...f, isActive: true },
+      update: {}, // operator tuning wins over re-seeds
+    });
+    console.log(`  upserted deal feed: ${f.name}`);
+  }
+  console.log(`Seeded ${dealFeeds.length} deal feeds (idle until DEALS_ENABLED + PA-API keys).`);
 }
 
 main()

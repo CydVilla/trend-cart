@@ -18,15 +18,16 @@ function isPermanentPostError(message: string): boolean {
   return /blocked|not found|invalid|deleted|suspended/i.test(message);
 }
 
-/** Byte-offset facets over the fixed anchor (link) and the "#ad" tag. UTF-8
- *  bytes, not JS char indices — a multibyte title shifts the offsets. */
-function buildFacets(text: string, linkUrl: string): AppBskyRichtextFacet.Main[] {
+/** Byte-offset facets over the link anchor and the "#ad" tag. UTF-8 bytes,
+ *  not JS char indices — a multibyte title shifts the offsets. The anchor is
+ *  per-post (wario style links the price phrase, classic the fixed one). */
+function buildFacets(text: string, linkUrl: string, anchor: string): AppBskyRichtextFacet.Main[] {
   const enc = new TextEncoder();
   const facets: AppBskyRichtextFacet.Main[] = [];
-  const aIdx = text.lastIndexOf(DEAL_ANCHOR);
+  const aIdx = text.lastIndexOf(anchor);
   if (aIdx >= 0) {
     const byteStart = enc.encode(text.slice(0, aIdx)).length;
-    const byteEnd = byteStart + enc.encode(DEAL_ANCHOR).length;
+    const byteEnd = byteStart + enc.encode(anchor).length;
     facets.push({
       index: { byteStart, byteEnd },
       features: [{ $type: "app.bsky.richtext.facet#link", uri: linkUrl }],
@@ -128,9 +129,9 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     if (!candidate) return;
 
     // Manual "post deal now" posts are operator-initiated — they bypass the
-    // global throttles. Only the AUTOMATED price-trigger is rate-limited here,
-    // so a burst of auto-fires can't flood the profile.
-    if (candidate.source === DealSource.AUTOMATED) {
+    // global throttles. The AUTOMATED price-trigger and DISCOVERED feed finds
+    // are rate-limited here, so a burst of fires can't flood the profile.
+    if (candidate.source !== DealSource.MANUAL) {
       const lastPosted = await prisma.dealPost.findFirst({
         where: { status: DealPostStatus.POSTED, postedAt: { not: null } },
         orderBy: { postedAt: "desc" },
@@ -175,7 +176,9 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     }
 
     // Recompose if the frozen copy is somehow missing; then hard-validate.
+    // Legacy rows (null linkAnchor) carry classic copy on the fixed anchor.
     let text = deal.postText ?? "";
+    let anchor = deal.linkAnchor ?? DEAL_ANCHOR;
     if (!text) {
       const composed = composeDealPost({
         title: listing.title,
@@ -185,14 +188,16 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         priceAsOf: deal.priceAsOf,
         linkUrl: deal.linkUrl,
         maxLength: config.deals.postMaxLength,
+        style: config.deals.postStyle,
       });
       if ("error" in composed) {
         await terminal(deal.id, DealPostStatus.FAILED, `compose failed: ${composed.error}`);
         return;
       }
       text = composed.text;
+      anchor = composed.anchor;
     }
-    const validation = validateDealText(text, deal.linkUrl, config.deals.postMaxLength);
+    const validation = validateDealText(text, deal.linkUrl, config.deals.postMaxLength, anchor);
     if (!validation.ok) {
       await terminal(deal.id, DealPostStatus.FAILED, `validation failed: ${validation.reason}`);
       return;
@@ -217,7 +222,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     }
 
     try {
-      const facets = buildFacets(text, deal.linkUrl);
+      const facets = buildFacets(text, deal.linkUrl, anchor);
       const thumb = await uploadThumb(activeAgent, listing.imageUrl);
       const wasClause =
         deal.wasPriceCents && deal.wasPriceCents > deal.salePriceCents

@@ -254,11 +254,14 @@ enum DealArmState {
 }
 
 /// DealPost lifecycle — the exact analog of ReplyStatus. PENDING = fired,
-/// awaiting copy generation; READY = has post text, claimable by the deal
-/// poster (manual rows start here); POSTING = exactly-once claim; DRY_RUN =
-/// would-post record written when DRY_RUN is on (never published).
+/// awaiting copy generation; PENDING_APPROVAL = feed-discovered deal waiting
+/// for the operator (expires when the price snapshot goes stale); READY = has
+/// post text, claimable by the deal poster (manual rows start here); POSTING =
+/// exactly-once claim; DRY_RUN = would-post record written when DRY_RUN is on
+/// (never published).
 enum DealPostStatus {
   PENDING
+  PENDING_APPROVAL
   READY
   POSTING
   POSTED
@@ -267,10 +270,20 @@ enum DealPostStatus {
   DRY_RUN
 }
 
-/// How a deal post was triggered.
+/// How a deal post was triggered. AUTOMATED = watchlist price trigger;
+/// DISCOVERED = found on sale by a DealFeed search; MANUAL = operator.
 enum DealSource {
   AUTOMATED
+  DISCOVERED
   MANUAL
+}
+
+/// How a TrackedListing entered the table. WATCHLIST rows are operator-curated
+/// and polled by the price checker; DISCOVERED rows are created by deal-feed
+/// searches purely as per-ASIN dedup/cooldown state — they are never polled.
+enum ListingOrigin {
+  WATCHLIST
+  DISCOVERED
 }
 
 /// One watched Amazon listing plus its persisted detection state.
@@ -298,6 +311,9 @@ model TrackedListing {
   currency    String @default("USD")
   /// Operator on/off switch. Inactive rows are never polled and never posted.
   isActive    Boolean @default(true)
+  /// WATCHLIST = operator-curated (polled); DISCOVERED = created by a deal
+  /// feed as dedup state (never polled; deactivating one bans the ASIN).
+  origin      ListingOrigin @default(WATCHLIST)
 
   // ── detection state (written by the worker / manual action, not CRUD) ──
   armState             DealArmState @default(ARMED)
@@ -348,6 +364,12 @@ model DealPost {
   linkUrl          String
   /// Frozen post copy; must contain a disclosure token before POSTING.
   postText         String?
+  /// The clickable phrase inside postText the link facet rides on. Null =
+  /// legacy rows using the classic fixed anchor ("grab it on Amazon").
+  linkAnchor       String?
+  /// The deal feed that discovered this deal (DISCOVERED source only).
+  feedId           String?
+  feed             DealFeed? @relation(fields: [feedId], references: [id], onDelete: SetNull)
   /// AT URI once POSTED.
   postUri          String?
   skipReason       String?
@@ -360,4 +382,44 @@ model DealPost {
   @@index([listingId])
   @@index([status, createdAt])
   @@index([createdAt])
+}
+
+/// One saved PA-API SearchItems query the discovery loop runs on a schedule:
+/// "find products in this category, currently discounted at least X%". The
+/// Wario64-style feed control panel — each row is an independent deal search.
+model DealFeed {
+  id       String @id @default(cuid())
+  /// Display name, unique so seeding stays idempotent ("Video game deals").
+  name     String @unique
+  /// PA-API SearchItems Keywords (free-text product search).
+  keywords String
+  /// PA-API SearchIndex (category) the search runs in, e.g. "VideoGames".
+  searchIndex String @default("All")
+  /// Only queue items discounted at least this % off Amazon's own list price
+  /// (SavingBasis). Server-side re-checked — never trusted from the API filter.
+  minSavingPercent Int @default(20)
+  /// Optional price band in cents — skip trinkets and grails.
+  minPriceCents Int?
+  maxPriceCents Int?
+  /// Quality floors, applied only when PA-API returns review data (0 = off).
+  minReviewCount  Int @default(50)
+  /// 1–4: PA-API MinReviewsRating (items rated above this many stars).
+  minReviewRating Int @default(4)
+  /// true = only offers sold by Amazon itself (Merchant=Amazon). Third-party
+  /// strikethrough prices are often inflated; Amazon's own are trustworthy.
+  amazonOnly Boolean @default(true)
+  isActive   Boolean @default(true)
+
+  // ── run state (written by the worker) ──
+  lastRunAt       DateTime?
+  lastFoundCount  Int @default(0)
+  lastQueuedCount Int @default(0)
+  lastRunError    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dealPosts DealPost[]
+
+  @@index([isActive, lastRunAt])
 }

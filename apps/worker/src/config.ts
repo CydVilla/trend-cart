@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
-import { envBool, envInt, envString, requireEnv } from "@trendcart/shared";
+import { envBool, envInt, envString, parseDealPostStyle, requireEnv } from "@trendcart/shared";
 
 // Load the repo-root .env whether we're run from the repo root or apps/worker.
 for (const candidate of [
@@ -118,6 +118,28 @@ export const config = {
     postMaxLength: envInt("DEAL_POST_MAX_LENGTH", 300),
     paapiBaseBackoffMs: envInt("DEAL_PAAPI_BASE_BACKOFF_MS", 60_000),
     paapiMaxBackoffMs: envInt("DEAL_PAAPI_MAX_BACKOFF_MS", 3_600_000),
+    /* "wario" = terse deal-account copy, the price phrase is the link;
+       "classic" = the original lead-in format on the fixed anchor. */
+    postStyle: parseDealPostStyle(envString("DEAL_POST_STYLE", "wario")),
+
+    /* Deal-feed discovery: PA-API SearchItems polls each active DealFeed for
+       products currently on sale (Wario64-style, but approval-gated unless
+       DEAL_FEED_AUTOPOST=true). Needs DEALS_ENABLED + PA-API keys. */
+    discovery: {
+      intervalMinutes: envInt("DEAL_DISCOVERY_INTERVAL_MINUTES", 30),
+      /* Feeds polled per tick (each = 1 SearchItems call/page); the rest wait
+         their turn, oldest-run first, so quota spreads across feeds. */
+      feedsPerTick: envInt("DEAL_DISCOVERY_FEEDS_PER_TICK", 4),
+      /* SearchItems pages per feed run (10 items each, 1 call per page). */
+      pagesPerFeed: envInt("DEAL_DISCOVERY_PAGES_PER_FEED", 1),
+      /* true = discovered deals post without operator approval (the real
+         Wario64 mode). false = they queue as PENDING_APPROVAL and expire when
+         the price snapshot goes stale. DRY_RUN overrides either way. */
+      autopost: envBool("DEAL_FEED_AUTOPOST", false),
+      /* Daily budget for DISCOVERED posts only — keep it under
+         DEAL_MAX_POSTS_PER_DAY so feed finds can't starve watchlist alerts. */
+      maxPostsPerDay: envInt("DEAL_FEED_MAX_POSTS_PER_DAY", 2),
+    },
   },
 
   /* Amazon Product Advertising API 5.0 credentials. When either key is

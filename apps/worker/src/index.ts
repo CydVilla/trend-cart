@@ -2,6 +2,7 @@ import { prisma } from "@trendcart/db";
 import type { LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
 import { createDealChecker, type DealCheckStats } from "./deals/check.js";
+import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
 import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
@@ -71,6 +72,7 @@ async function main(): Promise<void> {
   const insightsStats: InsightsStats = { reports: 0, errors: 0 };
   const dealCheckStats: DealCheckStats = { checked: 0, fired: 0, deferred: 0, errors: 0, backoffs: 0 };
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
+  const dealDiscoverStats = newDealDiscoverStats();
   setCountersRef({
     discover: discoverStats,
     rehydrate: rehydrateStats,
@@ -83,6 +85,7 @@ async function main(): Promise<void> {
     insights: insightsStats,
     dealCheck: dealCheckStats,
     dealPost: dealPostStats,
+    dealDiscover: dealDiscoverStats,
   });
 
   const llm: LlmClient = config.llm.useFake
@@ -107,6 +110,7 @@ async function main(): Promise<void> {
   // checker self-disables without PA-API keys; the poster without Bluesky
   // creds or under DRY_RUN — the manual "post deal now" path still queues.
   const dealChecker = config.deals.enabled ? createDealChecker(dealCheckStats) : null;
+  const dealDiscoverer = config.deals.enabled ? createDealDiscoverer(dealDiscoverStats) : null;
   const dealPoster = config.deals.enabled ? createDealPoster(dealPostStats) : null;
   if (!config.deals.enabled) {
     console.log("  deal tracker:     disabled (set DEALS_ENABLED=true to run)");
@@ -136,6 +140,11 @@ async function main(): Promise<void> {
     // Deal tracker loops (only when enabled + preconditions met).
     ...(dealChecker
       ? [startLoop("dealCheck", config.deals.checkIntervalMs, () => dealChecker.tick())]
+      : []),
+    // Ticks every minute; each feed is only due once per its interval, and
+    // feedsPerTick caps the per-minute API burst.
+    ...(dealDiscoverer?.enabled
+      ? [startLoop("dealDiscover", 60_000, () => dealDiscoverer.tick())]
       : []),
     ...(dealPoster ? [startLoop("dealPost", 30_000, () => dealPoster.tick())] : []),
     ...(notificationListener
@@ -172,7 +181,9 @@ async function main(): Promise<void> {
         `lessons=${reflectStats.reflections}` +
         (config.deals.enabled
           ? ` | dealChecked=${dealCheckStats.checked} dealFired=${dealCheckStats.fired} ` +
-            `dealDefer=${dealCheckStats.deferred} dealPosted=${dealPostStats.posted}`
+            `dealDefer=${dealCheckStats.deferred} dealPosted=${dealPostStats.posted} ` +
+            `feedRuns=${dealDiscoverStats.feeds} feedFound=${dealDiscoverStats.found} ` +
+            `feedQueued=${dealDiscoverStats.queued}`
           : ""),
     );
   }, STATS_LOG_MS);

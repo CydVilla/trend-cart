@@ -3,6 +3,35 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-07 — Deal feeds: Wario64-style sale discovery
+
+### Added
+- **Deal feeds** (ADR-0012): saved Amazon searches (keywords, category, min
+  % off, price band, review floors, sold-by-Amazon toggle) the worker polls
+  via PA-API SearchItems for products **currently on sale** — real
+  strikethrough discounts only, every gate re-verified server-side. Managed
+  in a new Deals-page section; three starter feeds seeded.
+  - Discovered deals queue as `PENDING_APPROVAL` with the exact post text and
+    approve/reject buttons, and **auto-expire** when the price snapshot passes
+    the freshness ceiling — the queue only ever shows actionable deals.
+    `DEAL_FEED_AUTOPOST=true` skips approval entirely.
+  - Per-ASIN dedup: discovered items become `origin=DISCOVERED` listings
+    (never price-polled) carrying the 7-day cooldown + identical-price dedup;
+    a new "Discovered by feeds" table can pause (ban) or delete any of them.
+  - Discovered posts spend their own daily budget
+    (`DEAL_FEED_MAX_POSTS_PER_DAY`, default 2) inside the global cap, so a hot
+    feed can't starve watchlist alerts, and are throttled by the global
+    gap/day caps at the poster like automated fires.
+- **Wario64-style post copy is the new default** for all deal posts
+  (`DEAL_POST_STYLE=wario`; `classic` restores the old format):
+  `"Title is $39.99 on Amazon (33% off, reg. $59.99) #ad"` + the compliance
+  line on its own line — the price phrase itself is the clickable affiliate
+  link (per-post `DealPost.linkAnchor`). Amazon's keyword-stuffed titles are
+  shortened deterministically (cut at the first strong separator outside
+  parentheses, so "(Switch)"-style platform markers survive).
+- `.env.example` documents a raise-the-caps recipe for a real deal-feed
+  cadence (autopost + 12 posts/day + 20-min gap) once the operator trusts it.
+
 ## 2026-07-04 (later) — Deal tracker + reply length fix
 
 ### Added
