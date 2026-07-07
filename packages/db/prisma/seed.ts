@@ -298,6 +298,97 @@ const suggestionSources: SourceSeed[] = [
     ],
     excludeKeywords: ["refurbished", "renewed", "pre-owned"],
   },
+  {
+    name: "Video games & gaming (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "Video games and gaming hardware: physical and digital game titles for PlayStation, " +
+      "Xbox, Nintendo Switch, and PC; consoles and handhelds (PS5, Xbox Series, Switch, " +
+      "Steam Deck); controllers, headsets, and gaming accessories. Gaming-branded apparel, " +
+      "gift cards, and in-game currency do NOT match.",
+    includeKeywords: [
+      "game",
+      "games",
+      "ps5",
+      "playstation",
+      "xbox",
+      "nintendo",
+      "switch",
+      "steam deck",
+      "console",
+      "controller",
+    ],
+    excludeKeywords: [
+      "gift card",
+      "subscription",
+      "in-game",
+      "refurbished",
+      "renewed",
+      "pre-owned",
+    ],
+    minPriceCents: 1000,
+  },
+  {
+    name: "Home office & desk setup (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "Home-office and desk gear: standing and sit-stand desks, ergonomic and office chairs, " +
+      "monitor arms and stands, desk lamps and lighting, cable management, keyboard and mouse " +
+      "peripherals, and desk organizers. General furniture and home decor unrelated to a work " +
+      "desk do NOT match.",
+    includeKeywords: [
+      "desk",
+      "chair",
+      "monitor arm",
+      "monitor stand",
+      "standing desk",
+      "office",
+      "keyboard",
+      "mouse",
+      "lamp",
+      "cable",
+    ],
+    excludeKeywords: ["gift card", "subscription", "refurbished", "renewed", "pre-owned"],
+    minPriceCents: 2000,
+  },
+  {
+    name: "LEGO & building sets (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "LEGO and building-brick sets, especially licensed pop-culture themes (Star Wars, " +
+      "Marvel, Harry Potter, Nintendo, Icons). Generic non-LEGO toys, minifigure blind bags, " +
+      "and used or incomplete sets do NOT match.",
+    includeKeywords: ["lego", "building set", "brick set"],
+    excludeKeywords: ["used", "incomplete", "refurbished", "renewed", "pre-owned"],
+    minPriceCents: 2000,
+  },
+  {
+    name: "Coffee & kitchen gear (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "Home coffee and kitchen equipment: espresso machines, coffee grinders, pour-over and " +
+      "cold-brew gear, kettles, and small kitchen appliances and organization. Groceries, " +
+      "consumable coffee beans, and gift cards do NOT match.",
+    includeKeywords: [
+      "coffee",
+      "espresso",
+      "grinder",
+      "kettle",
+      "french press",
+      "air fryer",
+      "kitchen",
+    ],
+    excludeKeywords: [
+      "gift card",
+      "subscription",
+      "k-cup",
+      "coffee beans",
+      "refurbished",
+      "renewed",
+      "pre-owned",
+    ],
+    minPriceCents: 1500,
+  },
 ];
 
 async function main(): Promise<void> {
