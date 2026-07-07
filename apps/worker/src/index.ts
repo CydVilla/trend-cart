@@ -5,6 +5,7 @@ import { createDealChecker, type DealCheckStats } from "./deals/check.js";
 import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
 import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDealSuggester, newDealSuggestStats } from "./deals/suggest.js";
+import { blueskyBackoffSeconds } from "./bluesky-health.js";
 import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
@@ -189,6 +190,7 @@ async function main(): Promise<void> {
         `posted=${posterStats.posted} requests=${notificationStats.requests} ` +
         `optOuts=${notificationStats.optOuts} outcomes=${outcomeStats.checked} ` +
         `lessons=${reflectStats.reflections}` +
+        (blueskyBackoffSeconds() > 0 ? ` | BLUESKY DOWN (retry ${blueskyBackoffSeconds()}s)` : "") +
         (config.deals.enabled
           ? ` | dealChecked=${dealCheckStats.checked} dealFired=${dealCheckStats.fired} ` +
             `dealDefer=${dealCheckStats.deferred} dealPosted=${dealPostStats.posted} ` +

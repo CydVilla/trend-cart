@@ -1,6 +1,7 @@
 import { AtpAgent } from "@atproto/api";
 import { prisma } from "@trendcart/db";
 import { computeEngagementScore } from "@trendcart/shared";
+import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 import { findPromotionalMatch, findSensitiveMatch } from "./filters.js";
 
@@ -110,12 +111,20 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
   let agent: AtpAgent | null = null;
 
   async function tick(): Promise<void> {
+    if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
     if (!agent) {
       const candidate = new AtpAgent({ service: "https://bsky.social" });
-      await candidate.login({
-        identifier: config.bluesky.handle,
-        password: config.bluesky.appPassword,
-      });
+      try {
+        await candidate.login({
+          identifier: config.bluesky.handle,
+          password: config.bluesky.appPassword,
+        });
+      } catch (error) {
+        // Transient outage → back off quietly; a real auth error still throws
+        // loudly so the operator sees the credential problem.
+        if (noteBlueskyDown(error)) return;
+        throw error;
+      }
       agent = candidate;
     }
     const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
@@ -133,6 +142,7 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
             since,
             limit: RESULTS_PER_QUERY,
           });
+          noteBlueskyUp(); // a working search means Bluesky is back
           for (const post of response.data.posts) {
             await processSearchResult(
               post as unknown as SearchResultPost,
@@ -143,6 +153,9 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
           }
         } catch (error) {
           stats.errors += 1;
+          // Bluesky is down — stop grinding the remaining ~115 queries this
+          // cycle; back off and let the next tick probe once the window clears.
+          if (noteBlueskyDown(error)) return;
           console.error(
             `[discover] query "${query}" failed:`,
             error instanceof Error ? error.message : error,

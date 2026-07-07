@@ -1,5 +1,6 @@
 import { AtpAgent } from "@atproto/api";
 import { prisma } from "@trendcart/db";
+import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 
 /**
@@ -73,18 +74,31 @@ export function createNotificationListener(
   let lastSeen = new Date(Date.now() - 30 * 60_000);
 
   async function tick(): Promise<void> {
+    if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
     if (!agent) {
       const candidate = new AtpAgent({ service: "https://bsky.social" });
-      await candidate.login({
-        identifier: config.bluesky.handle,
-        password: config.bluesky.appPassword,
-      });
+      try {
+        await candidate.login({
+          identifier: config.bluesky.handle,
+          password: config.bluesky.appPassword,
+        });
+      } catch (error) {
+        if (noteBlueskyDown(error)) return; // transient outage — back off, retry later
+        throw error;
+      }
       agent = candidate;
     }
     // Paginate so a burst (>50 notifications between ticks) can't silently
     // drop opt-outs or requests; process OLDEST-FIRST so a later opt-out is
     // never erased by an earlier mention.
-    let response = await agent.listNotifications({ limit: 50 });
+    let response;
+    try {
+      response = await agent.listNotifications({ limit: 50 });
+    } catch (error) {
+      if (noteBlueskyDown(error)) return;
+      throw error;
+    }
+    noteBlueskyUp();
     const collected = [...response.data.notifications];
     for (let page = 0; page < 3; page++) {
       const oldest = response.data.notifications.at(-1);

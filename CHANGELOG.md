@@ -81,6 +81,23 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-07 — Bluesky outage resilience
+
+### Fixed
+- A Bluesky outage (504 gateway timeout, network error, 5xx, rate limit) no
+  longer wastes resources or breaks the bot. A shared reachability gate
+  (`bluesky-health.ts`) backs off exponentially (1m → 15m cap) and the loops
+  themselves probe on recovery; every Bluesky-touching loop (discover, reply
+  poster, deal poster, notifications) skips cheaply while it's down.
+- **Transient outages no longer permanently disable posting.** The posters'
+  3-strikes login-disable now fires only on genuine auth failures (bad
+  password) — a 504 spate backs off and retries instead of stopping until a
+  dyno restart.
+- Discovery stops grinding all ~116 search queries when Bluesky is down — it
+  bails on the first transient failure and lets the backoff window pass.
+- The worker stats line shows `BLUESKY DOWN (retry Ns)` and the dashboard
+  worker card shows `waiting: Bluesky unreachable` during an outage.
+
 ## 2026-07-06 — Manual candidates get true end-to-end priority
 
 ### Changed

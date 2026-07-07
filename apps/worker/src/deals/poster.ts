@@ -1,6 +1,7 @@
 import { AtpAgent, type AppBskyRichtextFacet } from "@atproto/api";
 import { prisma, DealPostStatus, DealSource, type DealPost, type TrackedListing } from "@trendcart/db";
 import { composeDealPost, DEAL_ANCHOR, formatMoney, isAmazonHost, validateDealText } from "@trendcart/shared";
+import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "../bluesky-health.js";
 import { config } from "../config.js";
 import { isPaused } from "../heartbeat.js";
 
@@ -78,6 +79,8 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       agent = candidate;
       return agent;
     } catch (error) {
+      // Transient outage ≠ bad credentials — back off, never permanently disable.
+      if (noteBlueskyDown(error)) return null;
       loginFailures += 1;
       console.error(
         `[dealPoster] login failed (${loginFailures}/${MAX_LOGIN_FAILURES}):`,
@@ -117,6 +120,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
   async function tick(): Promise<void> {
     if (stopped) return;
     if (await isPaused()) return;
+    if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
 
     const candidate = await prisma.dealPost.findFirst({
       where: {
@@ -256,10 +260,19 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
           data: { lastPostedAt: new Date() },
         }),
       ]);
+      noteBlueskyUp();
       stats.posted += 1;
       console.log(`[dealPoster] posted deal for ${listing.asin} (${listing.title})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Bluesky outage → release the claim without burning an attempt.
+      if (noteBlueskyDown(error)) {
+        await prisma.dealPost.update({
+          where: { id: deal.id },
+          data: { status: DealPostStatus.READY },
+        });
+        return;
+      }
       const attempts = deal.attemptCount + 1;
       if (isPermanentPostError(message) || attempts >= MAX_POST_ATTEMPTS) {
         await prisma.dealPost.update({

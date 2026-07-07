@@ -1,5 +1,6 @@
 import { AtpAgent, RichText } from "@atproto/api";
 import { prisma, ReplyStatus } from "@trendcart/db";
+import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 import { isPaused, setPostingState } from "./heartbeat.js";
 
@@ -83,6 +84,12 @@ export function createPoster(stats: PosterStats): Poster {
       agent = candidate;
       return agent;
     } catch (error) {
+      // A transient outage (504/network) is NOT a credential problem — back off
+      // and retry later; never let it trip the permanent login-disable.
+      if (noteBlueskyDown(error)) {
+        setPostingState("waiting: Bluesky unreachable");
+        return null;
+      }
       loginFailures += 1;
       console.error(
         `[poster] login failed (${loginFailures}/${MAX_LOGIN_FAILURES}):`,
@@ -108,6 +115,7 @@ export function createPoster(stats: PosterStats): Poster {
   async function tick(): Promise<void> {
     if (stopped) return;
     if (await isPaused()) return;
+    if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
 
     // Restart-proof global gap between real posts, derived from the DB.
     const lastPosted = await prisma.botReply.findFirst({
@@ -231,10 +239,20 @@ export function createPoster(stats: PosterStats): Poster {
         where: { id: approved.id },
         data: { status: ReplyStatus.POSTED, replyUri: result.uri, postedAt: new Date() },
       });
+      noteBlueskyUp();
       stats.posted += 1;
       console.log(`[poster] posted reply to ${approved.post.uri}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // A Bluesky outage must not burn this reply's attempts — back off and
+      // release the claim without counting the failure against it.
+      if (noteBlueskyDown(error)) {
+        await prisma.botReply.update({
+          where: { id: approved.id },
+          data: { status: ReplyStatus.APPROVED },
+        });
+        return;
+      }
       const attempts = approved.attemptCount + 1;
       if (isPermanentPostError(message) || attempts >= MAX_POST_ATTEMPTS) {
         await prisma.botReply.update({
