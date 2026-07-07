@@ -81,6 +81,14 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - Manual "Post deal now" posts bypass the global cooldown and daily cap — those
   throttle the automated price-trigger, not the operator deliberately posting.
 
+## 2026-07-07 — Release resilient to transient DB blips
+
+### Fixed
+- The release-phase migration (`prisma migrate deploy`) now retries up to 5×
+  (15s apart) on a connection failure instead of failing the whole deploy —
+  a brief Heroku Postgres network blip killed v47/v48. `migrate deploy` is
+  idempotent, so retrying is safe.
+
 ## 2026-07-07 — Bluesky outage resilience
 
 ### Fixed
