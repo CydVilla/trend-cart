@@ -384,6 +384,85 @@ model DealPost {
   @@index([createdAt])
 }
 
+/// Lifecycle of an RSS-sourced deal suggestion. NEW = awaiting the operator;
+/// QUEUED = operator confirmed the price and a DealPost was queued; DISMISSED
+/// = operator passed; EXPIRED = nobody acted before the deal went stale.
+enum SuggestionStatus {
+  NEW
+  QUEUED
+  DISMISSED
+  EXPIRED
+}
+
+/// One RSS feed of deals (e.g. a Slickdeals feed) the worker polls for
+/// Amazon items, plus the topical lane it should keep ("tech & electronics",
+/// "pop-culture apparel"). Bridges the no-PA-API gap: suggestions carry a
+/// price HINT only — the operator confirms the real price before anything
+/// posts, so no third-party price is ever advertised unattested.
+model DealSuggestionSource {
+  id   String @id @default(cuid())
+  /// Display name, unique so seeding stays idempotent.
+  name String @unique
+  /// RSS 2.0 feed URL.
+  url  String
+  /// Plain-words criteria for what belongs in this lane — the LLM topical
+  /// gate judges each item title against this.
+  topic String
+  /// Cheap prefilter: when non-empty, an item title must contain at least one
+  /// (case-insensitive) before it reaches the LLM gate.
+  includeKeywords String[] @default([])
+  /// Item titles containing any of these never become suggestions.
+  excludeKeywords String[] @default([])
+  /// Optional price band applied to the parsed hint price (when present).
+  minPriceCents Int?
+  maxPriceCents Int?
+  isActive Boolean @default(true)
+
+  // ── run state (written by the worker) ──
+  lastFetchedAt   DateTime?
+  lastItemCount   Int @default(0)
+  lastQueuedCount Int @default(0)
+  lastFetchError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  suggestions DealSuggestion[]
+
+  @@index([isActive, lastFetchedAt])
+}
+
+/// One Amazon item found in a deal RSS feed, waiting for the operator to
+/// confirm the price and queue a post (or dismiss it). Never posts by itself.
+model DealSuggestion {
+  id       String               @id @default(cuid())
+  sourceId String
+  source   DealSuggestionSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  /// RSS item guid (or link fallback) — the per-source dedup key.
+  guid  String
+  /// Raw RSS item title (deal headline, often includes the price).
+  title String
+  asin        String
+  marketplace String @default("www.amazon.com")
+  /// Canonical, tag-FREE product URL rebuilt from the ASIN — the source's
+  /// affiliate/redirect params never survive.
+  productUrl String
+  /// Price parsed from the deal headline, integer cents — a HINT the operator
+  /// must confirm; never advertised as-is.
+  hintPriceCents Int?
+  /// The deal thread/page for the operator to double-check.
+  sourceUrl String?
+  status    SuggestionStatus @default(NEW)
+  /// Topical-gate audit: verdict + confidence + model (or "keywords-only").
+  gateVerdict Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([sourceId, guid])
+  @@index([status, createdAt])
+  @@index([asin])
+}
+
 /// One saved PA-API SearchItems query the discovery loop runs on a schedule:
 /// "find products in this category, currently discounted at least X%". The
 /// Wario64-style feed control panel — each row is an independent deal search.

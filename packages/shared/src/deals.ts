@@ -174,6 +174,23 @@ export function shortenAmazonTitle(raw: string, max = 90): string {
   return short;
 }
 
+/**
+ * Strip deal-headline noise from an RSS item title ("Widget 2-Pack $29.99 +
+ * Free Shipping" → "Widget 2-Pack") so it can prefill a post-title field.
+ * Heuristic only — the operator edits the result before anything posts.
+ */
+export function cleanDealTitle(raw: string): string {
+  let title = raw.replace(/\s+/g, " ").trim();
+  // Headlines end with "$29.99 + Free Shipping"-style suffixes: cut at the
+  // first price, unless it leads the title ("$5 Widget" stays intact).
+  const priceIdx = title.search(/\$\s*[0-9]/);
+  if (priceIdx > 10) title = title.slice(0, priceIdx);
+  return title
+    .replace(/\b(?:w\/\s*|with\s*)?free (?:shipping|delivery|s&h)\b.*$/i, "")
+    .replace(/[\s\-–—:,+@&]+$/g, "")
+    .trim();
+}
+
 export type ComposedDeal = { text: string; anchor: string };
 
 /**

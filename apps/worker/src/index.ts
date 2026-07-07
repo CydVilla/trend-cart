@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { createDealChecker, type DealCheckStats } from "./deals/check.js";
 import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
 import { createDealPoster, type DealPostStats } from "./deals/poster.js";
+import { createDealSuggester, newDealSuggestStats } from "./deals/suggest.js";
 import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
@@ -73,6 +74,7 @@ async function main(): Promise<void> {
   const dealCheckStats: DealCheckStats = { checked: 0, fired: 0, deferred: 0, errors: 0, backoffs: 0 };
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
   const dealDiscoverStats = newDealDiscoverStats();
+  const dealSuggestStats = newDealSuggestStats();
   setCountersRef({
     discover: discoverStats,
     rehydrate: rehydrateStats,
@@ -86,6 +88,7 @@ async function main(): Promise<void> {
     dealCheck: dealCheckStats,
     dealPost: dealPostStats,
     dealDiscover: dealDiscoverStats,
+    dealSuggest: dealSuggestStats,
   });
 
   const llm: LlmClient = config.llm.useFake
@@ -112,6 +115,9 @@ async function main(): Promise<void> {
   const dealChecker = config.deals.enabled ? createDealChecker(dealCheckStats) : null;
   const dealDiscoverer = config.deals.enabled ? createDealDiscoverer(dealDiscoverStats) : null;
   const dealPoster = config.deals.enabled ? createDealPoster(dealPostStats) : null;
+  // RSS suggestions need no Amazon keys — the point is bridging the
+  // pre-PA-API gap — so only DEALS_ENABLED (and its own toggle) gates them.
+  const dealSuggester = config.deals.enabled ? createDealSuggester(llm, dealSuggestStats) : null;
   if (!config.deals.enabled) {
     console.log("  deal tracker:     disabled (set DEALS_ENABLED=true to run)");
   }
@@ -145,6 +151,10 @@ async function main(): Promise<void> {
     // feedsPerTick caps the per-minute API burst.
     ...(dealDiscoverer?.enabled
       ? [startLoop("dealDiscover", 60_000, () => dealDiscoverer.tick())]
+      : []),
+    // Same per-source due-gating pattern as discovery, RSS instead of PA-API.
+    ...(dealSuggester?.enabled
+      ? [startLoop("dealSuggest", 60_000, () => dealSuggester.tick())]
       : []),
     ...(dealPoster ? [startLoop("dealPost", 30_000, () => dealPoster.tick())] : []),
     ...(notificationListener
@@ -183,7 +193,8 @@ async function main(): Promise<void> {
           ? ` | dealChecked=${dealCheckStats.checked} dealFired=${dealCheckStats.fired} ` +
             `dealDefer=${dealCheckStats.deferred} dealPosted=${dealPostStats.posted} ` +
             `feedRuns=${dealDiscoverStats.feeds} feedFound=${dealDiscoverStats.found} ` +
-            `feedQueued=${dealDiscoverStats.queued}`
+            `feedQueued=${dealDiscoverStats.queued} rssItems=${dealSuggestStats.items} ` +
+            `rssSuggested=${dealSuggestStats.suggested}`
           : ""),
     );
   }, STATS_LOG_MS);

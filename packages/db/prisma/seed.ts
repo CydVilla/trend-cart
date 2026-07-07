@@ -239,6 +239,67 @@ const dealFeeds: FeedSeed[] = [
   },
 ];
 
+/**
+ * Starter RSS suggestion sources — the no-PA-API path. Both read the
+ * Slickdeals frontpage feed; the lane (topic + keyword prefilter) does the
+ * separation. Create-only: dashboard edits survive re-runs.
+ */
+type SourceSeed = {
+  name: string;
+  url: string;
+  topic: string;
+  includeKeywords: string[];
+  excludeKeywords: string[];
+  minPriceCents?: number;
+};
+
+const SLICKDEALS_FRONTPAGE_RSS =
+  "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1";
+
+const suggestionSources: SourceSeed[] = [
+  {
+    name: "Tech & electronics (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "Consumer tech and electronics: computers and PC parts, monitors, TVs, audio " +
+      "(headphones, earbuds, speakers), smart home, phones and tablets, gaming hardware " +
+      "and accessories (consoles, controllers, headsets), storage, networking, chargers " +
+      "and cables. Software subscriptions, gift cards, and non-tech household goods do " +
+      "NOT match.",
+    includeKeywords: [],
+    excludeKeywords: ["gift card", "subscription", "refurbished", "renewed", "pre-owned"],
+    minPriceCents: 1500,
+  },
+  {
+    name: "Pop-culture apparel (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "Clothing and apparel tied to TV shows, movies, video games, anime, comics, or " +
+      "pop-culture fandoms: graphic tees, hoodies, sweatshirts, jerseys, hats, socks, " +
+      "pajamas, costumes — items branded with a franchise or character (Star Wars, " +
+      "Marvel, Zelda, Pokémon, Mario, etc.). Plain unbranded clothing does NOT match.",
+    // Cheap prefilter: only clothing headlines reach the LLM lane judgment.
+    includeKeywords: [
+      "shirt",
+      "tee",
+      "t-shirt",
+      "hoodie",
+      "sweatshirt",
+      "sweater",
+      "jacket",
+      "jersey",
+      "hat",
+      "cap",
+      "beanie",
+      "socks",
+      "pajama",
+      "costume",
+      "apparel",
+    ],
+    excludeKeywords: ["refurbished", "renewed", "pre-owned"],
+  },
+];
+
 async function main(): Promise<void> {
   for (const c of categories) {
     await prisma.productCategory.upsert({
@@ -265,6 +326,18 @@ async function main(): Promise<void> {
     console.log(`  upserted deal feed: ${f.name}`);
   }
   console.log(`Seeded ${dealFeeds.length} deal feeds (idle until DEALS_ENABLED + PA-API keys).`);
+
+  for (const s of suggestionSources) {
+    await prisma.dealSuggestionSource.upsert({
+      where: { name: s.name },
+      create: { ...s, isActive: true },
+      update: {}, // operator tuning wins over re-seeds
+    });
+    console.log(`  upserted suggestion source: ${s.name}`);
+  }
+  console.log(
+    `Seeded ${suggestionSources.length} RSS suggestion sources (run under DEALS_ENABLED, no PA-API needed).`,
+  );
 }
 
 main()

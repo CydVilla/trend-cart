@@ -155,6 +155,14 @@ Three paths feed the same exactly-once poster:
   an optional stricter alert price; the worker polls prices and fires when a
   tracked item drops below its threshold. One sale = one post (it re-arms only
   after the price climbs back up).
+- **RSS suggestions** (ADR-0013, **no PA-API needed**): deal-site RSS feeds
+  (Slickdeals seeded, two lanes: tech & electronics, pop-culture apparel) are
+  polled for Amazon items; an LLM judges each headline against the lane
+  ("fandom clothing only — plain apparel doesn't match"), and matches appear
+  as suggestions with the parsed price as a hint. You check the live Amazon
+  price, confirm it, and the post queues — the operator attestation is what
+  makes a price compliant to advertise without PA-API. Suggestions expire on
+  their own after 48h.
 - **Manual** ("Post deal now" on a listing): you enter the sale price and it
   queues a post immediately — no API keys required.
 
@@ -198,6 +206,7 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `DEAL_POST_STYLE` | `wario` (default, terse deal-account copy) \| `classic` |
 | `DEAL_FEED_AUTOPOST` | `true` = feed-discovered deals post without approval (default false) |
 | `DEAL_FEED_MAX_POSTS_PER_DAY` | Daily budget for feed-discovered posts (default 2) |
+| `DEAL_SUGGESTIONS_ENABLED` | RSS deal suggestions — the no-PA-API path (default true, still needs `DEALS_ENABLED`) |
 
 ## Safety model
 

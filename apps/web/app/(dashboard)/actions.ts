@@ -1,7 +1,16 @@
 "use server";
 
 import Anthropic from "@anthropic-ai/sdk";
-import { prisma, DealArmState, DealPostStatus, DealSource, ReplyStatus, SafetyStatus } from "@trendcart/db";
+import {
+  prisma,
+  DealArmState,
+  DealPostStatus,
+  DealSource,
+  ListingOrigin,
+  ReplyStatus,
+  SafetyStatus,
+  SuggestionStatus,
+} from "@trendcart/db";
 import {
   PAAPI_SEARCH_INDEXES,
   canonicalAmazonUrl,
@@ -773,5 +782,210 @@ export async function rejectDealPost(formData: FormData): Promise<void> {
     where: { id, status: DealPostStatus.PENDING_APPROVAL },
     data: { status: DealPostStatus.SKIPPED, skipReason: "rejected by operator" },
   });
+  revalidatePath("/deals");
+}
+
+// ── Deal suggestion sources (RSS; the no-PA-API bridge) ─────
+
+/** Shared parse/validate for the create + update source forms. */
+function sourceFields(formData: FormData): {
+  url: string;
+  topic: string;
+  includeKeywords: string[];
+  excludeKeywords: string[];
+  minPriceCents: number | null;
+  maxPriceCents: number | null;
+} | null {
+  const url = str(formData, "url");
+  const topic = str(formData, "topic");
+  if (!topic) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  } catch {
+    return null;
+  }
+  const minPriceCents = parseCents(str(formData, "minPrice"));
+  const maxPriceCents = parseCents(str(formData, "maxPrice"));
+  if (minPriceCents != null && maxPriceCents != null && maxPriceCents < minPriceCents) return null;
+  return {
+    url,
+    topic,
+    includeKeywords: list(formData, "includeKeywords"),
+    excludeKeywords: list(formData, "excludeKeywords"),
+    minPriceCents,
+    maxPriceCents,
+  };
+}
+
+export async function createSuggestionSource(formData: FormData): Promise<void> {
+  const name = str(formData, "name");
+  const fields = sourceFields(formData);
+  if (!name || !fields) return;
+  await prisma.dealSuggestionSource.upsert({
+    where: { name },
+    create: { name, ...fields },
+    update: fields,
+  });
+  revalidatePath("/deals");
+}
+
+export async function updateSuggestionSource(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  const fields = sourceFields(formData);
+  if (!id || !fields) return;
+  await prisma.dealSuggestionSource.update({ where: { id }, data: fields }).catch(() => {});
+  revalidatePath("/deals");
+}
+
+export async function toggleSuggestionSourceActive(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  const source = await prisma.dealSuggestionSource.findUnique({ where: { id } });
+  if (!source) return;
+  await prisma.dealSuggestionSource.update({
+    where: { id },
+    data: { isActive: !source.isActive },
+  });
+  revalidatePath("/deals");
+}
+
+export async function deleteSuggestionSource(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  // Suggestions cascade with their source.
+  await prisma.dealSuggestionSource.delete({ where: { id } }).catch(() => {});
+  revalidatePath("/deals");
+}
+
+/** Make the source due immediately (the worker picks it up within a minute). */
+export async function fetchSuggestionSourceNow(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  await prisma.dealSuggestionSource.updateMany({
+    where: { id, isActive: true },
+    data: { lastFetchedAt: null, lastFetchError: null },
+  });
+  revalidatePath("/deals");
+}
+
+export async function dismissSuggestion(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  await prisma.dealSuggestion.updateMany({
+    where: { id, status: SuggestionStatus.NEW },
+    data: { status: SuggestionStatus.DISMISSED },
+  });
+  revalidatePath("/deals");
+}
+
+/**
+ * The operator confirmed a suggested deal: they checked the price on Amazon
+ * just now and attest it (priceAsOf = now — same trust model as postDealNow).
+ * Creates/updates the per-ASIN listing row and queues a MANUAL deal post with
+ * the operator's title, sale price, and optional full price for the % off.
+ */
+export async function queueSuggestedDeal(formData: FormData): Promise<void> {
+  const tag = associateTag();
+  if (!tag) return;
+  const id = str(formData, "id");
+  const title = str(formData, "title");
+  const saleCents = parseCents(str(formData, "salePrice"));
+  const fullCents = parseCents(str(formData, "fullPrice"));
+  if (!id || !title || saleCents === null || saleCents <= 0) return;
+  if (fullCents != null && fullCents <= saleCents) return; // "full" must exceed sale
+  const suggestion = await prisma.dealSuggestion.findUnique({ where: { id } });
+  if (!suggestion || suggestion.status !== SuggestionStatus.NEW) return;
+
+  const productUrl = canonicalAmazonUrl(suggestion.asin, suggestion.marketplace);
+  const linkUrl = withAffiliateTag(productUrl, tag);
+  try {
+    if (!isAmazonHost(new URL(linkUrl).hostname)) return;
+  } catch {
+    return;
+  }
+
+  const listing = await prisma.trackedListing.upsert({
+    where: {
+      asin_marketplace: { asin: suggestion.asin, marketplace: suggestion.marketplace },
+    },
+    create: {
+      asin: suggestion.asin,
+      marketplace: suggestion.marketplace,
+      productUrl,
+      title,
+      fullPriceCents: fullCents,
+      origin: ListingOrigin.DISCOVERED,
+      armState: DealArmState.DISARMED, // dedup state only — never polled
+    },
+    update: {
+      title,
+      ...(fullCents != null ? { fullPriceCents: fullCents } : {}),
+    },
+  });
+  if (!listing.isActive) return; // operator banned this ASIN earlier
+
+  // In-flight dedup: at most one queued/posting deal per listing.
+  const pending = await prisma.dealPost.findFirst({
+    where: {
+      listingId: listing.id,
+      status: {
+        in: [
+          DealPostStatus.PENDING,
+          DealPostStatus.PENDING_APPROVAL,
+          DealPostStatus.READY,
+          DealPostStatus.POSTING,
+        ],
+      },
+    },
+    select: { id: true },
+  });
+  if (pending) return;
+
+  const priceAsOf = new Date(); // operator attests the price as of NOW
+  const composed = composeDealPost({
+    title,
+    salePriceCents: saleCents,
+    wasPriceCents: fullCents,
+    currency: listing.currency,
+    priceAsOf,
+    linkUrl,
+    maxLength: DEAL_POST_MAX_LENGTH,
+    style: parseDealPostStyle(process.env.DEAL_POST_STYLE),
+  });
+  if ("error" in composed) return;
+
+  const dryRun = await workerInDryRun();
+  await prisma.$transaction([
+    prisma.dealPost.create({
+      data: {
+        listingId: listing.id,
+        source: DealSource.MANUAL,
+        status: dryRun ? DealPostStatus.DRY_RUN : DealPostStatus.READY,
+        salePriceCents: saleCents,
+        targetPriceCents: saleCents,
+        wasPriceCents: fullCents,
+        currency: listing.currency,
+        priceAsOf,
+        linkUrl,
+        postText: composed.text,
+        linkAnchor: composed.anchor,
+      },
+    }),
+    prisma.trackedListing.update({
+      where: { id: listing.id },
+      data: {
+        armState: DealArmState.DISARMED,
+        lastPriceCents: saleCents,
+        lastPriceAsOf: priceAsOf,
+        lastPostedPriceCents: saleCents,
+        source: "MANUAL",
+        ...(dryRun ? {} : { lastPostedAt: new Date() }),
+      },
+    }),
+    prisma.dealSuggestion.updateMany({
+      where: { id, status: SuggestionStatus.NEW },
+      data: { status: SuggestionStatus.QUEUED },
+    }),
+  ]);
   revalidatePath("/deals");
 }

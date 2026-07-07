@@ -2,7 +2,9 @@ import type {
   CandidateEvaluationResult,
   ClassifyPostInput,
   GenerateReplyInput,
+  JudgeSuggestionInput,
   LlmClient,
+  SuggestionVerdict,
 } from "@trendcart/shared";
 import { findPromotionalMatch, findSensitiveMatch } from "../filters.js";
 
@@ -103,5 +105,26 @@ export class FakeLlmClient implements LlmClient {
       text = `${text.slice(0, Math.max(0, input.textBudget - 1)).trimEnd()}…`;
     }
     return text;
+  }
+
+  async judgeDealSuggestion(input: JudgeSuggestionInput): Promise<SuggestionVerdict> {
+    // Deterministic word overlap: the headline matches when it shares any
+    // meaningful word with the lane criteria. No semantics — fake mode only
+    // exercises the pipeline shape, and its verdicts are labeled as such.
+    const words = new Set(
+      input.topic
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length > 3),
+    );
+    const matches = input.itemTitle
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .some((w) => words.has(w));
+    return {
+      matches,
+      confidence: matches ? 75 : 40,
+      reason: `fake: ${matches ? "shares a keyword with" : "no keyword overlap with"} the lane topic`,
+    };
   }
 }

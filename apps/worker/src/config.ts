@@ -140,6 +140,24 @@ export const config = {
          DEAL_MAX_POSTS_PER_DAY so feed finds can't starve watchlist alerts. */
       maxPostsPerDay: envInt("DEAL_FEED_MAX_POSTS_PER_DAY", 2),
     },
+
+    /* RSS deal suggestions: the no-PA-API bridge. Polls deal RSS feeds
+       (Deals page → Suggestion sources), lane-gates the items, and queues
+       SUGGESTIONS the operator confirms — this path never posts on its own
+       and needs no Amazon keys. */
+    suggestions: {
+      enabled: envBool("DEAL_SUGGESTIONS_ENABLED", true),
+      intervalMinutes: envInt("DEAL_SUGGEST_INTERVAL_MINUTES", 30),
+      sourcesPerTick: envInt("DEAL_SUGGEST_SOURCES_PER_TICK", 2),
+      /* Newest-first cap per fetch — bounds first-run floods. */
+      maxItemsPerFetch: envInt("DEAL_SUGGEST_MAX_ITEMS_PER_FETCH", 30),
+      /* NEW suggestions older than this auto-expire (deals rot fast). */
+      expireHours: envInt("DEAL_SUGGEST_EXPIRE_HOURS", 48),
+      /* Topical-gate floor: below this confidence an item is off-lane. */
+      minTopicConfidence: envInt("DEAL_SUGGEST_MIN_TOPIC_CONFIDENCE", 70),
+      /* LLM lane judgments per tick across all sources (cost bound). */
+      maxLlmPerTick: envInt("DEAL_SUGGEST_MAX_LLM_PER_TICK", 20),
+    },
   },
 
   /* Amazon Product Advertising API 5.0 credentials. When either key is
