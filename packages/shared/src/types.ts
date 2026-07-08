@@ -13,8 +13,11 @@ export type CandidateEvaluationResult = {
   recommendedSearchQuery: string | null;
   /**
    * 0–100: how confident the model is that the first page of Amazon results
-   * for recommendedSearchQuery shows the product itself or closely related
-   * same-franchise items. Below the floor, the query is never linked.
+   * for recommendedSearchQuery both shows the product itself (or closely
+   * related same-franchise items) AND lets a buyer order it right now (a
+   * genuine pre-order page counts). Out-of-print/collector-only items and
+   * titles with no listing yet score low even when results look relevant.
+   * Below the floor, the query is never linked.
    */
   linkConfidence: number;
   /** When real intent exists but no category fits: what category is missing? */

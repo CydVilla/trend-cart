@@ -3,6 +3,40 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-08 — Link confidence judges purchasability, not just relevance
+
+### Changed
+- **The classifier separates "does this product exist" from "can a buyer
+  order it now."** Operator 👎 ratings kept flagging replies that linked to
+  things a buyer couldn't get — a book with no buyable Amazon listing yet, a
+  sold-out / out-of-print Game Boy Color cartridge. Root cause: `linkConfidence`
+  was defined purely as *result relevance* ("does the first page show this
+  product or same-franchise items"), while rule 3b told the model that
+  anything an author owns or is excited about "is real and purchasable." An
+  out-of-print game's search still *looks* relevant (used listings, other
+  franchise titles), so it scored high and got linked to something unbuyable.
+  - **Rule 3b** keeps its real job — never skip a genuinely-released product
+    just because training data thinks it isn't out yet — but no longer asserts
+    purchasability. The test is whether a listing can be *ordered*: a live
+    **pre-order page counts as buyable** (an upcoming book/game you can
+    pre-order is a good link, framed as a pre-order); what fails is a title
+    with *no listing yet* (unannounced / "still in development") or an
+    out-of-print/discontinued item that survives only as used/collector
+    listings.
+  - **`linkConfidence`** now scores relevance AND orderable-right-now. A
+    page of used/collector listings for a sold-out item is a bad link even
+    though it "matches"; no-listing and collector-only items land in the low
+    (<50) bucket and fall back to a retargeted in-franchise query (a
+    re-release, successor console, physical edition), a category link, or no
+    link — never a dead search.
+  - **Rule 4's** retarget trigger extends past digital-only/services to cover
+    no-listing and out-of-print items, adding re-release/new-edition and the
+    successor console to the buyable targets; genuine pre-orders are kept
+    (noted as "pre-order" in the reply angle). The
+    `CandidateEvaluationResult.linkConfidence` doc comment is updated to match.
+- No schema, gate, or threshold change: `MIN_LINK_CONFIDENCE` (60) still does
+  the enforcing — the model now feeds it an orderability-aware score.
+
 ## 2026-07-08 — The bot can see: image + comment context
 
 ### Added
