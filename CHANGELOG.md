@@ -3,6 +3,25 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-08 — Calibration: honest labels + about-vs-incidental
+
+### Changed
+- **Calibration triage over chasing 100%** (issue #2). Two structural fixes,
+  then the residue is left to the learning loop:
+  - **Stale-draft labels excluded**: a dashboard rejection rejects a reply
+    *draft*, not the post. When the draft predates the current format (a raw
+    URL — replies now ride a facet — or a link to the retired
+    `/recommendations/` pages), it judged a draft the bot can no longer
+    produce. `calibrate.ts` drops those so the metric measures post selection.
+  - **Classifier — about vs. incidental**: a hashtag / "virtual photography"
+    screenshot naming a specific game *is* an identifiable-product candidate
+    (fixes the RE Requiem miss); but a product merely incidental to a personal
+    joke, anecdote, or mishap is not an opening — a recommendation there
+    hijacks a personal moment (matches operator 👎 ratings).
+- The remaining disagreements (hard link-confidence calls like whether an
+  itch.io indie game is on Amazon; evolving taste) are owned by the
+  rating → reflection → lessons loop, not more prompt hand-tuning.
+
 ## 2026-07-07 — RSS deal suggestions: the no-PA-API bridge
 
 ### Added
