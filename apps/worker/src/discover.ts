@@ -43,11 +43,44 @@ function isEnglish(langs: string[] | undefined): boolean {
   return langs.some((lang) => lang.toLowerCase().startsWith("en"));
 }
 
+/** A single image inside a hydrated Bluesky embed view. */
+type EmbedImage = { thumb?: string; fullsize?: string; alt?: string };
+/** The subset of a hydrated embed view we care about (images live directly on
+ *  an images#view, or nested under a recordWithMedia#view's media). */
+type EmbedView = {
+  $type?: string;
+  images?: EmbedImage[];
+  media?: { $type?: string; images?: EmbedImage[] };
+};
+
+/**
+ * Pull image thumbnails + author alt text from a hydrated embed. We keep the
+ * THUMBNAIL (a few hundred px), not full-size — vision tokens scale with pixels,
+ * so thumbnails hold cost near-zero while still letting the model read a game
+ * screenshot or box art. Alt text is free descriptive signal either way.
+ */
+export function extractImages(embed: EmbedView | undefined): { url: string; alt: string | null }[] {
+  if (!embed) return [];
+  const imgs =
+    embed.$type === "app.bsky.embed.images#view"
+      ? embed.images
+      : embed.$type === "app.bsky.embed.recordWithMedia#view" &&
+          embed.media?.$type === "app.bsky.embed.images#view"
+        ? embed.media.images
+        : undefined;
+  if (!imgs) return [];
+  return imgs
+    .map((i) => ({ url: i.thumb ?? i.fullsize ?? "", alt: i.alt?.trim() || null }))
+    .filter((i) => i.url.length > 0)
+    .slice(0, 4); // Bluesky allows at most 4 images per post
+}
+
 export type SearchResultPost = {
   uri: string;
   cid: string;
   author: { did: string; handle?: string };
   record?: { text?: string; reply?: unknown; langs?: string[] };
+  embed?: EmbedView;
   indexedAt?: string;
   likeCount?: number;
   repostCount?: number;
@@ -82,6 +115,8 @@ export async function processSearchResult(
   const score = computeEngagementScore(counts);
   if (score < config.llm.minEngagementScore) return skip(stats, "below_floor");
 
+  const images = extractImages(post.embed);
+
   const result = await prisma.post.createMany({
     data: [
       {
@@ -97,6 +132,9 @@ export async function processSearchResult(
         matchedKeywords: [query],
         source: "SEARCH",
         lastHydratedAt: new Date(), // counts are current at discovery
+        imageUrls: images.map((i) => i.url),
+        // Kept index-aligned with imageUrls ("" = no alt) so the pair survives.
+        imageAlts: images.map((i) => i.alt ?? ""),
       },
     ],
     skipDuplicates: true,

@@ -1,5 +1,6 @@
 import { prisma, ReplyStatus, type CandidateEvaluation, type Post } from "@trendcart/db";
 import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
+import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
 import { getOperatorFlags } from "./heartbeat.js";
@@ -324,12 +325,26 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     // attached as a facet at posting time, never shown raw.
     const reserved = link.anchor.length + 1;
     const compose = (text: string) => `${text} ${link.anchor}`;
+    // Same visual + conversation context the classifier saw, so the reply can
+    // reference what was actually shared. Comments are re-fetched fresh (cheap
+    // public read) so the reply reflects the thread as it stands now.
+    const images = evaluation.post.imageUrls.map((url, i) => ({
+      url,
+      alt: evaluation.post.imageAlts[i]?.trim() || null,
+    }));
+    const comments =
+      config.llm.useFake || evaluation.post.replyCount === 0
+        ? []
+        : await fetchTopComments(evaluation.post.uri);
+
     const replyInput = {
       postText: evaluation.post.text,
       categoryName: link.categoryName,
       suggestedReplyAngle: evaluation.suggestedReplyAngle,
       textBudget: config.bot.replyMaxLength - reserved,
       isDirectRequest: evaluation.post.source === "MENTION",
+      images,
+      comments,
       operatorNote: evaluation.post.operatorNote,
       operatorGuidance: config.llm.useFake ? null : await getOperatorGuidance(),
       learnedGuidelines: config.llm.useFake ? null : await getLearnedGuidelines(),

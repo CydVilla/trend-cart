@@ -3,6 +3,30 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-08 — The bot can see: image + comment context
+
+### Added
+- **Vision + conversation context for classification and replies.** The
+  classifier and reply generator were text-only — blind to a post's images and
+  to the replies underneath it (the `operatorNote` field existed only to
+  hand-describe images the bot couldn't see). Now:
+  - **Images**: discovery captures each post's image thumbnails + author alt
+    text from the Bluesky embed (previously discarded). Thumbnails are sent to
+    Haiku as vision input so it can actually *see* a game screenshot, box art,
+    or a physical edition — directly fixing the "virtual photography" /
+    hashtag-only posts that calibration flagged as misses. Thumbnails (not
+    full-size) keep vision ~$0.10/day at the eval cap.
+  - **Comments**: the post's top replies (by likes) are pulled from the public
+    AppView — free, no auth — and given to the classifier + reply as untrusted
+    conversation context ("is this on Switch?", "the physical edition rules").
+  - Both are gated (`VISION_ENABLED`, `COMMENTS_ENABLED`, default on) and
+    cost-capped (`VISION_MAX_IMAGES=2`, `COMMENTS_MAX=5`). Untrusted image alt
+    text and comments ride the same sanitizer/`untrusted_*` tags as post text,
+    so neither can inject instructions.
+  - Calibration replays stored images through the vision-capable brain for
+    fidelity; the reply reuses the same context so it can reference what was
+    actually shared.
+
 ## 2026-07-08 — Calibration: honest labels + about-vs-incidental
 
 ### Changed

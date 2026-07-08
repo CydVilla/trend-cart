@@ -88,6 +88,14 @@ model Post {
   /// injection). When set, LLM classification is bypassed entirely.
   operatorLinkUrl    String?
 
+  /// Thumbnail URLs of images attached to the post (Bluesky embed), captured
+  /// at ingest. Fed to the classifier as vision input so it can SEE what was
+  /// shared (a game screenshot, a physical edition) instead of guessing.
+  imageUrls          String[] @default([])
+  /// Alt text the author wrote for those images — free, descriptive context
+  /// (often names the product), passed to the classifier and reply as text.
+  imageAlts          String[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

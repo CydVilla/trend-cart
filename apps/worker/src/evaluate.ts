@@ -6,6 +6,7 @@ import type {
   CategoryContext,
   LlmClient,
 } from "@trendcart/shared";
+import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { findPromotionalMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
@@ -354,6 +355,15 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       continue;
     }
 
+    // Pair stored thumbnails with their alt text (arrays are index-aligned).
+    const images = post.imageUrls.map((url, i) => ({
+      url,
+      alt: post.imageAlts[i]?.trim() || null,
+    }));
+    // Only spend a thread fetch when replies actually exist; free public read.
+    const comments =
+      config.llm.useFake || post.replyCount === 0 ? [] : await fetchTopComments(post.uri);
+
     const input = {
       postText: post.text,
       authorHandle: post.authorHandle,
@@ -369,6 +379,8 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       authorProfile,
       isDirectRequest: post.source === "MENTION",
       threadContext: post.contextText,
+      images,
+      comments,
       operatorNote: post.operatorNote,
       operatorGuidance,
       learnedGuidelines,

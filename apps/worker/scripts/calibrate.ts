@@ -137,6 +137,10 @@ async function main(): Promise<void> {
         authorProfile: null,
         isDirectRequest: post.source === "MENTION",
         threadContext: post.contextText,
+        // Replay the stored images through today's (vision-capable) brain.
+        // Comments aren't persisted and old threads have drifted, so skip them.
+        images: post.imageUrls.map((url, i) => ({ url, alt: post.imageAlts[i]?.trim() || null })),
+        comments: [],
         operatorNote: post.operatorNote,
         operatorGuidance: guidance,
         learnedGuidelines: lessons,

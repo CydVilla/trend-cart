@@ -43,6 +43,9 @@ export type AuthorProfileContext = {
   accountAgeDays: number | null;
 } | null;
 
+/** An image attached to the post: a thumbnail URL for vision + author alt text. */
+export type PostImage = { url: string; alt: string | null };
+
 export type ClassifyPostInput = {
   postText: string;
   authorHandle: string | null;
@@ -58,6 +61,12 @@ export type ClassifyPostInput = {
   isDirectRequest?: boolean;
   /** Parent-post text when the request was made under someone else's post. */
   threadContext?: string | null;
+  /** Images attached to the post (thumbnails + alt) — vision context so the
+   *  model can SEE what was shared instead of guessing from text/hashtags. */
+  images?: PostImage[];
+  /** Top replies under the post — UNTRUSTED conversation context (what people
+   *  are saying about it), used to sharpen the judgment and reply angle. */
+  comments?: string[];
   /** TRUSTED note from the bot's operator (e.g. what a post's image shows). */
   operatorNote?: string | null;
   /** TRUSTED standing guidance the operator set — authoritative, overrides
@@ -80,6 +89,12 @@ export type GenerateReplyInput = {
   textBudget: number;
   /** True when answering someone who tagged the bot — address them directly. */
   isDirectRequest?: boolean;
+  /** Images attached to the post (thumbnails + alt) — lets the reply reference
+   *  what was actually shared. */
+  images?: PostImage[];
+  /** Top replies under the post — UNTRUSTED context so the reply fits the
+   *  conversation already happening. */
+  comments?: string[];
   /** TRUSTED note from the bot's operator, overrides inferences from the post. */
   operatorNote?: string | null;
   /** TRUSTED standing guidance the operator set — authoritative for tone and

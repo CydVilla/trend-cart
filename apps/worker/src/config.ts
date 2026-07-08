@@ -60,6 +60,26 @@ export const config = {
     lowSignalMultiplier: envInt("LOW_SIGNAL_MULTIPLIER", 2),
   },
 
+  /* Multimodal context for classification + reply. Both gated so cost stays
+     predictable; thumbnails + free public reads keep it well under $1/day. */
+  vision: {
+    /* Send post image THUMBNAILS to the model as vision input so it can see a
+       game screenshot / physical edition instead of guessing from hashtags.
+       Thumbnails (not full-size) keep it ~$0.10/day at the eval cap. */
+    enabled: envBool("VISION_ENABLED", true),
+    /* Hard cap on images per LLM call (a Bluesky post carries up to 4). */
+    maxImagesPerCall: envInt("VISION_MAX_IMAGES", 2),
+  },
+  comments: {
+    /* Pull the post's top replies (public API — free, no auth) and give them
+       to the classifier + reply as untrusted conversation context. */
+    enabled: envBool("COMMENTS_ENABLED", true),
+    /* Top-N replies by like count; bounds prompt size. */
+    max: envInt("COMMENTS_MAX", 5),
+    /* Drop replies shorter than this — "lol"/emoji add noise, not signal. */
+    minLength: envInt("COMMENTS_MIN_LENGTH", 15),
+  },
+
   site: {
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
   },
