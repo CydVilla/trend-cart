@@ -3,6 +3,28 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-08 — Calibration threshold sweep + sample-aware insights
+
+### Added
+- **Threshold sweep in the weekly calibration** (`pnpm --filter @trendcart/worker
+  calibrate`). The job already replays operator-labeled posts through the live
+  classifier + gates to measure agreement; it now classifies each post *once*
+  and re-gates those same outputs across a grid of `MIN_PRODUCT_INTENT_SCORE`
+  and `MIN_LINK_CONFIDENCE` values (no extra API calls). The report shows
+  agreement **and** reply-rate at each value and flags the one that best matches
+  your labels — so thresholds get tuned from the golden set instead of
+  eyeballed off the funnel. Disagreements are also bucketed by category, a
+  better cut/re-key signal than raw posted counts. `applyGates()` gained an
+  optional threshold override (defaults to config, so live gating is unchanged).
+
+### Changed
+- **Insights won't recommend cutting a category on noise.** The daily report
+  now marks any category with fewer than `CATEGORY_SAMPLE_FLOOR` (5)
+  worth-replying candidates as `[thin sample]`, and the analyst is told never to
+  recommend cutting/re-keying a thin category, nor to move a threshold without
+  citing its current value. (An earlier read proposed cutting categories that
+  had only 1–2 candidates — statistically meaningless.)
+
 ## 2026-07-08 — Link confidence judges purchasability, not just relevance
 
 ### Changed

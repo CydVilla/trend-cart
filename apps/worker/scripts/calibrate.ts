@@ -9,6 +9,13 @@
  *                      clicked Approve) that were never rated 👎
  *   expected NO REPLY: replies rated 👎, dashboard rejections, manual skips
  *
+ * Each post is classified ONCE; the report then re-gates those same LLM
+ * outputs at a grid of intent / link-confidence thresholds (a THRESHOLD SWEEP,
+ * no extra API calls) so the operator can pick the gate that best matches
+ * their own labels instead of eyeballing the funnel. Disagreements are also
+ * bucketed by category — higher-signal than the funnel's posted counts for
+ * deciding which categories to cut or re-key.
+ *
  * Output: a markdown report on stdout (the workflow files it as an issue).
  * Also stores the agreement number in BotMemory("calibration") so next run
  * (and the insights job) can show the trend.
@@ -18,15 +25,18 @@
  *      CALIBRATE_MAX_PER_CLASS (default 20).
  */
 import { prisma, type Post, type Prisma } from "@trendcart/db";
-import type { CategoryContext } from "@trendcart/shared";
+import type { CandidateEvaluationResult, CategoryContext } from "@trendcart/shared";
 import { config } from "../src/config.js";
-import { applyGates } from "../src/evaluate.js";
+import { applyGates, type GateThresholds } from "../src/evaluate.js";
 import { AnthropicLlmClient } from "../src/llm/anthropic.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "../src/reflect.js";
 
 const MAX_PER_CLASS = Number(process.env.CALIBRATE_MAX_PER_CLASS ?? 20);
 /** Autonomous mode went live 2026-07-06 — approvals before then were human clicks. */
 const MANUAL_ERA_END = new Date("2026-07-06T00:00:00Z");
+/** Values the sweep re-gates at. Bracket the useful range around the defaults. */
+const INTENT_SWEEP = [40, 45, 50, 55, 60, 65, 70, 75, 80, 85];
+const LINK_SWEEP = [40, 45, 50, 55, 60, 65, 70, 75, 80];
 
 type Labeled = { post: Post; expected: boolean; source: string };
 
@@ -94,6 +104,16 @@ async function gatherLabels(): Promise<Labeled[]> {
   return [...positives.filter((p) => !negativeIds.has(p.post.id)), ...negatives];
 }
 
+/** One classified label: the LLM output kept so the sweep can re-gate it. */
+type Scored = {
+  expected: boolean;
+  source: string;
+  text: string;
+  raw: CandidateEvaluationResult;
+};
+
+type SweepRow = { value: number; agreementPct: number; replyRate: number; current: boolean };
+
 async function main(): Promise<void> {
   if (!config.llm.anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required");
 
@@ -115,11 +135,10 @@ async function main(): Promise<void> {
   const [guidance, lessons] = await Promise.all([getOperatorGuidance(), getLearnedGuidelines()]);
   const llm = new AnthropicLlmClient(config.llm.anthropicApiKey, config.llm.model);
 
-  type Flip = { text: string; source: string; got: boolean; reason: string };
-  const flips: Flip[] = [];
-  let agree = 0;
+  // Classify each labeled post ONCE. The sweep below re-gates these raw
+  // outputs at many thresholds, so it adds no API calls beyond this loop.
+  const scoredPosts: Scored[] = [];
   let errors = 0;
-
   for (const { post, expected, source } of labels) {
     try {
       const raw = await llm.classifyPost({
@@ -145,24 +164,100 @@ async function main(): Promise<void> {
         operatorGuidance: guidance,
         learnedGuidelines: lessons,
       });
-      const verdict = applyGates(raw, activeSlugs);
-      if (verdict.shouldReply === expected) agree += 1;
-      else {
-        flips.push({
-          text: post.text.slice(0, 110),
-          source,
-          got: verdict.shouldReply,
-          reason: verdict.reason.slice(0, 140),
-        });
-      }
+      scoredPosts.push({ expected, source, text: post.text.slice(0, 110), raw });
     } catch (error) {
       errors += 1;
       console.error(`eval failed: ${error instanceof Error ? error.message : error}`);
     }
   }
 
-  const scored = labels.length - errors;
-  const pct = scored > 0 ? Math.round((agree / scored) * 100) : 0;
+  const scored = scoredPosts.length;
+  if (scored === 0) {
+    console.log(`## Calibration failed\n\nAll ${errors} evaluations errored.`);
+    return;
+  }
+
+  // Agreement + flips at the CURRENTLY DEPLOYED thresholds (the regression
+  // signal, unchanged from before the sweep was added).
+  type Flip = { text: string; source: string; got: boolean; reason: string; category: string };
+  const flips: Flip[] = [];
+  let agree = 0;
+  for (const s of scoredPosts) {
+    const verdict = applyGates(s.raw, activeSlugs);
+    if (verdict.shouldReply === s.expected) agree += 1;
+    else {
+      flips.push({
+        text: s.text,
+        source: s.source,
+        got: verdict.shouldReply,
+        reason: verdict.reason.slice(0, 140),
+        category: verdict.recommendedCategorySlug ?? "(specific-product search)",
+      });
+    }
+  }
+  const pct = Math.round((agree / scored) * 100);
+
+  // Re-gate the same outputs at each threshold value. agreementPct is vs the
+  // operator's labels; replyRate is the share of THIS labeled set the bot
+  // would reply to — shown so a stricter gate's agreement gain is read against
+  // its volume cost (a "never reply" gate scores high if most labels are no).
+  function sweep(values: number[], make: (v: number) => GateThresholds, current: number): SweepRow[] {
+    return values.map((value) => {
+      let a = 0;
+      let replies = 0;
+      for (const s of scoredPosts) {
+        const verdict = applyGates(s.raw, activeSlugs, make(value));
+        if (verdict.shouldReply) replies += 1;
+        if (verdict.shouldReply === s.expected) a += 1;
+      }
+      return {
+        value,
+        agreementPct: Math.round((a / scored) * 100),
+        replyRate: Math.round((replies / scored) * 100),
+        current: value === current,
+      };
+    });
+  }
+  const intentSweep = sweep(
+    INTENT_SWEEP,
+    (v) => ({ minProductIntentScore: v }),
+    config.bot.minProductIntentScore,
+  );
+  const linkSweep = sweep(LINK_SWEEP, (v) => ({ minLinkConfidence: v }), config.bot.minLinkConfidence);
+
+  function peak(rows: SweepRow[]): SweepRow {
+    return rows.reduce((best, r) => (r.agreementPct > best.agreementPct ? r : best));
+  }
+  function sweepTable(name: string, envVar: string, rows: SweepRow[], current: number): string[] {
+    const best = peak(rows);
+    const currentRow = rows.find((r) => r.current);
+    const out = [
+      `### ${name} — \`${envVar}\` (currently ${current})`,
+      ``,
+      `| ${name} | agreement | reply-rate | |`,
+      `| ---: | ---: | ---: | :--- |`,
+    ];
+    for (const r of rows) {
+      const tags = [r.current ? "← current" : "", r.value === best.value ? "peak" : ""]
+        .filter(Boolean)
+        .join(", ");
+      out.push(`| ${r.value} | ${r.agreementPct}% | ${r.replyRate}% | ${tags} |`);
+    }
+    out.push(``);
+    out.push(
+      best.value === current
+        ? `Current \`${envVar}=${current}\` already maximizes agreement (${best.agreementPct}%).`
+        : `Agreement peaks at \`${envVar}=${best.value}\` (${best.agreementPct}%) vs ${currentRow?.agreementPct ?? "?"}% at the current ${current}. Check the reply-rate column before moving — a stricter gate trades volume for agreement.`,
+    );
+    out.push(``);
+    return out;
+  }
+
+  // Disagreements bucketed by category — where the brain and the operator
+  // diverge most, a better cut/re-key signal than raw posted counts.
+  const catFlips = new Map<string, number>();
+  for (const f of flips) catFlips.set(f.category, (catFlips.get(f.category) ?? 0) + 1);
+  const catFlipRows = [...catFlips.entries()].sort((a, b) => b[1] - a[1]);
 
   const prev = await prisma.botMemory.findUnique({ where: { id: "calibration" } });
   const prevBasis = (prev?.basis ?? null) as { agreementPct?: number } | null;
@@ -176,9 +271,25 @@ async function main(): Promise<void> {
     ``,
     `Replayed **${scored}** operator-labeled posts (${positives} expected-reply, ${negatives} expected-skip) through the current classifier + gates + lessons + guidance.`,
     ``,
-    `**Agreement: ${pct}%**${delta}${errors ? ` · ${errors} eval errors` : ""}`,
+    `**Agreement: ${pct}%**${delta}${errors ? ` · ${errors} eval errors` : ""} at the deployed thresholds (\`MIN_PRODUCT_INTENT_SCORE=${config.bot.minProductIntentScore}\`, \`MIN_LINK_CONFIDENCE=${config.bot.minLinkConfidence}\`).`,
     ``,
+    `## Threshold sweep — which gate best matches your labels`,
+    ``,
+    `The same replayed evaluations, re-gated at each value (no extra API calls). Use this to tune thresholds from your own labels instead of guessing; reply-rate is the share of this labeled set the bot would reply to.`,
+    ``,
+    ...sweepTable("Intent", "MIN_PRODUCT_INTENT_SCORE", intentSweep, config.bot.minProductIntentScore),
+    ...sweepTable("Link confidence", "MIN_LINK_CONFIDENCE", linkSweep, config.bot.minLinkConfidence),
   ];
+  if (catFlipRows.length > 0) {
+    lines.push(
+      `### Disagreements by category`,
+      ``,
+      `Categories the brain and your labels diverge on most (at current thresholds):`,
+      ``,
+    );
+    for (const [cat, n] of catFlipRows) lines.push(`- ${cat}: ${n}`);
+    lines.push(``);
+  }
   if (falsePositives.length > 0) {
     lines.push(`### Would now reply, but you said no (${falsePositives.length})`, ``);
     for (const f of falsePositives) lines.push(`- (${f.source}) "${f.text}" — bot: ${f.reason}`);
@@ -211,6 +322,8 @@ async function main(): Promise<void> {
         agreementPct: pct,
         scored,
         generatedAt: new Date().toISOString(),
+        intentSweep,
+        linkSweep,
       } as Prisma.InputJsonValue,
     },
   });
