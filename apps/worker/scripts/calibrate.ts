@@ -30,9 +30,6 @@ const MANUAL_ERA_END = new Date("2026-07-06T00:00:00Z");
 
 type Labeled = { post: Post; expected: boolean; source: string };
 
-/** Stale rejection labels excluded this run (obsolete reply drafts). */
-let staleRejectionsDropped = 0;
-
 function dedupeByPost(rows: Labeled[]): Labeled[] {
   const seen = new Set<string>();
   return rows.filter((r) => {
@@ -82,17 +79,6 @@ async function gatherLabels(): Promise<Labeled[]> {
     }),
   ]);
 
-  // A dashboard REJECTION rejects the specific reply DRAFT, not the post. When
-  // that draft predates the current reply format — a raw URL (replies now ride
-  // a facet, never a raw URL) or a link to the retired /recommendations pages —
-  // the rejection was about a now-impossible draft, not "don't reply to this
-  // post". Such labels poison the metric (e.g. a Deltarune post rejected only
-  // because its draft pointed at a dead page + Steam), so drop them.
-  const isStaleDraft = (text: string): boolean =>
-    /\/recommendations\//.test(text) || /https?:\/\//.test(text);
-  const freshRejected = rejected.filter((r) => !isStaleDraft(r.replyText));
-  staleRejectionsDropped = rejected.length - freshRejected.length;
-
   const positives = dedupeByPost([
     ...ratedUp.map((r) => ({ post: r.post, expected: true, source: "rated 👍" })),
     ...manualApproved.map((r) => ({ post: r.post, expected: true, source: "manually approved" })),
@@ -101,7 +87,7 @@ async function gatherLabels(): Promise<Labeled[]> {
   // operator regrets it, whatever the earlier approval said).
   const negatives = dedupeByPost([
     ...ratedDown.map((r) => ({ post: r.post, expected: false, source: "rated 👎" })),
-    ...freshRejected.map((r) => ({ post: r.post, expected: false, source: "rejected" })),
+    ...rejected.map((r) => ({ post: r.post, expected: false, source: "rejected" })),
     ...skipped.map((r) => ({ post: r.post, expected: false, source: "skipped" })),
   ]).slice(0, MAX_PER_CLASS);
   const negativeIds = new Set(negatives.map((n) => n.post.id));
@@ -188,12 +174,6 @@ async function main(): Promise<void> {
     ``,
     `**Agreement: ${pct}%**${delta}${errors ? ` · ${errors} eval errors` : ""}`,
     ``,
-    ...(staleRejectionsDropped > 0
-      ? [
-          `_Excluded ${staleRejectionsDropped} stale rejection label(s) — their reply drafts predate the current format (raw URL / retired page), so they judged an obsolete draft, not the post._`,
-          ``,
-        ]
-      : []),
   ];
   if (falsePositives.length > 0) {
     lines.push(`### Would now reply, but you said no (${falsePositives.length})`, ``);
