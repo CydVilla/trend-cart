@@ -3,6 +3,54 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-09 — Funnel tuning from live data: timeliness, honest fallbacks
+
+### Changed
+- **Data-driven pass over the insights report's recommendations** — each one
+  verified against the live funnel before acting. Confirmed the real leak is
+  TIMELINESS, not thresholds or targeting: 51 candidates expired unposted
+  (15 discovered already >18h old, 27 died queued behind stale candidates),
+  while the numeric gates turned out to decide almost nothing.
+  - **Discovery age cap** (`MAX_CANDIDATE_AGE_HOURS`, default 16): search
+    ingest skips posts too old to realistically clear eval + reply before the
+    24h expiry — those evals were money spent on guaranteed expiries, and a
+    reply that late lands on a dead thread anyway.
+  - **Reply queue drains freshest-post-first** (was oldest-evaluation-first).
+    During bursts, FIFO spent the whole batch racing candidates about to
+    expire while fresh ones aged in line. Replies now land while threads are
+    hot (the funnel's weak reply engagement — 18 likes / 0 replies — is partly
+    reply latency). Stale candidates get a terminal expired-skip row via a
+    per-tick sweeper instead of dangling.
+  - **Category-fallback honesty** (the "don't link to products that don't
+    exist yet" 👎): when a specific product fails the link-confidence gate and
+    the reply falls back to a generic category link, the reply generator is
+    now told explicitly — it must not imply the link leads to the named item.
+    Previously the reply name-dropped an unbuyable ARC while linking a generic
+    books search. Complements the purchasability change: low-confidence
+    specifics now degrade to an HONEST category recommendation.
+  - **Threshold sweep harness** (`scripts/threshold-sweep.ts` +
+    `applyGates(_, _, thresholds?)` override param): replays the operator's
+    labels once, re-gates at a grid. Verdict: agreement is FLAT (82%) across
+    intent 40–75 and linkConf 40–80, so `MIN_PRODUCT_INTENT_SCORE`/
+    `MIN_LINK_CONFIDENCE` stay at 60/60 — the insights' "tighten intent to 68"
+    would have caught zero of the four 👎s (all scored 75–85) while risking
+    real volume above 75.
+  - **Label hygiene**: operator-DIRECTIVE posts (operatorLinkUrl set) are no
+    longer calibration labels — they bypass the classifier in production, so
+    replaying them measured nothing. Shared label module
+    (`scripts/calibration-labels.ts`) keeps calibrate + sweep on one set.
+  - Calibration after this pass: **86%** (from 80%). The v55 purchasability
+    brain now correctly skips the itch.io digital-only posts it used to chase.
+- **Explicitly NOT changed**, with the data that said so: engagement floor
+  and eval cap stay (policy-gate false-positive rate ~10–18% on a 30-sample
+  audit — healthy; the insights' floor-raise would cut real candidates to
+  save cost that isn't hurting); anime-figures stays (its "83% skip rate" is
+  expiry + cooldown, not targeting); retro/video-games keywords stay (their
+  leaks are expiry, and their worth-replying volume is the funnel's best);
+  books-reading keywords stay ("just finished reading" was already live);
+  author cooldown stays (13 skips across 10 authors, mostly news accounts —
+  working as intended).
+
 ## 2026-07-08 — Link confidence judges purchasability, not just relevance
 
 ### Changed

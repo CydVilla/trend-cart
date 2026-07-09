@@ -87,6 +87,11 @@ export const config = {
   ingest: {
     minPostLength: envInt("MIN_POST_LENGTH", 40),
     requireEnglish: envBool("REQUIRE_ENGLISH", true),
+    /* Never ingest a post older than this. Candidates expire 24h after the
+       post; ones discovered near that wall burn an LLM eval and die in the
+       reply queue (15 of the first 51 expiries were discovered >18h old), and
+       a reply that late lands on a dead thread anyway. */
+    maxCandidateAgeHours: envInt("MAX_CANDIDATE_AGE_HOURS", 16),
     /* How often to poll Bluesky search for trending candidates */
     discoverIntervalMinutes: envInt("DISCOVER_INTERVAL_MINUTES", 15),
     rehydrateIntervalMinutes: envInt("REHYDRATE_INTERVAL_MINUTES", 15),

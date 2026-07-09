@@ -56,6 +56,13 @@ function sanitizeSearchQuery(query: string | null): string | null {
   return cleaned.slice(0, 60);
 }
 
+/** Optional threshold overrides for offline analysis (calibration sweeps).
+ *  Omitted fields fall back to the live config — production callers pass none. */
+export type GateThresholds = {
+  minProductIntentScore?: number;
+  minLinkConfidence?: number;
+};
+
 /**
  * Enforce business rules on top of whatever the LLM returned. The model's
  * shouldReply is advisory — every gate is re-checked here so a hallucinated
@@ -64,7 +71,10 @@ function sanitizeSearchQuery(query: string | null): string | null {
 export function applyGates(
   result: CandidateEvaluationResult,
   activeSlugs: Set<string>,
+  thresholds?: GateThresholds,
 ): CandidateEvaluationResult {
+  const minIntent = thresholds?.minProductIntentScore ?? config.bot.minProductIntentScore;
+  const minLink = thresholds?.minLinkConfidence ?? config.bot.minLinkConfidence;
   const score = Math.min(100, Math.max(0, Math.round(result.productIntentScore)));
   const linkConfidence = Math.min(100, Math.max(0, Math.round(result.linkConfidence ?? 0)));
   const slug =
@@ -74,17 +84,17 @@ export function applyGates(
   const searchQuery = sanitizeSearchQuery(result.recommendedSearchQuery);
   /** A search query only counts as a link path when the model believes the
    *  Amazon results will actually be relevant (same product or franchise). */
-  const confidentQuery = searchQuery !== null && linkConfidence >= config.bot.minLinkConfidence;
+  const confidentQuery = searchQuery !== null && linkConfidence >= minLink;
 
   const failedGates: string[] = [];
   if (result.safetyStatus !== "safe") failedGates.push(`safety=${result.safetyStatus}`);
-  if (score < config.bot.minProductIntentScore) {
-    failedGates.push(`intent ${score} < ${config.bot.minProductIntentScore}`);
+  if (score < minIntent) {
+    failedGates.push(`intent ${score} < ${minIntent}`);
   }
   if (!slug && !searchQuery) failedGates.push("no category and no search query");
   if (!slug && searchQuery && !confidentQuery) {
     failedGates.push(
-      `link confidence ${linkConfidence} < ${config.bot.minLinkConfidence} and no category fallback`,
+      `link confidence ${linkConfidence} < ${minLink} and no category fallback`,
     );
   }
   if (!result.shouldReply) failedGates.push("llm declined");

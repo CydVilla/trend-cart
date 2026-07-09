@@ -277,6 +277,31 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     orderBy: { createdAt: "asc" },
     take: BATCH_SIZE,
   });
+  // Terminal-skip trending candidates whose post already aged out (24h): with
+  // the freshest-first ordering below they would otherwise never surface for
+  // their auditable SKIPPED row. Cheap: usually zero rows.
+  const agedOut = await prisma.candidateEvaluation.findMany({
+    where: {
+      ...dueWhere,
+      post: {
+        replies: { none: {} },
+        deadAt: null,
+        source: { notIn: ["MANUAL", "MENTION"] },
+        indexedAt: { lt: new Date(Date.now() - 24 * 3_600_000) },
+      },
+    },
+    select: { postId: true },
+  });
+  for (const stale of agedOut) {
+    await writeSkip(stale.postId, "candidate expired (post expired)", stats);
+  }
+
+  // FRESHEST post first, not oldest evaluation first: replies are worth the
+  // most while a post is still hot, and during bursts the old FIFO order spent
+  // the whole batch racing candidates that were about to expire anyway while
+  // fresh ones aged in line (27 of the first 51 expiries died waiting there).
+  // Under backlog the stalest now expire unposted — by design; a reply to a
+  // near-dead post is the least valuable thing this loop can produce.
   const trendingDue =
     solicitedDue.length < BATCH_SIZE
       ? await prisma.candidateEvaluation.findMany({
@@ -289,7 +314,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
             },
           },
           include: { post: true },
-          orderBy: { createdAt: "asc" },
+          orderBy: { post: { indexedAt: "desc" } },
           take: BATCH_SIZE - solicitedDue.length,
         })
       : [];
@@ -340,6 +365,13 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     const replyInput = {
       postText: evaluation.post.text,
       categoryName: link.categoryName,
+      // A specific product was identified but failed the link-confidence gate
+      // (often unbuyable: pre-release, out-of-print) — the link is a generic
+      // category search, and the reply must not pretend otherwise. This is
+      // the fix for the operator's "don't link to products that don't exist
+      // yet" 👎: honest copy when the link can't deliver the named item.
+      linkIsCategoryFallback:
+        link.kind === "category" && Boolean(evaluation.recommendedSearchQuery),
       suggestedReplyAngle: evaluation.suggestedReplyAngle,
       textBudget: config.bot.replyMaxLength - reserved,
       isDirectRequest: evaluation.post.source === "MENTION",

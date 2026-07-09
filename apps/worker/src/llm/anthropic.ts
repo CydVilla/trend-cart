@@ -192,7 +192,11 @@ ${sanitizeUntrusted(input.postText)}
 
 function buildReplyPrompt(input: GenerateReplyInput, wordBudget: number): string {
   return `Word limit: at most ${wordBudget} words. Do not include any link — it is appended after your text automatically.
-${input.isDirectRequest ? "The author tagged the bot asking for this — answer them directly and helpfully (no @-mention; the reply threads to them automatically).\n" : ""}${input.categoryName ? `Category: ${input.categoryName} (the appended link is an Amazon search for this kind of product)` : "Recommendation type: a specific product (the appended link is an Amazon search for it)"}
+${input.isDirectRequest ? "The author tagged the bot asking for this — answer them directly and helpfully (no @-mention; the reply threads to them automatically).\n" : ""}${input.categoryName ? `Category: ${input.categoryName} (the appended link is an Amazon search for this kind of product)` : "Recommendation type: a specific product (the appended link is an Amazon search for it)"}${
+    input.linkIsCategoryFallback
+      ? `\nIMPORTANT: the specific item in this post could NOT be confidently linked (it may be unreleased, out of print, or not orderable on Amazon), so the appended link is a GENERAL ${input.categoryName ?? "category"} search — it will NOT land on that item. Never imply the link leads to it, is a way to get it, or that readers "hunting for it" should click. Engage with the post's enthusiasm, then recommend the ${input.categoryName ?? "category"} genuinely in its own right (e.g. similar things readers of this thread would enjoy).`
+      : ""
+  }
 Reply angle: ${input.suggestedReplyAngle ?? "address the specific problem or enthusiasm in the post"}
 ${input.operatorNote ? `\n<operator_note>\n${input.operatorNote}\n</operator_note>\n` : ""}${operatorGuidanceBlock(input.operatorGuidance)}${guidelinesBlock(input.learnedGuidelines)}${imagesBlock(input.images)}${commentsBlock(input.comments)}
 <untrusted_post>

@@ -8,7 +8,9 @@ import { findPromotionalMatch, findSensitiveMatch } from "./filters.js";
 /**
  * Discovery v2: instead of filtering the entire firehose (89% of whose
  * captures never reached the engagement floor), poll Bluesky search for the
- * TOP posts of the last 24h per category keyword. Posts arrive already
+ * TOP posts of the last MAX_CANDIDATE_AGE_HOURS per category keyword —
+ * fresh enough that eval + reply still land while the thread is alive.
+ * Posts arrive already
  * trending, with real engagement counts — no maturation wait, no
  * rehydration dependency, ~50 cheap queries per cycle instead of millions
  * of events per day.
@@ -99,6 +101,15 @@ export async function processSearchResult(
   const text = post.record?.text?.trim() ?? "";
   if (!text) return skip(stats, "empty");
   if (post.record?.reply) return skip(stats, "is_reply");
+  // Too old to act on: by the time it matures + evaluates + queues, the 24h
+  // reply window is gone — an eval here is money spent on a guaranteed expiry.
+  if (
+    post.indexedAt &&
+    Date.now() - new Date(post.indexedAt).getTime() >
+      config.ingest.maxCandidateAgeHours * 3_600_000
+  ) {
+    return skip(stats, "too_old");
+  }
   if (text.length < config.ingest.minPostLength) return skip(stats, "too_short");
   if (config.ingest.requireEnglish && !isEnglish(post.record?.langs)) {
     return skip(stats, "not_english");
@@ -165,7 +176,9 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
       }
       agent = candidate;
     }
-    const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
+    const since = new Date(
+      Date.now() - config.ingest.maxCandidateAgeHours * 3_600_000,
+    ).toISOString();
     const categories = await prisma.productCategory.findMany({
       where: { isActive: true },
       select: { slug: true, keywords: true },

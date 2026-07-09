@@ -17,82 +17,13 @@
  * Env: DATABASE_URL, ANTHROPIC_API_KEY (required); ANTHROPIC_MODEL,
  *      CALIBRATE_MAX_PER_CLASS (default 20).
  */
-import { prisma, type Post, type Prisma } from "@trendcart/db";
+import { prisma, type Prisma } from "@trendcart/db";
 import type { CategoryContext } from "@trendcart/shared";
 import { config } from "../src/config.js";
 import { applyGates } from "../src/evaluate.js";
 import { AnthropicLlmClient } from "../src/llm/anthropic.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "../src/reflect.js";
-
-const MAX_PER_CLASS = Number(process.env.CALIBRATE_MAX_PER_CLASS ?? 20);
-/** Autonomous mode went live 2026-07-06 — approvals before then were human clicks. */
-const MANUAL_ERA_END = new Date("2026-07-06T00:00:00Z");
-
-type Labeled = { post: Post; expected: boolean; source: string };
-
-function dedupeByPost(rows: Labeled[]): Labeled[] {
-  const seen = new Set<string>();
-  return rows.filter((r) => {
-    if (seen.has(r.post.id)) return false;
-    seen.add(r.post.id);
-    return true;
-  });
-}
-
-async function gatherLabels(): Promise<Labeled[]> {
-  const [ratedUp, manualApproved] = await Promise.all([
-    prisma.botReply.findMany({
-      where: { operatorRating: "up" },
-      include: { post: true },
-      orderBy: { ratedAt: "desc" },
-      take: MAX_PER_CLASS,
-    }),
-    prisma.botReply.findMany({
-      where: {
-        status: "POSTED",
-        approvedAt: { lt: MANUAL_ERA_END },
-        OR: [{ operatorRating: null }, { operatorRating: "up" }],
-      },
-      include: { post: true },
-      orderBy: { postedAt: "desc" },
-      take: MAX_PER_CLASS,
-    }),
-  ]);
-  const [ratedDown, rejected, skipped] = await Promise.all([
-    prisma.botReply.findMany({
-      where: { operatorRating: "down" },
-      include: { post: true },
-      orderBy: { ratedAt: "desc" },
-      take: MAX_PER_CLASS,
-    }),
-    prisma.botReply.findMany({
-      where: { status: "SKIPPED", skipReason: "rejected via dashboard" },
-      include: { post: true },
-      orderBy: { createdAt: "desc" },
-      take: MAX_PER_CLASS,
-    }),
-    prisma.botReply.findMany({
-      where: { status: "SKIPPED", skipReason: "manually skipped via dashboard" },
-      include: { post: true },
-      orderBy: { createdAt: "desc" },
-      take: MAX_PER_CLASS,
-    }),
-  ]);
-
-  const positives = dedupeByPost([
-    ...ratedUp.map((r) => ({ post: r.post, expected: true, source: "rated 👍" })),
-    ...manualApproved.map((r) => ({ post: r.post, expected: true, source: "manually approved" })),
-  ]).slice(0, MAX_PER_CLASS);
-  // Negatives outrank positives on conflict (a 👎 on a posted reply means the
-  // operator regrets it, whatever the earlier approval said).
-  const negatives = dedupeByPost([
-    ...ratedDown.map((r) => ({ post: r.post, expected: false, source: "rated 👎" })),
-    ...rejected.map((r) => ({ post: r.post, expected: false, source: "rejected" })),
-    ...skipped.map((r) => ({ post: r.post, expected: false, source: "skipped" })),
-  ]).slice(0, MAX_PER_CLASS);
-  const negativeIds = new Set(negatives.map((n) => n.post.id));
-  return [...positives.filter((p) => !negativeIds.has(p.post.id)), ...negatives];
-}
+import { gatherLabels } from "./calibration-labels.js";
 
 async function main(): Promise<void> {
   if (!config.llm.anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required");
