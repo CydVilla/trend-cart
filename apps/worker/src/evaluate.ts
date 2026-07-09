@@ -251,8 +251,62 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   });
   const activeSlugs = new Set(categories.map((c) => c.slug));
   const modelTag = evaluationModelTag();
+  // Loop-invariant context — one read per tick, not per candidate.
+  const learnedGuidelines = config.llm.useFake ? null : await getLearnedGuidelines();
+  const operatorGuidance = config.llm.useFake ? null : await getOperatorGuidance();
+
+  /** Write a cheap pre-LLM rejection (model="policy") and mark the post done. */
+  async function policySkip(postId: string, reason: string): Promise<void> {
+    await prisma.$transaction([
+      prisma.candidateEvaluation.create({
+        data: {
+          postId,
+          rawInput: {} as Prisma.InputJsonValue,
+          productIntentScore: 0,
+          safetyDecision: SafetyStatus.UNCERTAIN,
+          model: "policy",
+          shouldReply: false,
+          reason,
+        },
+      }),
+      prisma.post.update({ where: { id: postId }, data: { safetyStatus: SafetyStatus.UNCERTAIN } }),
+    ]);
+  }
 
   for (const post of due) {
+    // ── Doomed-candidate gates: outcomes already decided by reply policy, so
+    // an LLM eval would be money spent on a guaranteed skip. The same checks
+    // remain in checkReplyPolicy as defense-in-depth (state can change between
+    // eval and reply); here they just run BEFORE the spend instead of after.
+    // Opt-out is consent — unconditional, even for solicited/operator posts.
+    const optOut = await prisma.authorOptOut.findUnique({ where: { did: post.authorDid } });
+    if (optOut) {
+      await policySkip(post.id, "author opted out (pre-eval)");
+      continue;
+    }
+    // Author cooldown (48h) is longer than a post's reply window (24h): any
+    // ACTIVE reply to this author newer than (post expiry − cooldown) makes a
+    // reply mathematically impossible before expiry. Solicited posts are
+    // cooldown-exempt at reply time, so they are exempt here too.
+    if (post.source !== "MANUAL" && post.source !== "MENTION") {
+      const expiryMs = post.indexedAt.getTime() + 24 * 3_600_000;
+      const doomCutoff = new Date(expiryMs - config.bot.authorCooldownHours * 3_600_000);
+      const blockingReply = await prisma.botReply.findFirst({
+        where: {
+          status: { in: ["DRY_RUN", "PENDING_APPROVAL", "APPROVED", "POSTING", "POSTED"] },
+          createdAt: { gte: doomCutoff },
+          post: { authorDid: post.authorDid },
+        },
+        select: { id: true },
+      });
+      if (blockingReply) {
+        await policySkip(
+          post.id,
+          `author cooldown (${config.bot.authorCooldownHours}h) outlasts the candidate's reply window`,
+        );
+        continue;
+      }
+    }
     // Operator link override: the human already decided this post gets a
     // reply with a specific link — no LLM judgment needed, just generation.
     if (post.operatorLinkUrl) {
@@ -338,8 +392,6 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       continue;
     }
 
-    const learnedGuidelines = config.llm.useFake ? null : await getLearnedGuidelines();
-    const operatorGuidance = config.llm.useFake ? null : await getOperatorGuidance();
     const authorProfile = config.llm.useFake ? null : await fetchAuthorProfile(post.authorDid);
 
     // Sellers advertise in their bios. A promotional author bio disqualifies

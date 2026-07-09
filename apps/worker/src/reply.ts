@@ -319,6 +319,10 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         })
       : [];
   const due = [...solicitedDue, ...trendingDue];
+  if (due.length === 0) return;
+  // Loop-invariant context — one read per tick, not per candidate.
+  const operatorGuidance = config.llm.useFake ? null : await getOperatorGuidance();
+  const learnedGuidelines = config.llm.useFake ? null : await getLearnedGuidelines();
 
   for (const evaluation of due) {
     // Policy runs FIRST so the 24h/7d expiry always writes a terminal SKIPPED
@@ -378,8 +382,8 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       images,
       comments,
       operatorNote: evaluation.post.operatorNote,
-      operatorGuidance: config.llm.useFake ? null : await getOperatorGuidance(),
-      learnedGuidelines: config.llm.useFake ? null : await getLearnedGuidelines(),
+      operatorGuidance,
+      learnedGuidelines,
     };
 
     let body: string;

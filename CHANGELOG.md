@@ -3,6 +3,21 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-09 — Spend-path efficiency: never pay to evaluate a doomed candidate
+
+### Changed
+- **Pre-eval doom gates**: opt-outs and author-cooldowns were checked at reply
+  time — *after* the LLM eval was paid for, though both are knowable before
+  it. Opted-out authors now policy-skip pre-LLM (unconditional — consent wins
+  over everything), and since the author cooldown (48h) is longer than a
+  post's 24h reply window, any unsolicited candidate whose author got an
+  active reply after `post time − 24h` is mathematically unpostable and
+  policy-skips pre-LLM too. Every historical author-cooldown skip (13) had
+  paid a full classify for a guaranteed skip; that class is now $0. The same
+  checks remain in the reply policy as defense-in-depth.
+- **Loop-invariant reads hoisted**: the eval and reply loops fetched operator
+  guidance + learned lessons from the DB per candidate; now once per tick.
+
 ## 2026-07-09 — Funnel tuning from live data: timeliness, honest fallbacks
 
 ### Changed
