@@ -108,6 +108,10 @@ export const config = {
        BOTH bars; anything weaker still queues for manual approval. */
     autoMinIntentScore: envInt("AUTO_MIN_INTENT_SCORE", 80),
     autoMinLinkConfidence: envInt("AUTO_MIN_LINK_CONFIDENCE", 75),
+    /* PLAYFUL (joke-first) replies are high-variance — the operator 👎'd two
+       earnest attempts at this genre — so they queue for manual approval even
+       in autonomous mode until this is flipped on. */
+    playfulAutoApprove: envBool("PLAYFUL_AUTO_APPROVE", false),
     maxRepliesPerHour: envInt("MAX_REPLIES_PER_HOUR", 3),
     maxRepliesPerDay: envInt("MAX_REPLIES_PER_DAY", 20),
     replyMaxLength: envInt("REPLY_MAX_LENGTH", 240),

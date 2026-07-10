@@ -3,6 +3,30 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-10 — The PLAYFUL lane + reply-runway eval floor
+
+### Added
+- **PLAYFUL replies**: the bot may now answer a comedic mishap with a joke
+  whose punchline IS the recommendation (dog toured the neighborhood → a
+  leash). Guards learned from the operator's own 👎s: the author must be
+  playing it for laughs themselves, the product must genuinely FIX the
+  comedic problem AND be missing from their life (never joke-recommend the
+  thing they're posting about), any hint of real distress disqualifies, and
+  purchasability rules apply. The classifier marks these angles `PLAYFUL:`;
+  the reply generator goes joke-first with no earnest-sales pivot.
+  **Comedy is curated**: PLAYFUL replies queue for manual approval even in
+  autonomous mode until `PLAYFUL_AUTO_APPROVE=true` — the operator's ratings
+  teach the humor taste before the bot self-posts it. Calibration held at
+  **89%** with the foam-roller/rhythm-game 👎s still correctly skipped.
+
+### Changed
+- **Reply-runway floor at eval time**: trending candidates with under ~2h of
+  reply window left (post already >22h old) are no longer LLM-evaluated —
+  they age out unevaluated at zero spend. The last pre-v56 backlog posts were
+  being classified at 19–21h old and swept hours later; that class is closed.
+  (Post-v56 the expiry leak is confirmed shut: 77 of 78 all-time expiry skips
+  were pre-v56 ingests.)
+
 ## 2026-07-09 — Spend-path efficiency: never pay to evaluate a doomed candidate
 
 ### Changed

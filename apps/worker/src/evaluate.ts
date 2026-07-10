@@ -221,11 +221,16 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   // Trending candidates must BOTH mature and clear the floor: recent AND
   // actually liked. Below-floor posts keep waiting (they may still be
   // rising) and expire unevaluated if they never catch on: zero LLM spend.
+  // Reply-runway floor: a candidate expires 24h after the post; evaluating
+  // one with under ~2h of runway is a paid classify on a near-guaranteed
+  // expiry (the reply queue needs time too). Such posts age out unevaluated.
+  const runwayCutoff = new Date(now - 22 * 3_600_000);
   const trending =
     trendingTake > 0
       ? await prisma.post.findMany({
           where: {
             ...baseWhere,
+            indexedAt: { gte: runwayCutoff },
             OR: [
               // Search-discovered posts arrive already trending with real
               // counts — no maturation needed, floor re-checked.

@@ -154,10 +154,15 @@ function statusFor(
   }
   if (autonomous) {
     const humanDecided = evaluation.model === "operator" || link.kind === "operator";
+    // PLAYFUL (joke-first) replies always escalate until the operator has
+    // curated enough of them to trust the bot's humor — comedy is the genre
+    // his 👎 ratings flagged most.
+    const playful =
+      evaluation.suggestedReplyAngle?.startsWith("PLAYFUL") && !config.bot.playfulAutoApprove;
     const confident =
       evaluation.productIntentScore >= config.bot.autoMinIntentScore &&
       (link.kind !== "search" || evaluation.linkConfidence >= config.bot.autoMinLinkConfidence);
-    if (humanDecided || confident) {
+    if (humanDecided || (confident && !playful)) {
       return { status: ReplyStatus.APPROVED, approvedAt: new Date() };
     }
     return { status: ReplyStatus.PENDING_APPROVAL, approvedAt: null }; // escalate to the human
