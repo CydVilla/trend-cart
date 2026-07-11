@@ -3,6 +3,29 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-11 — Trending radar + approval-queue lifecycle
+
+### Added
+- **Trending radar** (`RadarPost`): one standalone post per day on the bot's
+  own profile, synthesized from the bot's OWN discovery data — what actually
+  trended across its categories in the last 24h (data nobody else has; the
+  follower-growth engine). One Haiku call/day, zero on thin days
+  (`RADAR_MIN_ITEMS`). Drafts queue as PENDING_APPROVAL on the Overview page
+  (approve & post / reject) until `RADAR_AUTO_APPROVE=true`; approved drafts
+  post within a minute (link facet on the headline item + #ad tag); drafts
+  older than 24h auto-expire — a stale radar reports yesterday's news.
+  `RADAR_ENABLED=false` turns the whole thing off.
+- **Operator DM pings** (`notify.ts`): when actionable items are waiting
+  (pending replies — playful count called out — radar drafts, pending deal
+  posts), the bot DMs the operator's personal account. At most one ping per
+  `NOTIFY_MIN_INTERVAL_HOURS` (4), only when something is NEW since the last
+  ping; state survives restarts in BotMemory. Ships dark until
+  `OPERATOR_DM_HANDLE` is set AND the bot's app password is regenerated with
+  DM access (fails soft with a clear log otherwise).
+- **Approval-queue hygiene**: PENDING_APPROVAL replies whose post has passed
+  the poster's necro window (48h; 7d for operator-injected) auto-expire with
+  an audit row — the dashboard queue only ever shows actionable items.
+
 ## 2026-07-10 — The PLAYFUL lane + reply-runway eval floor
 
 ### Added

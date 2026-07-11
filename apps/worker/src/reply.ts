@@ -282,6 +282,29 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     orderBy: { createdAt: "asc" },
     take: BATCH_SIZE,
   });
+  // Approval-queue hygiene: a PENDING_APPROVAL reply whose post has passed
+  // the poster's necro window can never post (the stale-approval guard would
+  // skip it anyway) — expire it so the dashboard queue only ever shows
+  // actionable items. Windows mirror poster.ts: 7d for operator-injected
+  // posts, 48h otherwise.
+  const now = Date.now();
+  const lapsed = await prisma.botReply.updateMany({
+    where: {
+      status: ReplyStatus.PENDING_APPROVAL,
+      OR: [
+        { post: { source: "MANUAL", indexedAt: { lt: new Date(now - 7 * 24 * 3_600_000) } } },
+        {
+          post: { source: { not: "MANUAL" }, indexedAt: { lt: new Date(now - 48 * 3_600_000) } },
+        },
+      ],
+    },
+    data: {
+      status: ReplyStatus.SKIPPED,
+      skipReason: "approval window lapsed (post too old to reply to)",
+    },
+  });
+  if (lapsed.count > 0) stats.skipped += lapsed.count;
+
   // Terminal-skip trending candidates whose post already aged out (24h): with
   // the freshest-first ordering below they would otherwise never surface for
   // their auditable SKIPPED row. Cheap: usually zero rows.

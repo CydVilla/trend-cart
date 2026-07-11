@@ -13,8 +13,10 @@ import { insightsTick, type InsightsStats } from "./insights.js";
 import { AnthropicLlmClient } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
+import { createNotifier, type NotifyStats } from "./notify.js";
 import { outcomesTick, type OutcomeStats } from "./outcomes.js";
 import { createPoster, type PosterStats } from "./poster.js";
+import { createRadar, type RadarStats } from "./radar.js";
 import { reflectTick, type ReflectStats } from "./reflect.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
 import { generateDueReplies, type ReplyStats } from "./reply.js";
@@ -76,6 +78,8 @@ async function main(): Promise<void> {
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
   const dealDiscoverStats = newDealDiscoverStats();
   const dealSuggestStats = newDealSuggestStats();
+  const radarStats: RadarStats = { drafted: 0, posted: 0, errors: 0, disabled: false };
+  const notifyStats: NotifyStats = { pings: 0, errors: 0, disabled: false };
   setCountersRef({
     discover: discoverStats,
     rehydrate: rehydrateStats,
@@ -90,6 +94,8 @@ async function main(): Promise<void> {
     dealPost: dealPostStats,
     dealDiscover: dealDiscoverStats,
     dealSuggest: dealSuggestStats,
+    radar: radarStats,
+    notify: notifyStats,
   });
 
   const llm: LlmClient = config.llm.useFake
@@ -113,6 +119,12 @@ async function main(): Promise<void> {
   // Deal tracker: the whole feature ships dark behind DEALS_ENABLED. The
   // checker self-disables without PA-API keys; the poster without Bluesky
   // creds or under DRY_RUN — the manual "post deal now" path still queues.
+  const radar = createRadar(llm, radarStats);
+  const notifier = createNotifier(notifyStats);
+  if (!notifier) {
+    console.log("  operator pings:   disabled (set OPERATOR_DM_HANDLE to enable)");
+  }
+
   const dealChecker = config.deals.enabled ? createDealChecker(dealCheckStats) : null;
   const dealDiscoverer = config.deals.enabled ? createDealDiscoverer(dealDiscoverStats) : null;
   const dealPoster = config.deals.enabled ? createDealPoster(dealPostStats) : null;
@@ -138,6 +150,11 @@ async function main(): Promise<void> {
     startLoop("reply", 60_000, () => generateDueReplies(llm, replyStats)),
     startLoop("poster", 30_000, () => poster.tick()),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
+    // Radar: internal gating makes each tick a cheap findFirst; the 60s
+    // cadence just means dashboard approvals publish promptly.
+    ...(radar ? [startLoop("radar", 60_000, () => radar.tick())] : []),
+    // Operator DM ping — rate-limited internally (one per N hours, max).
+    ...(notifier ? [startLoop("notify", 10 * 60_000, () => notifier.tick())] : []),
     // Learning loop: hourly outcome measurement (free public API), daily
     // reflection (one small LLM call — reflectTick no-ops until stale).
     startLoop("outcomes", 3_600_000, () => outcomesTick(outcomeStats)),

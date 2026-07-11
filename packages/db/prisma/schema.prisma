@@ -108,6 +108,31 @@ model Post {
   @@index([safetyStatus, productIntentScore])
 }
 
+/// Daily "trending radar" standalone post for the bot's own profile,
+/// synthesized from the last 24h of discovery data (what's actually trending
+/// across the bot's categories). Approval-gated like marginal replies; the
+/// same ReplyStatus lifecycle drives the dashboard queue and the poster.
+model RadarPost {
+  id         String      @id @default(cuid())
+  /// Post body (link anchor + #ad are composed at posting time).
+  content    String
+  /// Tagged Amazon search URL for the radar's headline item.
+  linkUrl    String
+  /// Clickable anchor text the URL rides on as a facet.
+  linkAnchor String
+  /// Snapshot of the trending items that fed the LLM (audit trail).
+  basis      Json?
+  status     ReplyStatus @default(PENDING_APPROVAL)
+  skipReason String?
+  postUri    String?
+  approvedAt DateTime?
+  postedAt   DateTime?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([status, createdAt])
+}
+
 /// Discovery control: each category's keywords run as Bluesky search queries,
 /// and the slug/description guide the LLM's category picks.
 model ProductCategory {

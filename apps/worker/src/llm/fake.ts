@@ -1,6 +1,7 @@
 import type {
   CandidateEvaluationResult,
   ClassifyPostInput,
+  GenerateRadarInput,
   GenerateReplyInput,
   JudgeSuggestionInput,
   LlmClient,
@@ -105,6 +106,11 @@ export class FakeLlmClient implements LlmClient {
       text = `${text.slice(0, Math.max(0, input.textBudget - 1)).trimEnd()}…`;
     }
     return text;
+  }
+
+  async generateRadarPost(input: GenerateRadarInput): Promise<string> {
+    const rest = input.items.length - 1;
+    return `Radar check: ${input.items[0]?.label ?? "nothing"} is trending today${rest > 0 ? ` (plus ${rest} more)` : ""}. Worth a look:`;
   }
 
   async judgeDealSuggestion(input: JudgeSuggestionInput): Promise<SuggestionVerdict> {

@@ -84,6 +84,29 @@ export const config = {
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
   },
 
+  /* Operator notifications: a Bluesky DM to the operator's personal account
+     when actionable items land in the approval queues. Ships dark until
+     OPERATOR_DM_HANDLE is set AND the bot's app password has DM access. */
+  notify: {
+    operatorDmHandle: envString("OPERATOR_DM_HANDLE", ""),
+    /* Rate limit: at most one ping per this many hours. */
+    minIntervalHours: envInt("NOTIFY_MIN_INTERVAL_HOURS", 4),
+    /* Optional dashboard link appended to the DM. */
+    dashboardUrl: envString("DASHBOARD_URL", ""),
+  },
+
+  /* Trending radar: one standalone post per day on the bot's own profile,
+     synthesized from the last 24h of the bot's OWN discovery data. Approval-
+     gated (PENDING_APPROVAL) until RADAR_AUTO_APPROVE=true. */
+  radar: {
+    enabled: envBool("RADAR_ENABLED", true),
+    autoApprove: envBool("RADAR_AUTO_APPROVE", false),
+    /* Need at least this many worth-replying candidates in the last 24h —
+       no radar on thin days (a data-starved radar post reads as filler). */
+    minItems: envInt("RADAR_MIN_ITEMS", 3),
+    maxLength: envInt("RADAR_MAX_LENGTH", 300),
+  },
+
   ingest: {
     minPostLength: envInt("MIN_POST_LENGTH", 40),
     requireEnglish: envBool("REQUIRE_ENGLISH", true),
