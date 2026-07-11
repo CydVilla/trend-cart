@@ -3,6 +3,32 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-11 — Click tracking + single-item radar
+
+### Added
+- **Click tracking** (`TrackedLink`, gated by `CLICK_TRACKING_ENABLED`, default
+  OFF): the one revenue-proximate signal the bot was blind to. Amazon reports
+  clicks per *tag*, never per *post*, so the learning loop couldn't see which
+  replies/categories actually earn. Posted links now optionally route through a
+  first-party `/r/<id>` redirect that counts the click and 302s to the tagged
+  Amazon URL. Wired for reply + radar links (deal links are a fast-follow).
+  - **The redirect is guaranteed, the count is best-effort**: any DB failure
+    still bounces the user to Amazon (a tagged-homepage fallback if the id is
+    unknown), and it only ever redirects to Amazon hosts — never an open
+    redirect. Tracking can't break the revenue path.
+  - OFF by default because enabling puts the (Eco, sleep-prone) web dyno in
+    front of every link — the operator's explicit call. Needs
+    `PUBLIC_BASE_URL` set; a "Link clicks" stat appears on the Overview once
+    links are minted. Verified end-to-end locally (redirect, fallback,
+    public-access, count increment, dashboard surfacing).
+
+### Changed
+- **Radar posts are single-item.** The first radar draft name-dropped Elden
+  Ring and PlayBound while linking a Donkey Kong LEGO set — a roundup with one
+  link reads as a mismatch. The generator now receives only the headline item
+  and the prompt forbids mentioning any other product, so the post is about the
+  one thing it links. (The incoherent live post was deleted.)
+
 ## 2026-07-11 — Trending radar + approval-queue lifecycle
 
 ### Added

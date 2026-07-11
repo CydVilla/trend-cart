@@ -170,6 +170,8 @@ type Stats = {
   posted: number;
   replyLikes: number;
   categories: number;
+  clicks: number;
+  trackedLinks: number;
 };
 
 /**
@@ -240,14 +242,16 @@ async function RadarCard() {
 
 async function getStats(): Promise<{ ok: true; stats: Stats } | { ok: false; error: string }> {
   try {
-    const [posts, evaluations, pendingApproval, posted, likeAgg, categories] = await Promise.all([
-      prisma.post.count(),
-      prisma.candidateEvaluation.count(),
-      prisma.botReply.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
-      prisma.botReply.count({ where: { status: ReplyStatus.POSTED } }),
-      prisma.botReply.aggregate({ _sum: { replyLikeCount: true } }),
-      prisma.productCategory.count({ where: { isActive: true } }),
-    ]);
+    const [posts, evaluations, pendingApproval, posted, likeAgg, categories, clickAgg] =
+      await Promise.all([
+        prisma.post.count(),
+        prisma.candidateEvaluation.count(),
+        prisma.botReply.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
+        prisma.botReply.count({ where: { status: ReplyStatus.POSTED } }),
+        prisma.botReply.aggregate({ _sum: { replyLikeCount: true } }),
+        prisma.productCategory.count({ where: { isActive: true } }),
+        prisma.trackedLink.aggregate({ _sum: { clickCount: true }, _count: true }),
+      ]);
     return {
       ok: true,
       stats: {
@@ -257,6 +261,8 @@ async function getStats(): Promise<{ ok: true; stats: Stats } | { ok: false; err
         posted,
         replyLikes: likeAgg._sum.replyLikeCount ?? 0,
         categories,
+        clicks: clickAgg._sum.clickCount ?? 0,
+        trackedLinks: clickAgg._count,
       },
     };
   } catch (error) {
@@ -284,6 +290,11 @@ export default async function HomePage() {
     { label: "Awaiting approval", value: stats.pendingApproval, href: "/replies", highlight: stats.pendingApproval > 0 },
     { label: "Posted replies", value: stats.posted, href: "/replies" },
     { label: "Likes on bot replies", value: stats.replyLikes, href: "/replies" },
+    // Only shown once click tracking has minted links, so an off/empty state
+    // never displays a misleading "0 clicks".
+    ...(stats.trackedLinks > 0
+      ? [{ label: "Link clicks", value: stats.clicks, href: "/replies" }]
+      : []),
     { label: "Active categories", value: stats.categories, href: "/categories" },
   ];
 

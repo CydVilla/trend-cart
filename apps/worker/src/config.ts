@@ -84,6 +84,20 @@ export const config = {
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
   },
 
+  /* Click tracking: route posted affiliate links through a first-party
+     /r/<id> redirect so clicks can be counted (the one revenue-proximate
+     signal Amazon never gives per-post). OFF by default — enabling puts the
+     web dyno in front of every link, so it's the operator's explicit call;
+     off means links go straight to Amazon exactly as before. */
+  clickTracking: {
+    enabled: envBool("CLICK_TRACKING_ENABLED", false),
+    /* Public origin of the web app (no trailing slash) where /r/<id> lives,
+       e.g. https://trend-cart-xxxx.herokuapp.com. Empty disables tracking
+       regardless of the flag — a link with no reachable redirect is worse
+       than an untracked-but-working one. */
+    baseUrl: envString("PUBLIC_BASE_URL", "").replace(/\/+$/, ""),
+  },
+
   /* Operator notifications: an EMAIL (via Resend) when actionable items land
      in the approval queues. Ships dark until RESEND_API_KEY and NOTIFY_EMAIL_TO
      are both set. NOTE: the default from-address (onboarding@resend.dev) only

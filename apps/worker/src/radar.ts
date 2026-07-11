@@ -5,6 +5,7 @@ import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-hea
 import { config } from "./config.js";
 import { isPaused } from "./heartbeat.js";
 import { truncateReplyToFit } from "./reply.js";
+import { createTrackedLink } from "./tracking.js";
 
 /**
  * Trending radar: one standalone post per day on the bot's OWN profile,
@@ -150,7 +151,9 @@ export function createRadar(llm: LlmClient, stats: RadarStats): { tick: () => Pr
     // Budget: anchor + " #ad" + separator ride on top of the body.
     const reserved = anchor.length + 5;
     const wordBudget = Math.max(12, Math.floor((config.radar.maxLength - reserved) / 6.5));
-    const body = await llm.generateRadarPost({ items, wordBudget });
+    // Only the headline is passed: the post carries ONE link, so it must be
+    // about ONE item. The rest of `items` still feeds `basis` for the audit.
+    const body = await llm.generateRadarPost({ items: [headline], wordBudget });
     const composed = `${truncateReplyToFit(body, anchor, config.radar.maxLength - 4)} #ad`;
 
     const status = config.bot.dryRun
@@ -158,16 +161,23 @@ export function createRadar(llm: LlmClient, stats: RadarStats): { tick: () => Pr
       : config.radar.autoApprove
         ? ReplyStatus.APPROVED
         : ReplyStatus.PENDING_APPROVAL;
-    await prisma.radarPost.create({
+    const tracked = await createTrackedLink(linkUrl, "radar");
+    const draftRow = await prisma.radarPost.create({
       data: {
         content: composed,
-        linkUrl,
+        linkUrl: tracked.url,
         linkAnchor: anchor,
         basis: { items } as unknown as Prisma.InputJsonValue,
         status,
         approvedAt: status === ReplyStatus.APPROVED ? new Date() : null,
       },
+      select: { id: true },
     });
+    if (tracked.id) {
+      await prisma.trackedLink
+        .update({ where: { id: tracked.id }, data: { sourceId: draftRow.id } })
+        .catch(() => {});
+    }
     stats.drafted += 1;
     console.log(`[radar] drafted (${status}): ${composed.slice(0, 80)}`);
   }

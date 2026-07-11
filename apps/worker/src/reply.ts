@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
 import { getOperatorFlags } from "./heartbeat.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
+import { createTrackedLink } from "./tracking.js";
 import { validateReply } from "./validate.js";
 
 const BATCH_SIZE = 5;
@@ -498,16 +499,24 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     }
 
     const { status, approvedAt } = statusFor(evaluation, link, flags.autonomous);
-    await prisma.botReply.create({
+    // Route the link through a click-tracking redirect (no-op when disabled).
+    const tracked = await createTrackedLink(link.url, "reply");
+    const created = await prisma.botReply.create({
       data: {
         postId: evaluation.postId,
         replyText: text,
-        linkUrl: link.url,
+        linkUrl: tracked.url,
         linkAnchor: link.anchor,
         status,
         approvedAt,
       },
+      select: { id: true },
     });
+    if (tracked.id) {
+      await prisma.trackedLink
+        .update({ where: { id: tracked.id }, data: { sourceId: created.id } })
+        .catch(() => {}); // drill-down only — never fail the reply over it
+    }
     stats.generated += 1;
     if (status === ReplyStatus.APPROVED && flags.autonomous) stats.autoApproved += 1;
   }

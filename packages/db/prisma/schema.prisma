@@ -108,6 +108,27 @@ model Post {
   @@index([safetyStatus, productIntentScore])
 }
 
+/// One tagged Amazon link the bot posted, behind a /r/<id> redirect so clicks
+/// can be COUNTED — the revenue-proximate signal the learning loop was blind
+/// to (Amazon reports clicks per tag, never per post). Gated by
+/// CLICK_TRACKING_ENABLED; when off, links go straight to Amazon as before.
+model TrackedLink {
+  id           String    @id @default(cuid())
+  /// The final tagged Amazon URL the redirect 302s to.
+  targetUrl    String
+  /// Surface that posted it, for per-surface analytics: reply | radar | deal.
+  kind         String
+  /// Id of the source row (BotReply / RadarPost / DealPost) for drill-down.
+  sourceId     String?
+  clickCount   Int       @default(0)
+  firstClickAt DateTime?
+  lastClickAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([kind, createdAt])
+  @@index([sourceId])
+}
+
 /// Daily "trending radar" standalone post for the bot's own profile,
 /// synthesized from the last 24h of discovery data (what's actually trending
 /// across the bot's categories). Approval-gated like marginal replies; the
