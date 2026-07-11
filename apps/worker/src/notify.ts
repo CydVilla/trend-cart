@@ -1,37 +1,27 @@
-import { AtpAgent } from "@atproto/api";
 import { prisma, ReplyStatus, type Prisma } from "@trendcart/db";
-import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 
 /**
- * Operator ping: a Bluesky DM to the operator's PERSONAL account when
- * actionable items are sitting in the approval queues (pending replies,
- * radar drafts, pending deal posts). Without it the queues are silent —
- * a PLAYFUL reply or radar draft waits invisibly until the dashboard is
- * visited, then lapses.
+ * Operator ping: an EMAIL to the operator when actionable items are sitting in
+ * the approval queues (pending replies, radar drafts, pending deal posts).
+ * Without it the queues are silent — a PLAYFUL reply or radar draft waits
+ * invisibly until the dashboard is visited, then lapses.
  *
- * Ships dark until BOTH are true:
- *   - OPERATOR_DM_HANDLE is set (the operator's own handle), and
- *   - the bot's app password was created with "Allow access to your direct
- *     messages" checked (otherwise the chat API 401s — we fail soft and
- *     disable until restart).
+ * Delivery is Resend (https://resend.com) — Heroku can't send mail itself.
+ * Ships dark until BOTH RESEND_API_KEY and NOTIFY_EMAIL_TO are set.
  *
  * Pings only when something is NEW since the last ping, at most one per
  * NOTIFY_MIN_INTERVAL_HOURS. State survives restarts in BotMemory.
  */
 
 const PING_MEMORY_ID = "approval-ping";
-const CHAT_PROXY = { service: "did:web:api.bsky.chat", type: "bsky_chat" } as const;
+const RESEND_URL = "https://api.resend.com/emails";
 
 export type NotifyStats = { pings: number; errors: number; disabled: boolean };
 
 export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> } | null {
-  if (!config.notify.operatorDmHandle) return null;
-  if (!config.bluesky.handle || !config.bluesky.appPassword) return null;
-  console.log(`  operator pings:   DM to @${config.notify.operatorDmHandle} when approvals wait`);
-
-  let agent: AtpAgent | null = null;
-  let operatorDid: string | null = null;
+  if (!config.notify.resendApiKey || !config.notify.emailTo) return null;
+  console.log(`  operator email:   ping ${config.notify.emailTo} when approvals wait`);
   let stopped = false;
 
   async function lastPingAt(): Promise<Date | null> {
@@ -42,7 +32,6 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
 
   async function tick(): Promise<void> {
     if (stopped) return;
-    if (blueskyBackingOff()) return;
 
     const last = await lastPingAt();
     if (last && Date.now() - last.getTime() < config.notify.minIntervalHours * 3_600_000) return;
@@ -58,9 +47,7 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
         prisma.botReply.count({
           where: {
             status: ReplyStatus.PENDING_APPROVAL,
-            post: {
-              evaluations: { some: { suggestedReplyAngle: { startsWith: "PLAYFUL" } } },
-            },
+            post: { evaluations: { some: { suggestedReplyAngle: { startsWith: "PLAYFUL" } } } },
           },
         }),
         prisma.radarPost.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
@@ -89,60 +76,66 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
     }
     if (pendingRadar > 0) parts.push(`${pendingRadar} radar draft${pendingRadar === 1 ? "" : "s"}`);
     if (pendingDeals > 0) parts.push(`${pendingDeals} deal post${pendingDeals === 1 ? "" : "s"}`);
-    const text = `TrendCart: awaiting your approval — ${parts.join(", ")}.${
-      config.notify.dashboardUrl ? ` ${config.notify.dashboardUrl}` : ""
+    const summary = parts.join(", ");
+    const subject = `TrendCart: ${total} item${total === 1 ? "" : "s"} awaiting your approval`;
+    const link = config.notify.dashboardUrl;
+    const text = `Waiting in your approval queue: ${summary}.${link ? `\n\nReview: ${link}` : ""}`;
+    const html = `<p>Waiting in your approval queue: <strong>${summary}</strong>.</p>${
+      link ? `<p><a href="${link}">Review on the dashboard →</a></p>` : ""
     }`;
 
     try {
-      if (!agent) {
-        const candidate = new AtpAgent({ service: "https://bsky.social" });
-        await candidate.login({
-          identifier: config.bluesky.handle,
-          password: config.bluesky.appPassword,
-        });
-        agent = candidate;
-      }
-      if (!operatorDid) {
-        const resolved = await agent.resolveHandle({ handle: config.notify.operatorDmHandle });
-        operatorDid = resolved.data.did;
-      }
-      const chat = agent.withProxy(CHAT_PROXY.type, CHAT_PROXY.service);
-      const convo = await chat.chat.bsky.convo.getConvoForMembers({ members: [operatorDid] });
-      await chat.chat.bsky.convo.sendMessage({
-        convoId: convo.data.convo.id,
-        message: { text },
+      const res = await fetch(RESEND_URL, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${config.notify.resendApiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          from: config.notify.emailFrom,
+          to: [config.notify.emailTo],
+          subject,
+          text,
+          html,
+        }),
+        signal: AbortSignal.timeout(15_000),
       });
-      noteBlueskyUp();
+      if (!res.ok) {
+        stats.errors += 1;
+        const body = await res.text().catch(() => "");
+        // Auth/permission failure is permanent until the key is fixed — a bad
+        // API key or an unverified from-address (403). Disable, loudly, once.
+        if (res.status === 401 || res.status === 403) {
+          console.error(
+            `[notify] Resend rejected the send (${res.status}: ${body.slice(0, 200)}). ` +
+              `Check RESEND_API_KEY and that NOTIFY_EMAIL_FROM is allowed (the default ` +
+              `onboarding@resend.dev only delivers to your own Resend account email; ` +
+              `use a verified-domain address to reach anyone else). Pings disabled until restart.`,
+          );
+          stats.disabled = true;
+          stopped = true;
+          return;
+        }
+        console.error(`[notify] Resend send failed (${res.status}): ${body.slice(0, 200)}`);
+        return; // transient (rate limit / 5xx) — retry next tick
+      }
       stats.pings += 1;
+      console.log(`[notify] emailed operator: ${summary}`);
       await prisma.botMemory.upsert({
         where: { id: PING_MEMORY_ID },
         create: {
           id: PING_MEMORY_ID,
-          content: text,
+          content: subject,
           basis: { lastSentAt: new Date().toISOString() } as Prisma.InputJsonValue,
         },
         update: {
-          content: text,
+          content: subject,
           basis: { lastSentAt: new Date().toISOString() } as Prisma.InputJsonValue,
         },
       });
     } catch (error) {
-      if (noteBlueskyDown(error)) return; // transient outage — retry next tick
       stats.errors += 1;
-      const message = error instanceof Error ? error.message : String(error);
-      // A scope/permission failure means the app password lacks DM access —
-      // permanent until the operator regenerates it. Disable, loudly, once.
-      if (/bad token scope|unauthorized|forbidden|401|403/i.test(message)) {
-        console.error(
-          `[notify] DM failed (${message}) — the bot's app password likely lacks DM access. ` +
-            `Regenerate it with "Allow access to your direct messages" checked, update ` +
-            `BOT_APP_PASSWORD, and restart. Pings disabled until then.`,
-        );
-        stats.disabled = true;
-        stopped = true;
-        return;
-      }
-      console.error(`[notify] DM ping failed: ${message}`);
+      console.error(`[notify] email ping failed: ${error instanceof Error ? error.message : error}`);
     }
   }
 

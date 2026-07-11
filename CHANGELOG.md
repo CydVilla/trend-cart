@@ -15,13 +15,14 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   post within a minute (link facet on the headline item + #ad tag); drafts
   older than 24h auto-expire — a stale radar reports yesterday's news.
   `RADAR_ENABLED=false` turns the whole thing off.
-- **Operator DM pings** (`notify.ts`): when actionable items are waiting
+- **Operator email pings** (`notify.ts`): when actionable items are waiting
   (pending replies — playful count called out — radar drafts, pending deal
-  posts), the bot DMs the operator's personal account. At most one ping per
+  posts), the operator gets an email (via Resend). At most one ping per
   `NOTIFY_MIN_INTERVAL_HOURS` (4), only when something is NEW since the last
-  ping; state survives restarts in BotMemory. Ships dark until
-  `OPERATOR_DM_HANDLE` is set AND the bot's app password is regenerated with
-  DM access (fails soft with a clear log otherwise).
+  ping; state survives restarts in BotMemory. Ships dark until `RESEND_API_KEY`
+  and `NOTIFY_EMAIL_TO` are set. (Email, not a Bluesky DM: an account can't DM
+  itself — "Convos may only contain two members" — and the operator has no
+  separate Bluesky account, so email is the reliable inbox.)
 - **Approval-queue hygiene**: PENDING_APPROVAL replies whose post has passed
   the poster's necro window (48h; 7d for operator-injected) auto-expire with
   an audit row — the dashboard queue only ever shows actionable items.

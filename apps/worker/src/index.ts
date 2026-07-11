@@ -122,7 +122,7 @@ async function main(): Promise<void> {
   const radar = createRadar(llm, radarStats);
   const notifier = createNotifier(notifyStats);
   if (!notifier) {
-    console.log("  operator pings:   disabled (set OPERATOR_DM_HANDLE to enable)");
+    console.log("  operator email:   disabled (set RESEND_API_KEY + NOTIFY_EMAIL_TO to enable)");
   }
 
   const dealChecker = config.deals.enabled ? createDealChecker(dealCheckStats) : null;

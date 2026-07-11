@@ -84,14 +84,18 @@ export const config = {
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
   },
 
-  /* Operator notifications: a Bluesky DM to the operator's personal account
-     when actionable items land in the approval queues. Ships dark until
-     OPERATOR_DM_HANDLE is set AND the bot's app password has DM access. */
+  /* Operator notifications: an EMAIL (via Resend) when actionable items land
+     in the approval queues. Ships dark until RESEND_API_KEY and NOTIFY_EMAIL_TO
+     are both set. NOTE: the default from-address (onboarding@resend.dev) only
+     delivers to your own Resend account email; set NOTIFY_EMAIL_FROM to a
+     verified-domain address to reach any other inbox. */
   notify: {
-    operatorDmHandle: envString("OPERATOR_DM_HANDLE", ""),
+    resendApiKey: envString("RESEND_API_KEY", ""),
+    emailTo: envString("NOTIFY_EMAIL_TO", ""),
+    emailFrom: envString("NOTIFY_EMAIL_FROM", "TrendCart <onboarding@resend.dev>"),
     /* Rate limit: at most one ping per this many hours. */
     minIntervalHours: envInt("NOTIFY_MIN_INTERVAL_HOURS", 4),
-    /* Optional dashboard link appended to the DM. */
+    /* Optional dashboard link included in the email. */
     dashboardUrl: envString("DASHBOARD_URL", ""),
   },
 
