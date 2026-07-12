@@ -17,7 +17,7 @@
  * Env: DATABASE_URL, ANTHROPIC_API_KEY (required); ANTHROPIC_MODEL,
  *      CALIBRATE_MAX_PER_CLASS (default 20).
  */
-import { prisma, type Prisma } from "@trendcart/db";
+import { computeFunnel, prisma, type Prisma } from "@trendcart/db";
 import type { CategoryContext } from "@trendcart/shared";
 import { config } from "../src/config.js";
 import { applyGates } from "../src/evaluate.js";
@@ -125,6 +125,29 @@ async function main(): Promise<void> {
       ? `No disagreements — the learning loop is still aligned with your decisions.`
       : `Operator approvals and ratings are ground truth — a flip is always the bot's miss, never a "label error". Fix via Operator guidance (authoritative) or the lessons editor on the Overview page.`,
   );
+
+  // Weekly health snapshot: the last 7 days' funnel + clicks, so this issue
+  // is a one-stop check, not just an agreement number. Best-effort — a
+  // snapshot failure must never sink the calibration report.
+  try {
+    const funnel = await computeFunnel(prisma, { windowDays: 7 });
+    const clicks = await prisma.trackedLink.aggregate({
+      _sum: { clickCount: true },
+      _count: true,
+      where: { createdAt: { gte: new Date(Date.now() - 7 * 24 * 3_600_000) } },
+    });
+    lines.push(
+      ``,
+      `### Last 7 days`,
+      ``,
+      `discovered ${funnel.candidates.total} → evaluated ${funnel.candidates.evaluated} → worth replying ${funnel.evaluations.wouldReply} → posted ${funnel.replies.posted}`,
+      `engagement: ${funnel.engagement.likes} likes · ${funnel.engagement.replies} replies · clicks ${clicks._sum.clickCount ?? 0} across ${clicks._count} tracked links`,
+      `your verdicts this week: 👍 ${funnel.operatorRatings.up} · 👎 ${funnel.operatorRatings.down}`,
+      `top skips: ${funnel.skipReasons.slice(0, 3).map((s) => `${s.reason} (${s.count})`).join(" · ") || "none"}`,
+    );
+  } catch (error) {
+    lines.push(``, `_(7-day snapshot unavailable: ${error instanceof Error ? error.message : error})_`);
+  }
 
   const report = lines.join("\n");
   console.log(report);

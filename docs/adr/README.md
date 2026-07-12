@@ -18,3 +18,6 @@ made. Format: Status / Context / Decision / Consequences.
 | [0011](0011-deal-tracker.md) | Deal tracker: target-price alerts as standalone profile posts | Accepted |
 | [0012](0012-deal-feed-discovery.md) | Deal feeds: Wario64-style sale discovery on the bot's profile | Accepted |
 | [0013](0013-rss-deal-suggestions.md) | RSS deal suggestions: human-attested prices before PA-API exists | Accepted |
+| [0014](0014-multimodal-context.md) | The classifier sees what it judges: images, comments, purchasability | Accepted |
+| [0015](0015-timeliness-over-thresholds.md) | Timeliness over thresholds: measured gates, freshest-first spend | Accepted |
+| [0016](0016-growth-loop.md) | The growth loop: radar posts, click tracking, operator pings | Accepted |

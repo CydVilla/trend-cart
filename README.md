@@ -117,9 +117,14 @@ re-pasting an existing candidate resets its verdict for a fresh run),
 anchor and its exact link destination; the mode banner reflects the worker's
 real heartbeat, not env guesses; pending replies can be edited inline or
 regenerated with a direction), **Categories** (the discovery control panel —
-keywords are the Bluesky search queries), and a worker status card on
-Overview with the **Autonomous** toggle, a **Pause bot** kill switch, and a
-"What the bot has learned" card once the reflection job has run.
+keywords are the Bluesky search queries), **Insights** (the live funnel plus
+the bot's daily read on it), and — on Overview — a worker status card with
+the **Autonomous** toggle and a **Pause bot** kill switch, the **Trending
+radar** approval card (the daily what's-hot draft), the **Operator guidance**
+box (standing instructions the bot obeys above anything it learned), and an
+editable "What the bot has learned" card once the reflection job has run.
+Posted replies can be rated 👍/👎 (with an optional note) on the Replies
+page — those ratings are the strongest signal the learning loop gets.
 `/api/health` is public and returns 500 when the worker heartbeat goes stale —
 point a free uptime pinger at it.
 
@@ -207,6 +212,12 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `DEAL_FEED_AUTOPOST` | `true` = feed-discovered deals post without approval (default false) |
 | `DEAL_FEED_MAX_POSTS_PER_DAY` | Daily budget for feed-discovered posts (default 2) |
 | `DEAL_SUGGESTIONS_ENABLED` | RSS deal suggestions — the no-PA-API path (default true, still needs `DEALS_ENABLED`) |
+| `VISION_ENABLED` / `COMMENTS_ENABLED` | Multimodal context: post image thumbnails as vision input; top replies as conversation context (default true) |
+| `MAX_CANDIDATE_AGE_HOURS` | Never ingest posts older than this (default 16) — timeliness beats stale volume |
+| `PLAYFUL_AUTO_APPROVE` | Joke-first replies self-post in autonomous mode (default false — they queue for approval) |
+| `RADAR_ENABLED` / `RADAR_AUTO_APPROVE` | Daily trending-radar post from the bot's own discovery data (on / approval-gated by default) |
+| `RESEND_API_KEY` / `NOTIFY_EMAIL_TO` | Email pings when approvals wait (both required; dark otherwise) |
+| `CLICK_TRACKING_ENABLED` / `PUBLIC_BASE_URL` | Per-post click counting via first-party `/r/<id>` redirects (default off) |
 
 ## Safety model
 
@@ -267,24 +278,29 @@ stays public. The worker dyno additionally needs `ANTHROPIC_API_KEY`,
 See [CHANGELOG.md](CHANGELOG.md) for what shipped when, and
 [docs/adr/](docs/adr/README.md) for the architecture decision records.
 
-## Post-MVP roadmap
+## Roadmap
 
-Ranked by leverage — see git history / discussion for full rationale:
+The original post-MVP roadmap is fully shipped: search discovery (ADR-0008),
+a second own-profile channel (deals ADR-0011..13, radar ADR-0016), the
+measurement loop (`/r/<id>` click tracking, reply-outcome tracking, the
+Insights funnel), operator notifications (email pings), and the golden set
+(weekly calibration + threshold sweep). What's next, ranked by leverage:
 
-1. **Search-based discovery.** Replace firehose+keyword matching with polling
-   `app.bsky.feed.searchPosts` per category: precise, returns engagement
-   counts at discovery time (making "trending" real), and far cheaper.
-2. **(retired — ADR-0010: replies link straight to Amazon)** ~~Site-pull over bot-push.~~ Make the recommendation pages a real content
-   site; add a safe second channel — the bot posting curated lists to its own
-   timeline. Cold replies stay the smallest, most conservative channel.
-3. **Close the measurement loop.** `/go/[productId]` click-tracking redirects,
-   reply-outcome tracking (likes vs. blocks on our replies), and a daily
-   funnel metrics row surfaced in the dashboard.
-4. **Operator notifications.** Digest/push when replies enter the approval
-   queue (candidates expire in 24h — an unseen queue means the bot never
-   posts); move rate limits/cooldowns into a DB settings table.
-5. **Hygiene.** Split ingest and act into separate processes; Haiku triage
-   before Opus; a golden set of labeled posts to eval prompt changes.
+1. **PA-API unlock at 3 qualifying sales.** The one milestone that changes
+   the product: replies link DIRECTLY to `/dp/<ASIN>` product pages (verified
+   in-stock) instead of tagged searches, and the deal channel's automated
+   price polling + feed discovery light up. The PA-API client already exists
+   (`apps/worker/src/paapi.ts`); wiring replies to it is a modest change.
+2. **Click-aware learning.** Clicks are counted but don't yet FEED the loop:
+   pull `TrackedLink.clickCount` into the outcomes job and let reflection /
+   insights rank categories and phrasings by click-through. Do this once
+   ~1–2 weeks of real click data exist.
+3. **Reflection guardrail.** Re-run calibration after each nightly distill
+   and auto-revert a lesson set that drops agreement — needs a bigger golden
+   set (~30+ per class) before the metric is stable enough to trigger on.
+4. **Edge redirect.** If click volume grows, move just `/r/` to an
+   always-warm edge (Cloudflare Workers free tier) so the Eco dyno's
+   cold-start never eats a click.
 
 ## Phase status
 
@@ -297,6 +313,22 @@ Ranked by leverage — see git history / discussion for full rationale:
 - [x] Phase 7 — public site (now a single /about disclosure page — ADR-0010)
 - [x] Phase 8 — safety & rate limits (audited; stale-approval guard added to poster)
 - [x] Phase 9 — seed data (9 categories; keywords double as search queries)
+
+Live-era additions (bot went live 2026-07-03; see CHANGELOG + ADRs 0009–0016):
+
+- [x] Autonomous mode with escalation + the learning loop (ratings → nightly
+      reflection → editable lessons; operator guidance override channel)
+- [x] Deal channel: watchlist alerts, feed discovery (dark until PA-API),
+      RSS suggestions with human-attested prices
+- [x] Multimodal evaluation: image thumbnails as vision input, top replies
+      as conversation context, purchasability-aware link confidence
+- [x] Learning measurement: weekly calibration vs the operator's own labels
+      (GitHub Actions → issue) + gate-threshold sweep harness
+- [x] Timeliness funnel: discovery/eval age caps, freshest-first reply
+      queue, pre-LLM doom gates
+- [x] Growth loop: daily trending-radar post, per-post click tracking
+      (`/r/<id>`), operator email pings + approval-queue auto-expiry
+- [x] PLAYFUL reply lane (joke-first recommendations, approval-gated)
 
 ## Going live checklist
 

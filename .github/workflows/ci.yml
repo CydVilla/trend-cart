@@ -12,6 +12,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Secret scan
+        # Backstop for the local pre-push discipline: fail the build if a
+        # committed file ever contains a live-looking credential — Anthropic
+        # keys, Resend keys, or a Postgres URL with a real (non-localhost)
+        # password. .env is gitignored; this catches the accident anyway.
+        run: |
+          matches=$(grep -rInE "sk-ant-api[0-9a-zA-Z_-]{10,}|re_[0-9A-Za-z]{20,}|postgres(ql)?://[^/[:space:]:]+:[^@[:space:]]+@" \
+            --exclude-dir=node_modules --exclude-dir=.git --exclude=pnpm-lock.yaml . \
+            | grep -vE "localhost|127\.0\.0\.1|@db\b" || true)
+          if [ -n "$matches" ]; then
+            echo "$matches"
+            echo "::error::Possible committed secret found (see matches above)"; exit 1
+          fi
+          echo "no secrets detected"
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v6

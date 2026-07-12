@@ -1,0 +1,17 @@
+# Monthly, batched dependency PRs — enough to catch security patches without
+# a weekly PR flood on a solo project. CI (typecheck/lint/build + secret scan)
+# is the merge gate.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      all-npm-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
