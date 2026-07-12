@@ -14,13 +14,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@prisma/client": "^6.5.0",
-    "prisma": "^6.5.0"
+    "@prisma/client": "^7.8.0",
+    "prisma": "^7.8.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
-    "dotenv-cli": "^8.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "@types/node": "^26.1.1",
+    "dotenv-cli": "^11.0.0",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2"
   }
 }
