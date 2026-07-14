@@ -439,6 +439,12 @@ export async function updateCategory(formData: FormData): Promise<void> {
   const name = str(formData, "name");
   const description = str(formData, "description");
   if (!id || !name) return;
+  // Optional per-category engagement floor: blank = follow the global
+  // MIN_ENGAGEMENT_SCORE; a number overrides it for this category only.
+  const floorRaw = str(formData, "minEngagementScore");
+  const floorNum = Number(floorRaw);
+  const minEngagementScore =
+    floorRaw !== "" && Number.isFinite(floorNum) && floorNum >= 0 ? Math.round(floorNum) : null;
   await prisma.productCategory.update({
     where: { id },
     data: {
@@ -446,6 +452,7 @@ export async function updateCategory(formData: FormData): Promise<void> {
       description,
       keywords: list(formData, "keywords"),
       negativeKeywords: list(formData, "negativeKeywords"),
+      minEngagementScore,
     },
   });
   revalidatePath("/categories");

@@ -150,7 +150,8 @@ export default async function InsightsPage() {
         <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
           <div className="font-medium">Posted-reply engagement</div>
           <div className="mt-1 text-zinc-600">
-            {funnel.engagement.likes} likes · {funnel.engagement.replies} replies across{" "}
+            {funnel.engagement.likes} likes · {funnel.engagement.replies} replies ·{" "}
+            {funnel.engagement.reposts + funnel.engagement.quotes} reposts/quotes across{" "}
             {funnel.engagement.postedCount} posts
           </div>
           <div className="mt-1 text-xs text-zinc-500">

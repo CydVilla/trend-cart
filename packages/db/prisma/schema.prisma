@@ -148,6 +148,12 @@ model RadarPost {
   postUri    String?
   approvedAt DateTime?
   postedAt   DateTime?
+  /// Engagement on the posted radar post (same outcome sweep as replies).
+  likeCount        Int       @default(0)
+  repostCount      Int       @default(0)
+  replyCount       Int       @default(0)
+  quoteCount       Int       @default(0)
+  outcomeCheckedAt DateTime?
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
@@ -161,12 +167,16 @@ model ProductCategory {
   slug             String   @unique
   name             String
   description      String
-  /// Bluesky search queries polled each discovery cycle (first 6 used)
+  /// Bluesky search queries polled each discovery cycle (first 12 used)
   keywords         String[] @default([])
   /// If any of these appear, the category does NOT match
   negativeKeywords String[] @default([])
   /// Example problem statements, used as few-shot context for the LLM
   exampleProblems  String[] @default([])
+  /// Per-category engagement floor overriding MIN_ENGAGEMENT_SCORE (null =
+  /// global floor). Lower it for high-conviction categories whose candidates
+  /// expire waiting, raise it for noisy ones.
+  minEngagementScore Int?
   isActive         Boolean  @default(true)
 
   createdAt DateTime @default(now())
@@ -198,6 +208,8 @@ model BotReply {
   /// operator hand-edited the text before approving
   replyLikeCount    Int       @default(0)
   replyReplyCount   Int       @default(0)
+  replyRepostCount  Int       @default(0)
+  replyQuoteCount   Int       @default(0)
   outcomeCheckedAt  DateTime?
   editedByOperator  Boolean   @default(false)
   /// Original text before the operator's first edit — before/after pairs are
@@ -279,6 +291,26 @@ model WorkerHeartbeat {
   postingState String
   loops        Json
   counters     Json
+}
+
+/// Point-in-time engagement reading for one of the bot's own posted items.
+/// The live counts on BotReply/RadarPost/DealPost are overwritten in place;
+/// this table keeps the history, so engagement-over-time (did a reply land
+/// immediately or slow-burn?) is answerable — and it accumulates the
+/// time-series a future fine-tuning/reward dataset needs.
+model EngagementSnapshot {
+  id       String @id @default(cuid())
+  /// Surface: reply | radar | deal (mirrors TrackedLink.kind).
+  kind     String
+  /// Id of the source row (BotReply / RadarPost / DealPost).
+  sourceId String
+  likeCount   Int @default(0)
+  repostCount Int @default(0)
+  replyCount  Int @default(0)
+  quoteCount  Int @default(0)
+  capturedAt DateTime @default(now())
+
+  @@index([kind, sourceId, capturedAt])
 }
 
 /// Small persistent memory the bot writes for itself — currently a single
@@ -430,6 +462,12 @@ model DealPost {
   attemptCount     Int @default(0)
   nextAttemptAt    DateTime?
   postedAt         DateTime?
+  /// Engagement on the posted deal alert (same outcome sweep as replies).
+  likeCount        Int       @default(0)
+  repostCount      Int       @default(0)
+  replyCount       Int       @default(0)
+  quoteCount       Int       @default(0)
+  outcomeCheckedAt DateTime?
 
   createdAt DateTime @default(now())
 

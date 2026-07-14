@@ -3,6 +3,60 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — Full engagement outcomes + insights follow-ups
+
+### Added
+- **Full outcome tracking for everything the bot posts.** The hourly outcomes
+  sweep now also reads reposts and quotes on replies
+  (`BotReply.replyRepostCount/replyQuoteCount`), and covers the bot's OWN
+  radar and deal posts (their URIs were stored but never re-queried). Every
+  reading is also appended to a new `EngagementSnapshot` table, so engagement
+  becomes a time series instead of a single overwritten number — the raw
+  material a future fine-tuning/reward dataset needs. Reflection, insights,
+  and the dashboard all see the fuller counts.
+- **Labeled training-data export** (`pnpm --filter @trendcart/worker
+  export:dataset [out.jsonl]`): one JSONL record per operator-judged reply —
+  full context the bot saw, what it wrote (incl. before/after operator
+  edits), engagement + clicks, labeled good/bad from the operator's own
+  actions (same ground truth as calibration). The "collect and label
+  successful vs. failed responses" half of a fine-tuning loop, ready today.
+- **Per-category engagement floors** (`ProductCategory.minEngagementScore`,
+  dashboard-editable): the July insights showed retro-gaming/video-games
+  candidates expiring hardest while being the operator's highest-conviction
+  categories. A per-category floor lowers the bar for those without
+  loosening noisy categories; blank = global `MIN_ENGAGEMENT_SCORE`.
+- **Real-time orderability check for reply links** (PA-API-gated,
+  best-effort): the operator's 👎s cluster on "doesn't exist yet" and
+  sold-out items. With PA-API keys, a reply's search query is verified
+  against Amazon (new + in-stock) before linking; zero orderable results
+  demotes to the category fallback (whose copy already never implies the
+  item is purchasable). No keys / API errors = unchanged behavior.
+
+### Fixed
+- **The hourly LLM eval budget no longer counts free evaluations.** The
+  budget query counted every `CandidateEvaluation` row — including `policy`
+  rows (cheap pre-LLM rejections, ~half of all evaluations) and `operator`
+  directives (no LLM call) — silently halving real LLM throughput at any
+  configured `MAX_LLM_EVALS_PER_HOUR`. With policy rejections at 49% of
+  evaluations, this alone roughly doubles effective eval pace at the same
+  spend cap: the single biggest lever on the 81%-of-skips expiration problem.
+
+### Changed
+- **Data migration** applying the insights recommendations the funnel data
+  supports: engagement floor 8 for `retro-gaming` and `video-games` (highest
+  conviction, hardest hit by expiry; guarded — skipped if the operator set a
+  floor), and three intent-heavy discovery queries appended to
+  `books-reading` (63%→72% conversion, 3 GOOD / 0 BAD; duplicate-guarded).
+- `MAX_QUERIES_PER_CATEGORY` 8 → 12 (searches are free; the eval budget is
+  the cost ceiling) so keyword additions to an already-tuned category
+  actually poll instead of dying past the cap. Stale "first 6" copy fixed.
+- `MAX_LLM_EVALS_PER_HOUR` default 40 → 50 (and `.env.example` 15 → 50):
+  81% of all reply skips were candidates expiring in the eval backlog.
+  **Check the deployed env var** — a low deployed value overrides this.
+- `.env.example` `MIN_PRODUCT_INTENT_SCORE` 60 → 70, matching the code
+  default. **Check the deployed env var**: if production still sets 60, the
+  marginal 60–69 candidates driving the recent 👎s are getting through.
+
 ## 2026-07-11 — Click tracking + single-item radar
 
 ### Added
