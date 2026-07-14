@@ -192,8 +192,13 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
 
   const now = Date.now();
   const hourAgo = new Date(now - 3_600_000);
+  // MAX_LLM_EVALS_PER_HOUR is a COST cap, so only rows that actually spent an
+  // LLM call count against it. "policy" rows (cheap pre-LLM rejections — half
+  // of all evaluations) and "operator" directives (no LLM judgment) used to be
+  // counted too, silently halving real LLM throughput and letting candidates
+  // expire in the backlog while budget sat unused.
   const recentEvals = await prisma.candidateEvaluation.count({
-    where: { createdAt: { gte: hourAgo } },
+    where: { createdAt: { gte: hourAgo }, model: { notIn: ["policy", "operator"] } },
   });
   const budget = config.llm.maxEvalsPerHour - recentEvals;
 

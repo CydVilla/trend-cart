@@ -32,7 +32,24 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   demotes to the category fallback (whose copy already never implies the
   item is purchasable). No keys / API errors = unchanged behavior.
 
+### Fixed
+- **The hourly LLM eval budget no longer counts free evaluations.** The
+  budget query counted every `CandidateEvaluation` row — including `policy`
+  rows (cheap pre-LLM rejections, ~half of all evaluations) and `operator`
+  directives (no LLM call) — silently halving real LLM throughput at any
+  configured `MAX_LLM_EVALS_PER_HOUR`. With policy rejections at 49% of
+  evaluations, this alone roughly doubles effective eval pace at the same
+  spend cap: the single biggest lever on the 81%-of-skips expiration problem.
+
 ### Changed
+- **Data migration** applying the insights recommendations the funnel data
+  supports: engagement floor 8 for `retro-gaming` and `video-games` (highest
+  conviction, hardest hit by expiry; guarded — skipped if the operator set a
+  floor), and three intent-heavy discovery queries appended to
+  `books-reading` (63%→72% conversion, 3 GOOD / 0 BAD; duplicate-guarded).
+- `MAX_QUERIES_PER_CATEGORY` 8 → 12 (searches are free; the eval budget is
+  the cost ceiling) so keyword additions to an already-tuned category
+  actually poll instead of dying past the cap. Stale "first 6" copy fixed.
 - `MAX_LLM_EVALS_PER_HOUR` default 40 → 50 (and `.env.example` 15 → 50):
   81% of all reply skips were candidates expiring in the eval backlog.
   **Check the deployed env var** — a low deployed value overrides this.

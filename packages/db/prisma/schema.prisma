@@ -167,7 +167,7 @@ model ProductCategory {
   slug             String   @unique
   name             String
   description      String
-  /// Bluesky search queries polled each discovery cycle (first 6 used)
+  /// Bluesky search queries polled each discovery cycle (first 12 used)
   keywords         String[] @default([])
   /// If any of these appear, the category does NOT match
   negativeKeywords String[] @default([])
