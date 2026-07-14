@@ -46,7 +46,10 @@ export const config = {
     model: envString("ANTHROPIC_MODEL", "claude-opus-4-8"),
     /* Deterministic fake client for pipeline testing without API spend */
     useFake: useFakeLlm,
-    maxEvalsPerHour: envInt("MAX_LLM_EVALS_PER_HOUR", 40),
+    /* 50/h clears a discovery burst in ~1 day — at lower caps the July
+       insights showed candidates expiring in the eval backlog (81% of all
+       reply skips) before the reply loop ever saw them. */
+    maxEvalsPerHour: envInt("MAX_LLM_EVALS_PER_HOUR", 50),
     /* Firehose posts wait this long before evaluation so the engagement
        snapshot is meaningful; manually injected posts skip the wait. */
     evalMinPostAgeMinutes: envInt("EVAL_MIN_POST_AGE_MINUTES", 30),

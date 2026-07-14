@@ -3,6 +3,43 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — Full engagement outcomes + insights follow-ups
+
+### Added
+- **Full outcome tracking for everything the bot posts.** The hourly outcomes
+  sweep now also reads reposts and quotes on replies
+  (`BotReply.replyRepostCount/replyQuoteCount`), and covers the bot's OWN
+  radar and deal posts (their URIs were stored but never re-queried). Every
+  reading is also appended to a new `EngagementSnapshot` table, so engagement
+  becomes a time series instead of a single overwritten number — the raw
+  material a future fine-tuning/reward dataset needs. Reflection, insights,
+  and the dashboard all see the fuller counts.
+- **Labeled training-data export** (`pnpm --filter @trendcart/worker
+  export:dataset [out.jsonl]`): one JSONL record per operator-judged reply —
+  full context the bot saw, what it wrote (incl. before/after operator
+  edits), engagement + clicks, labeled good/bad from the operator's own
+  actions (same ground truth as calibration). The "collect and label
+  successful vs. failed responses" half of a fine-tuning loop, ready today.
+- **Per-category engagement floors** (`ProductCategory.minEngagementScore`,
+  dashboard-editable): the July insights showed retro-gaming/video-games
+  candidates expiring hardest while being the operator's highest-conviction
+  categories. A per-category floor lowers the bar for those without
+  loosening noisy categories; blank = global `MIN_ENGAGEMENT_SCORE`.
+- **Real-time orderability check for reply links** (PA-API-gated,
+  best-effort): the operator's 👎s cluster on "doesn't exist yet" and
+  sold-out items. With PA-API keys, a reply's search query is verified
+  against Amazon (new + in-stock) before linking; zero orderable results
+  demotes to the category fallback (whose copy already never implies the
+  item is purchasable). No keys / API errors = unchanged behavior.
+
+### Changed
+- `MAX_LLM_EVALS_PER_HOUR` default 40 → 50 (and `.env.example` 15 → 50):
+  81% of all reply skips were candidates expiring in the eval backlog.
+  **Check the deployed env var** — a low deployed value overrides this.
+- `.env.example` `MIN_PRODUCT_INTENT_SCORE` 60 → 70, matching the code
+  default. **Check the deployed env var**: if production still sets 60, the
+  marginal 60–69 candidates driving the recent 👎s are getting through.
+
 ## 2026-07-11 — Click tracking + single-item radar
 
 ### Added

@@ -41,7 +41,7 @@ export type FunnelReport = {
   };
   skipReasons: { reason: string; count: number }[];
   categories: CategoryStat[];
-  engagement: { postedCount: number; likes: number; replies: number };
+  engagement: { postedCount: number; likes: number; replies: number; reposts: number; quotes: number };
   /** Post-hoc operator verdicts on POSTED replies (autonomous feedback loop). */
   operatorRatings: { up: number; down: number; withFeedback: number };
 };
@@ -101,7 +101,12 @@ export async function computeFunnel(
     }),
     prisma.botReply.aggregate({
       where: { ...replyWhen, status: "POSTED" },
-      _sum: { replyLikeCount: true, replyReplyCount: true },
+      _sum: {
+        replyLikeCount: true,
+        replyReplyCount: true,
+        replyRepostCount: true,
+        replyQuoteCount: true,
+      },
       _count: true,
     }),
     prisma.botReply.count({ where: { ...replyWhen, operatorRating: "up" } }),
@@ -156,6 +161,8 @@ export async function computeFunnel(
       postedCount: engagementAgg._count,
       likes: engagementAgg._sum.replyLikeCount ?? 0,
       replies: engagementAgg._sum.replyReplyCount ?? 0,
+      reposts: engagementAgg._sum.replyRepostCount ?? 0,
+      quotes: engagementAgg._sum.replyQuoteCount ?? 0,
     },
     operatorRatings: { up: ratedUp, down: ratedDown, withFeedback: ratedWithFeedback },
   };

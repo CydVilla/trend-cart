@@ -169,12 +169,14 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
     );
   }
   if (posted.length > 0) {
-    const flat = posted.filter((r) => r.replyLikeCount + r.replyReplyCount === 0).length;
+    const flat = posted.filter(
+      (r) => r.replyLikeCount + r.replyReplyCount + r.replyRepostCount + r.replyQuoteCount === 0,
+    ).length;
     sections.push(
-      `POSTED replies and their engagement (likes♥ / replies↩ on the bot's reply):\n${posted
+      `POSTED replies and their engagement (likes♥ / replies↩ / reposts+quotes⇄ on the bot's reply):\n${posted
         .map(
           (r) =>
-            `- ${r.replyLikeCount}♥ ${r.replyReplyCount}↩ ${r.editedByOperator ? "(operator-edited) " : ""}reply: "${clip(r.replyText)}"`,
+            `- ${r.replyLikeCount}♥ ${r.replyReplyCount}↩ ${r.replyRepostCount + r.replyQuoteCount}⇄ ${r.editedByOperator ? "(operator-edited) " : ""}reply: "${clip(r.replyText)}"`,
         )
         .join("\n")}\n(${flat} of ${posted.length} got zero engagement)`,
     );

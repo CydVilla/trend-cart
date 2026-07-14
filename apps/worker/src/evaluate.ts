@@ -218,6 +218,33 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     0,
     Math.min(BATCH_SIZE - solicited.length, budget - solicited.length),
   );
+  // Per-category floors: an operator-set ProductCategory.minEngagementScore
+  // overrides the global floor for posts that category discovered (lower it
+  // where good candidates expire waiting; raise it for noisy categories).
+  // The SQL bound uses the most permissive active floor; each post is then
+  // re-checked against ITS OWN categories' floor.
+  const categoryRows = await prisma.productCategory.findMany({
+    where: { isActive: true },
+    select: {
+      slug: true,
+      name: true,
+      description: true,
+      exampleProblems: true,
+      minEngagementScore: true,
+    },
+  });
+  const floorBySlug = new Map(
+    categoryRows.map((c) => [c.slug, c.minEngagementScore ?? config.llm.minEngagementScore]),
+  );
+  const lowestFloor = Math.min(config.llm.minEngagementScore, ...floorBySlug.values());
+  /** Effective floor for a post = the most permissive floor among its matched
+   *  categories (global floor when nothing matched). */
+  const floorFor = (detected: string[]): number => {
+    const floors = detected
+      .map((slug) => floorBySlug.get(slug))
+      .filter((f): f is number => f !== undefined);
+    return floors.length > 0 ? Math.min(...floors) : config.llm.minEngagementScore;
+  };
   // Trending candidates must BOTH mature and clear the floor: recent AND
   // actually liked. Below-floor posts keep waiting (they may still be
   // rising) and expire unevaluated if they never catch on: zero LLM spend.
@@ -225,7 +252,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   // one with under ~2h of runway is a paid classify on a near-guaranteed
   // expiry (the reply queue needs time too). Such posts age out unevaluated.
   const runwayCutoff = new Date(now - 22 * 3_600_000);
-  const trending =
+  const trendingRaw =
     trendingTake > 0
       ? await prisma.post.findMany({
           where: {
@@ -234,12 +261,12 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
             OR: [
               // Search-discovered posts arrive already trending with real
               // counts — no maturation needed, floor re-checked.
-              { source: "SEARCH", engagementScore: { gte: config.llm.minEngagementScore } },
+              { source: "SEARCH", engagementScore: { gte: lowestFloor } },
               // Legacy firehose rows keep the original mature+floor rules.
               {
                 source: "FIREHOSE",
                 indexedAt: { lte: maturedBefore },
-                engagementScore: { gte: config.llm.minEngagementScore },
+                engagementScore: { gte: lowestFloor },
               },
             ],
           },
@@ -247,13 +274,18 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
           take: trendingTake,
         })
       : [];
+  // Posts below their own categories' floor stay PENDING (they may still be
+  // rising) and expire unevaluated if they never catch on: zero LLM spend.
+  // May under-fill a batch when floors diverge — the next tick catches up.
+  const trending = trendingRaw.filter(
+    (post) => post.engagementScore >= floorFor(post.detectedCategories),
+  );
   const due = [...solicited, ...trending];
   if (due.length === 0) return;
 
-  const categories: CategoryContext[] = await prisma.productCategory.findMany({
-    where: { isActive: true },
-    select: { slug: true, name: true, description: true, exampleProblems: true },
-  });
+  const categories: CategoryContext[] = categoryRows.map(
+    ({ minEngagementScore: _floor, ...rest }) => rest,
+  );
   const activeSlugs = new Set(categories.map((c) => c.slug));
   const modelTag = evaluationModelTag();
   // Loop-invariant context — one read per tick, not per candidate.
@@ -344,10 +376,11 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     // outsized engagement to justify LLM spend; posts actually asking for
     // recommendations evaluate at the normal floor. Solicited and injected
     // posts never hit this.
+    const effectiveFloor = floorFor(post.detectedCategories);
     if (
       (post.source === "FIREHOSE" || post.source === "SEARCH") &&
       !INTENT_MARKERS.test(post.text) &&
-      post.engagementScore < config.llm.minEngagementScore * config.llm.lowSignalMultiplier
+      post.engagementScore < effectiveFloor * config.llm.lowSignalMultiplier
     ) {
       await prisma.$transaction([
         prisma.candidateEvaluation.create({
@@ -358,7 +391,7 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
             safetyDecision: SafetyStatus.UNCERTAIN,
             model: "policy",
             shouldReply: false,
-            reason: `low signal: no intent markers and engagement ${post.engagementScore} < ${config.llm.minEngagementScore * config.llm.lowSignalMultiplier}`,
+            reason: `low signal: no intent markers and engagement ${post.engagementScore} < ${effectiveFloor * config.llm.lowSignalMultiplier}`,
           },
         }),
         prisma.post.update({
