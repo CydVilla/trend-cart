@@ -81,22 +81,30 @@ async function checkReplyPolicy(post: Post, categorySlug: string | null): Promis
     }
   }
 
-  // Hourly/daily caps.
-  const hourCount = await prisma.botReply.count({
-    where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 3_600_000) } },
-  });
-  if (hourCount >= config.bot.maxRepliesPerHour) {
-    return { action: "defer", reason: "hourly reply limit reached" };
-  }
-  const dayCount = await prisma.botReply.count({
-    where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 24 * 3_600_000) } },
-  });
-  if (dayCount >= config.bot.maxRepliesPerDay) {
-    return { action: "defer", reason: "daily reply limit reached" };
+  // Hourly/daily caps — UNSOLICITED (trending) replies only. Replies are the
+  // bot's secondary channel now: the deal/radar posts on its own profile do
+  // the volume, and a trending reply must be rare and excellent. Solicited
+  // replies are exempt: a mention deserves its answer, and manual injection
+  // is the operator's deliberate "post more" lever.
+  if (!solicited) {
+    const hourCount = await prisma.botReply.count({
+      where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 3_600_000) } },
+    });
+    if (hourCount >= config.bot.maxRepliesPerHour) {
+      return { action: "defer", reason: "hourly reply limit reached" };
+    }
+    const dayCount = await prisma.botReply.count({
+      where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 24 * 3_600_000) } },
+    });
+    if (dayCount >= config.bot.maxRepliesPerDay) {
+      return { action: "defer", reason: "daily reply limit reached" };
+    }
   }
 
-  // Global cooldown — minimum gap between any two replies.
-  if (config.bot.globalReplyCooldownMinutes > 0) {
+  // Global cooldown — minimum gap between trending replies. Solicited ones
+  // skip it too: an asker deserves a prompt answer, and the operator's
+  // injections are deliberate.
+  if (!solicited && config.bot.globalReplyCooldownMinutes > 0) {
     const lastReply = await prisma.botReply.findFirst({
       where: { status: { in: ACTIVE_STATUSES } },
       orderBy: { createdAt: "desc" },

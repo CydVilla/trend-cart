@@ -1,12 +1,22 @@
 import {
   prisma,
+  DealArmState,
   DealPostStatus,
+  DealSource,
   ListingOrigin,
   SuggestionStatus,
   type DealSuggestionSource,
 } from "@trendcart/db";
-import type { LlmClient } from "@trendcart/shared";
+import {
+  canonicalAmazonUrl,
+  cleanDealTitle,
+  shortenAmazonTitle,
+  validateDealText,
+  withAffiliateTag,
+  type LlmClient,
+} from "@trendcart/shared";
 import { config } from "../config.js";
+import { factCheckDealListing } from "../factcheck.js";
 import { getOperatorFlags } from "../heartbeat.js";
 import { extractAmazonRef, extractPriceHintCents, parseRssItems, type RssItem } from "./rss.js";
 
@@ -28,18 +38,25 @@ export type DealSuggester = { tick: () => Promise<void>; enabled: boolean };
 const FETCH_TIMEOUT_MS = 15_000;
 /** Feeds ~1MB would be pathological; cap what we'll parse. */
 const MAX_FEED_BYTES = 2_000_000;
+/** The clickable phrase the affiliate link rides on (price-free channel). */
+const RSS_DEAL_ANCHOR = "see the deal on Amazon";
 
 /**
- * The no-PA-API bridge: polls deal RSS feeds (Slickdeals etc.), extracts
- * Amazon items, gates them into topical lanes, and writes SUGGESTIONS the
- * operator confirms on the Deals page. This loop never posts anything and
- * never trusts a third-party price — the parsed price is a hint the operator
- * must re-enter, so every advertised price is human-attested at queue time.
+ * The no-PA-API Wario64 bridge, fully AUTOMATED: polls deal RSS feeds
+ * (Slickdeals etc.), extracts Amazon items, gates them into topical lanes,
+ * corroborates each survivor with a web-search fact check, and queues a
+ * SELF-POSTING deal alert on the bot's own profile.
+ *
+ * The compliance line (ADR-0013) survives automation: no third-party price
+ * is ever advertised. The post is PRICE-FREE — "<title> is on sale, spotted
+ * via <source>" — so nothing unattested is claimed; the reader sees the real
+ * price on Amazon. When PA-API credentials exist, the feed-discovery channel
+ * (discover.ts) takes over with real attested prices.
  *
  * Lane filtering is two-stage per the repo's usual split: cheap keyword
- * include/exclude first, then an LLM topical judgment ("pop-culture apparel
- * only") whose verdict is stored for audit. No LLM available → keyword-only
- * mode (the operator remains the real gate either way).
+ * include/exclude first, then an LLM topical judgment whose verdict is
+ * stored for audit. DealSuggestion rows remain as the dedup + audit ledger:
+ * QUEUED = a post was minted, DISMISSED = a gate said no.
  */
 export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestStats): DealSuggester {
   if (!config.deals.suggestions.enabled) {
@@ -48,16 +65,16 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
   }
   const hasLlm = llm !== null && (config.llm.useFake || Boolean(config.llm.anthropicApiKey));
   console.log(
-    `  deal suggestions: enabled (RSS every ${config.deals.suggestions.intervalMinutes}m/source, ` +
-      `${hasLlm ? "LLM topical gate" : "keyword gate only — no LLM key"})`,
+    `  rss deal channel: enabled (RSS every ${config.deals.suggestions.intervalMinutes}m/source, ` +
+      `${hasLlm ? "LLM lane gate" : "keyword gate only — no LLM key"}, ` +
+      `${config.deals.suggestions.autopost ? "AUTOPOST" : "audit-only (DEAL_RSS_AUTOPOST=false)"})`,
   );
 
   function skip(reason: string): void {
     stats.skipped[reason] = (stats.skipped[reason] ?? 0) + 1;
   }
 
-  /** Suggestions rot fast — a deal from two days ago is dead. Close them out
-   *  so the dashboard queue only ever shows plausibly-live deals. */
+  /** Audit rows rot fast — close them out so the ledger stays readable. */
   async function expireStale(): Promise<void> {
     const cutoff = new Date(Date.now() - config.deals.suggestions.expireHours * 3_600_000);
     const expired = await prisma.dealSuggestion.updateMany({
@@ -82,8 +99,53 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     return body;
   }
 
-  /** All gates for one RSS item; creates a suggestion when everything passes.
-   *  Returns true when a suggestion row was written. */
+  /** Record the item in the audit ledger (also the per-source guid dedup). */
+  async function writeLedger(
+    source: DealSuggestionSource,
+    item: RssItem,
+    ref: { asin: string; marketplace: string },
+    hintPriceCents: number | null,
+    status: SuggestionStatus,
+    gateVerdict: Record<string, unknown>,
+  ): Promise<void> {
+    await prisma.dealSuggestion.create({
+      data: {
+        sourceId: source.id,
+        guid: item.guid,
+        title: item.title.slice(0, 300),
+        asin: ref.asin,
+        marketplace: ref.marketplace,
+        productUrl: `https://${ref.marketplace}/dp/${ref.asin}`,
+        hintPriceCents,
+        sourceUrl: item.link,
+        status,
+        gateVerdict: gateVerdict as object,
+      },
+    });
+  }
+
+  /** Compose the PRICE-FREE deal alert. Returns null if it can't validate. */
+  function composeRssDeal(
+    rawTitle: string,
+    sourceName: string,
+    linkUrl: string,
+  ): { text: string; anchor: string } | null {
+    const title = shortenAmazonTitle(cleanDealTitle(rawTitle), 120)
+      // Belt-and-suspenders: no $ amounts or "% off" claims survive into copy —
+      // we can't attest third-party prices, so we never repeat them.
+      .replace(/\$\s*[0-9][\d,.]*/g, "")
+      .replace(/\b\d{1,3}\s*%\s*(?:off|discount)\b/gi, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/[\s\-–—:,+@&]+$/g, "")
+      .trim();
+    if (title.length < 8) return null; // nothing meaningful left to say
+    const text = `${title} is on sale right now (spotted via ${sourceName}) — ${RSS_DEAL_ANCHOR} #ad`;
+    const validation = validateDealText(text, linkUrl, config.deals.postMaxLength, RSS_DEAL_ANCHOR);
+    return validation.ok ? { text, anchor: RSS_DEAL_ANCHOR } : null;
+  }
+
+  /** All gates for one RSS item; queues a self-posting deal alert when
+   *  everything passes. Returns true when a post was minted. */
   async function handleItem(
     source: DealSuggestionSource,
     item: RssItem,
@@ -114,13 +176,14 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       skip("no_amazon_link");
       return false;
     }
-    // v1 is single-marketplace: a .co.uk item would carry the wrong currency
-    // through the confirm form, so only the configured marketplace passes.
+    // Single-marketplace: only the configured marketplace passes.
     if (ref.marketplace !== config.paapi.marketplace) {
       skip("marketplace_mismatch");
       return false;
     }
 
+    // The hint price is used ONLY for the source's price-band filter and the
+    // audit row — it is never advertised.
     const hintPriceCents = extractPriceHintCents(item.title, item.description);
     if (hintPriceCents != null) {
       if (source.minPriceCents != null && hintPriceCents < source.minPriceCents) {
@@ -133,17 +196,8 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       }
     }
 
-    // Cross-source ASIN dedup + respect the per-ASIN posting state: a banned
-    // discovered listing, an in-flight deal, or a recent post all mean the
-    // operator does not need this suggestion.
-    const dupe = await prisma.dealSuggestion.findFirst({
-      where: { asin: ref.asin, status: SuggestionStatus.NEW },
-      select: { id: true },
-    });
-    if (dupe) {
-      skip("duplicate_asin");
-      return false;
-    }
+    // Per-ASIN posting state: a banned discovered listing, an in-flight deal,
+    // or a recent post all mean this item must not post again.
     const listing = await prisma.trackedListing.findUnique({
       where: { asin_marketplace: { asin: ref.asin, marketplace: ref.marketplace } },
       select: { id: true, isActive: true, origin: true, lastPostedAt: true },
@@ -181,8 +235,21 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       }
     }
 
-    // Topical lane gate. LLM errors fail OPEN (suggestion still queues, the
-    // operator is the real gate) but an off-lane verdict fails CLOSED.
+    // Daily budget for RSS-sourced posts (checked before any LLM spend).
+    const rssToday = await prisma.dealPost.count({
+      where: {
+        source: DealSource.DISCOVERED,
+        feedId: null, // RSS-sourced (PA-API feed finds carry their feedId)
+        createdAt: { gte: new Date(Date.now() - 24 * 3_600_000) },
+      },
+    });
+    if (rssToday >= config.deals.suggestions.maxPostsPerDay) {
+      skip("daily_budget");
+      return false;
+    }
+
+    // Topical lane gate. LLM errors fail CLOSED here — with no human behind
+    // this pipeline, "couldn't judge" must mean "don't post".
     let gateVerdict: Record<string, unknown> = { mode: "keywords-only" };
     if (hasLlm && llm) {
       if (llmBudget.remaining <= 0) {
@@ -198,30 +265,97 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
         };
         if (!verdict.matches || verdict.confidence < config.deals.suggestions.minTopicConfidence) {
           skip("off_topic");
+          await writeLedger(source, item, ref, hintPriceCents, SuggestionStatus.DISMISSED, gateVerdict);
           return false;
         }
       } catch (error) {
         stats.errors += 1;
-        gateVerdict = {
-          mode: "gate-error",
-          error: error instanceof Error ? error.message : String(error),
-        };
+        skip("gate_error");
+        console.warn(
+          `[rssDeal] lane gate errored for "${item.title.slice(0, 60)}":`,
+          error instanceof Error ? error.message : error,
+        );
+        return false; // no ledger row — the item retries on a later fetch
       }
     }
 
-    await prisma.dealSuggestion.create({
-      data: {
-        sourceId: source.id,
-        guid: item.guid,
-        title: item.title.slice(0, 300),
+    // Web-search corroboration — the same last gate every unreviewed post
+    // gets. Fake-LLM mode skips it (fake forces DRY_RUN; nothing publishes).
+    let factCheck: Record<string, unknown> | null = null;
+    if (!config.llm.useFake) {
+      const verdict = await factCheckDealListing({ title: item.title, sourceName: source.name });
+      if (
+        !verdict ||
+        !verdict.accurate ||
+        verdict.confidence < config.factCheck.minConfidence
+      ) {
+        skip("uncorroborated");
+        await writeLedger(source, item, ref, hintPriceCents, SuggestionStatus.DISMISSED, {
+          ...gateVerdict,
+          factCheck: verdict ?? { error: "check could not be completed" },
+        });
+        return false;
+      }
+      factCheck = verdict as unknown as Record<string, unknown>;
+    }
+
+    // Compose the price-free alert; tag the affiliate link.
+    const linkUrl = withAffiliateTag(
+      canonicalAmazonUrl(ref.asin, ref.marketplace),
+      config.site.amazonAssociateTag,
+    );
+    const composed = composeRssDeal(item.title, source.name, linkUrl);
+    if (!composed) {
+      skip("compose_failed");
+      return false;
+    }
+
+    const now = new Date();
+    // DISCOVERED listing row = per-ASIN dedup/cooldown state (never polled).
+    // Deliberately no imageUrl and no price fields: the poster must never
+    // build a priced embed from unattested hints.
+    const listingRow = await prisma.trackedListing.upsert({
+      where: { asin_marketplace: { asin: ref.asin, marketplace: ref.marketplace } },
+      create: {
         asin: ref.asin,
         marketplace: ref.marketplace,
-        productUrl: `https://${ref.marketplace}/dp/${ref.asin}`,
-        hintPriceCents,
-        sourceUrl: item.link,
-        gateVerdict: gateVerdict as object,
+        productUrl: canonicalAmazonUrl(ref.asin, ref.marketplace),
+        title: shortenAmazonTitle(cleanDealTitle(item.title), 120) || item.title.slice(0, 120),
+        currency: "USD",
+        origin: ListingOrigin.DISCOVERED,
+        armState: DealArmState.DISARMED, // never polled/armed — dedup state only
+        lastCheckedAt: now,
+        source: "MANUAL",
+      },
+      update: {},
+    });
+
+    const status =
+      config.bot.dryRun || config.llm.useFake
+        ? DealPostStatus.DRY_RUN
+        : config.deals.suggestions.autopost
+          ? DealPostStatus.READY
+          : DealPostStatus.DRY_RUN; // audit-only mode: record, never publish
+    await prisma.dealPost.create({
+      data: {
+        listingId: listingRow.id,
+        source: DealSource.DISCOVERED,
+        status,
+        // Internal bookkeeping only — the copy and embed never show these.
+        salePriceCents: hintPriceCents ?? 0,
+        targetPriceCents: hintPriceCents ?? 0,
+        currency: "USD",
+        priceAsOf: now,
+        linkUrl,
+        postText: composed.text,
+        linkAnchor: composed.anchor,
       },
     });
+    await writeLedger(source, item, ref, hintPriceCents, SuggestionStatus.QUEUED, {
+      ...gateVerdict,
+      ...(factCheck ? { factCheck } : {}),
+    });
+    console.log(`[rssDeal] queued ${ref.asin} (${status}): ${composed.text.slice(0, 80)}`);
     return true;
   }
 
@@ -237,7 +371,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       } catch (error) {
         stats.errors += 1;
         console.error(
-          `[dealSuggest] item failed (${source.name}):`,
+          `[rssDeal] item failed (${source.name}):`,
           error instanceof Error ? error.message : error,
         );
       }
@@ -253,7 +387,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
         lastFetchError: null,
       },
     });
-    if (queued > 0) console.log(`[dealSuggest] ${source.name}: ${queued} new suggestion(s)`);
+    if (queued > 0) console.log(`[rssDeal] ${source.name}: ${queued} deal post(s) queued`);
   }
 
   async function tick(): Promise<void> {
@@ -294,7 +428,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
             data: { lastFetchedAt: new Date(), lastFetchError: message },
           })
           .catch(() => {});
-        console.warn(`[dealSuggest] ${source.name} failed: ${message}`);
+        console.warn(`[rssDeal] ${source.name} failed: ${message}`);
       }
     }
   }

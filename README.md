@@ -5,10 +5,15 @@ A Bluesky bot + web app that finds trending posts with real product intent
 with manual approval or confidence-gated autonomy — replies with a clickable
 link to a tagged Amazon search for the thing being discussed.
 
-**Design principle: this is not a spam bot.** It is rate-limited,
-safety-filtered, dry-run by default, opt-out-respecting, and never links
-anywhere it isn't confident the results are relevant. Disclosure lives in the
-account bio and on the public /about page.
+**Design principle: this is not a spam bot.** The bot's PRIMARY channel is
+its own profile (automated deal posts + the daily trending radar) — posts
+there annoy nobody. Replies to strangers are the secondary channel: severely
+rate-limited (3/day, 1/hour, 90-min gap by default), held to high intent and
+link-confidence bars, safety-filtered, opt-out-respecting, and never linking
+anywhere the bot isn't confident the results are relevant. Mentions and
+operator injections bypass the caps — solicited replies deserve answers.
+Disclosure lives in the account bio, in-post #ad tags on profile posts, and
+on the public /about page.
 
 ## Architecture
 
@@ -164,20 +169,18 @@ Three paths feed the same exactly-once poster:
   (`DEAL_FEED_MAX_POSTS_PER_DAY`, default 2) inside the global cap, and a
   per-ASIN cooldown/dedup row keeps any item from reposting within 7 days —
   pause one in "Discovered by feeds" to ban it permanently.
-- **Watchlist** (same keys): specific listings with a full (normal) price and
-  an optional stricter alert price; the worker polls prices and fires when a
-  tracked item drops below its threshold. One sale = one post (it re-arms only
-  after the price climbs back up).
-- **RSS suggestions** (ADR-0013, **no PA-API needed**): deal-site RSS feeds
-  (Slickdeals seeded, two lanes: tech & electronics, pop-culture apparel) are
-  polled for Amazon items; an LLM judges each headline against the lane
-  ("fandom clothing only — plain apparel doesn't match"), and matches appear
-  as suggestions with the parsed price as a hint. You check the live Amazon
-  price, confirm it, and the post queues — the operator attestation is what
-  makes a price compliant to advertise without PA-API. Suggestions expire on
-  their own after 48h.
-- **Manual** ("Post deal now" on a listing): you enter the sale price and it
-  queues a post immediately — no API keys required.
+- **RSS deal channel** (ADR-0013, **no PA-API needed, fully automated**):
+  deal-site RSS feeds (Slickdeals seeded, two lanes: tech & electronics,
+  pop-culture apparel) are polled for Amazon items; keyword filters run
+  first, an LLM judges each headline against its lane ("fandom clothing only
+  — plain apparel doesn't match"), a web-search fact check corroborates the
+  deal, and survivors self-post with **price-free copy** attributed to the
+  source ("spotted via Slickdeals"). No third-party price is ever advertised
+  — that's what keeps automation compliant without PA-API; the reader sees
+  the real price on Amazon. Gated by `DEAL_RSS_AUTOPOST` (default off =
+  audit-only DRY_RUN rows), budgeted by `DEAL_RSS_MAX_POSTS_PER_DAY`
+  (default 2), deduped per ASIN with the same 7-day cooldown, and bannable
+  per item from "Discovered by feeds".
 
 PA-API needs an approved Associate account (3 qualifying sales in 180 days).
 The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
@@ -203,7 +206,7 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | --- | --- |
 | `DRY_RUN` | `true` = never post, only record what would be posted |
 | `REPLY_MODE` | `dry_run` \| `manual` (approve in dashboard) \| `auto` (off by default) |
-| `MAX_REPLIES_PER_HOUR` / `_DAY` | Hard rate limits |
+| `MAX_REPLIES_PER_HOUR` / `_DAY` | Hard rate limits for unsolicited replies (defaults 1/hour, 3/day — replies are the secondary channel) |
 | `MIN_PRODUCT_INTENT_SCORE` | LLM intent threshold (0–100) below which the bot never replies |
 | `MIN_ENGAGEMENT_SCORE` | Trending floor — discovered posts below it are never evaluated |
 | `MIN_LINK_CONFIDENCE` | Search queries below this confidence (0–100) are never linked (default 60) |
@@ -217,9 +220,11 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `PA_API_ACCESS_KEY` / `PA_API_SECRET_KEY` | Amazon Product Advertising API 5.0 keys — enable deal feeds + automated price polling (manual path works without them) |
 | `PA_API_PARTNER_TAG` | PA-API PartnerTag; defaults to `AMAZON_ASSOCIATE_TAG` |
 | `DEAL_POST_STYLE` | `wario` (default, terse deal-account copy) \| `classic` |
-| `DEAL_FEED_AUTOPOST` | `true` = feed-discovered deals post without approval (default false) |
+| `DEAL_FEED_AUTOPOST` | `true` = PA-API feed-discovered deals post without approval (default false) |
 | `DEAL_FEED_MAX_POSTS_PER_DAY` | Daily budget for feed-discovered posts (default 2) |
-| `DEAL_SUGGESTIONS_ENABLED` | RSS deal suggestions — the no-PA-API path (default true, still needs `DEALS_ENABLED`) |
+| `DEAL_RSS_AUTOPOST` | `true` = automated price-free RSS deal posts publish (default false = audit-only; needs `DEALS_ENABLED`) |
+| `DEAL_RSS_MAX_POSTS_PER_DAY` | Daily budget for RSS-sourced deal posts (default 2) |
+| `DEAL_SUGGESTIONS_ENABLED` | The RSS deal-discovery loop itself (default true, still needs `DEALS_ENABLED`) |
 | `VISION_ENABLED` / `COMMENTS_ENABLED` | Multimodal context: post image thumbnails as vision input; top replies as conversation context (default true) |
 | `MAX_CANDIDATE_AGE_HOURS` | Never ingest posts older than this (default 16) — timeliness beats stale volume |
 | `PLAYFUL_AUTO_APPROVE` | Joke-first replies self-post in autonomous mode (default false — they queue for approval) |

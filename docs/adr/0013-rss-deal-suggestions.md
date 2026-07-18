@@ -55,3 +55,19 @@ price; the manual posting path does the rest.**
 - Feed hosts may block unfamiliar user agents or change redirect formats; the
   per-source `lastFetchError` surfaces this in the dashboard, and failures
   never hot-loop (a failed fetch waits out the full interval).
+
+## Addendum (2026-07-18): automated, price-free
+The operator dropped the manual confirmation step — the channel's whole point
+is now automated Wario64-style self-posting. The price rule SURVIVES the
+automation by inverting the solution: instead of a human attesting the price,
+the post stops advertising any price at all. Copy is price-free and
+source-attributed ("<item> is on sale right now (spotted via Slickdeals) —
+see the deal on Amazon #ad"); hint prices from headlines are stripped from
+titles and used only for the source's price-band filter and audit rows. A
+web-search fact check (same machinery as the reply gate) corroborates each
+deal before it posts, gate errors fail closed, and `DEAL_RSS_AUTOPOST`
+(default off = audit-only) plus `DEAL_RSS_MAX_POSTS_PER_DAY` bound the
+channel. When PA-API credentials arrive, ADR-0012's feed discovery takes over
+with real attested prices; this path remains for deals PA-API search wouldn't
+surface. The operator-confirmation UI, watchlist, and "Post deal now" manual
+path were removed with it.

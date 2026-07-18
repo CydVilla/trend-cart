@@ -181,22 +181,25 @@ export const config = {
     replyMode: parseReplyMode(envString("REPLY_MODE", "manual")),
     /* Link-quality floor: a recommended search query below this confidence is
        never linked (the category fallback or a skip happens instead). */
-    minLinkConfidence: envInt("MIN_LINK_CONFIDENCE", 60),
+    minLinkConfidence: envInt("MIN_LINK_CONFIDENCE", 75),
     /* Autonomous mode (dashboard toggle) self-approves only replies clearing
        BOTH bars; anything weaker still queues for manual approval. */
-    autoMinIntentScore: envInt("AUTO_MIN_INTENT_SCORE", 80),
-    autoMinLinkConfidence: envInt("AUTO_MIN_LINK_CONFIDENCE", 75),
+    autoMinIntentScore: envInt("AUTO_MIN_INTENT_SCORE", 90),
+    autoMinLinkConfidence: envInt("AUTO_MIN_LINK_CONFIDENCE", 85),
     /* PLAYFUL (joke-first) replies are high-variance — the operator 👎'd two
        earnest attempts at this genre — so they queue for manual approval even
        in autonomous mode until this is flipped on. */
     playfulAutoApprove: envBool("PLAYFUL_AUTO_APPROVE", false),
-    maxRepliesPerHour: envInt("MAX_REPLIES_PER_HOUR", 3),
-    maxRepliesPerDay: envInt("MAX_REPLIES_PER_DAY", 20),
+    /* Replies are the SECONDARY channel (own-profile deal/radar posts carry
+       the volume): a trending reply must be rare and excellent. Caps apply to
+       unsolicited replies only — mentions and operator injections are exempt. */
+    maxRepliesPerHour: envInt("MAX_REPLIES_PER_HOUR", 1),
+    maxRepliesPerDay: envInt("MAX_REPLIES_PER_DAY", 3),
     replyMaxLength: envInt("REPLY_MAX_LENGTH", 240),
-    minProductIntentScore: envInt("MIN_PRODUCT_INTENT_SCORE", 70),
+    minProductIntentScore: envInt("MIN_PRODUCT_INTENT_SCORE", 85),
     authorCooldownHours: envInt("AUTHOR_COOLDOWN_HOURS", 168),
     categoryCooldownMinutes: envInt("CATEGORY_COOLDOWN_MINUTES", 120),
-    globalReplyCooldownMinutes: envInt("GLOBAL_REPLY_COOLDOWN_MINUTES", 10),
+    globalReplyCooldownMinutes: envInt("GLOBAL_REPLY_COOLDOWN_MINUTES", 90),
   },
 
   /* Deal tracker: standalone deal-alert posts to the bot's own profile.
@@ -248,17 +251,26 @@ export const config = {
       maxPostsPerDay: envInt("DEAL_FEED_MAX_POSTS_PER_DAY", 2),
     },
 
-    /* RSS deal suggestions: the no-PA-API bridge. Polls deal RSS feeds
-       (Deals page → Suggestion sources), lane-gates the items, and queues
-       SUGGESTIONS the operator confirms — this path never posts on its own
-       and needs no Amazon keys. */
+    /* RSS deal channel: the no-PA-API Wario64 bridge, fully AUTOMATED. Polls
+       deal RSS feeds (Deals page → Deal sources), lane-gates the items,
+       corroborates each survivor with a web-search fact check, and self-posts
+       PRICE-FREE copy ("spotted via Slickdeals") — no third-party price is
+       ever advertised, honoring ADR-0013's attestation rule without a human
+       in the loop. Needs no Amazon keys; PA-API feeds replace it with real
+       attested prices once credentials exist. */
     suggestions: {
       enabled: envBool("DEAL_SUGGESTIONS_ENABLED", true),
+      /* Master switch for autonomous RSS deal posts. Off = the RSS loop only
+         records what it WOULD post (audit rows), nothing publishes. */
+      autopost: envBool("DEAL_RSS_AUTOPOST", false),
+      /* Daily budget for RSS-sourced posts — keep under DEAL_MAX_POSTS_PER_DAY
+         so RSS finds can't starve future PA-API feed finds. */
+      maxPostsPerDay: envInt("DEAL_RSS_MAX_POSTS_PER_DAY", 2),
       intervalMinutes: envInt("DEAL_SUGGEST_INTERVAL_MINUTES", 30),
       sourcesPerTick: envInt("DEAL_SUGGEST_SOURCES_PER_TICK", 2),
       /* Newest-first cap per fetch — bounds first-run floods. */
       maxItemsPerFetch: envInt("DEAL_SUGGEST_MAX_ITEMS_PER_FETCH", 30),
-      /* NEW suggestions older than this auto-expire (deals rot fast). */
+      /* Suggestion audit rows older than this auto-expire (deals rot fast). */
       expireHours: envInt("DEAL_SUGGEST_EXPIRE_HOURS", 48),
       /* Topical-gate floor: below this confidence an item is off-lane. */
       minTopicConfidence: envInt("DEAL_SUGGEST_MIN_TOPIC_CONFIDENCE", 70),

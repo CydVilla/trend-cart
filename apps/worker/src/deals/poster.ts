@@ -169,12 +169,18 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     });
     const listing: TrackedListing = deal.listing;
 
+    // RSS-sourced posts (DISCOVERED with no feedId) are the PRICE-FREE
+    // channel: no price is advertised, so price freshness doesn't apply and
+    // no priced embed may ever render (salePriceCents is an unattested hint).
+    const priceFree =
+      (deal.source === DealSource.DISCOVERED && !deal.feedId) || deal.salePriceCents <= 0;
+
     // Pre-flight: paused listing, or a price snapshot too stale to advertise.
     if (!listing.isActive) {
       await terminal(deal.id, DealPostStatus.SKIPPED, "listing was deactivated before posting");
       return;
     }
-    if (Date.now() - deal.priceAsOf.getTime() > config.deals.maxPriceAgeHours * 3_600_000) {
+    if (!priceFree && Date.now() - deal.priceAsOf.getTime() > config.deals.maxPriceAgeHours * 3_600_000) {
       await terminal(deal.id, DealPostStatus.SKIPPED, "price snapshot too stale to post");
       return;
     }
@@ -227,7 +233,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
 
     try {
       const facets = buildFacets(text, deal.linkUrl, anchor);
-      const thumb = await uploadThumb(activeAgent, listing.imageUrl);
+      const thumb = priceFree ? null : await uploadThumb(activeAgent, listing.imageUrl);
       const wasClause =
         deal.wasPriceCents && deal.wasPriceCents > deal.salePriceCents
           ? ` (was ${formatMoney(deal.wasPriceCents, deal.currency)})`

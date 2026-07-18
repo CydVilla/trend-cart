@@ -1,26 +1,8 @@
 "use server";
 
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  prisma,
-  DealArmState,
-  DealPostStatus,
-  DealSource,
-  ListingOrigin,
-  ReplyStatus,
-  SafetyStatus,
-  SuggestionStatus,
-} from "@trendcart/db";
-import {
-  PAAPI_SEARCH_INDEXES,
-  canonicalAmazonUrl,
-  composeDealPost,
-  extractAsin,
-  isAmazonHost,
-  parseCents,
-  parseDealPostStyle,
-  withAffiliateTag,
-} from "@trendcart/shared";
+import { prisma, DealPostStatus, ReplyStatus, SafetyStatus } from "@trendcart/db";
+import { PAAPI_SEARCH_INDEXES, isAmazonHost, parseCents, withAffiliateTag } from "@trendcart/shared";
 import { revalidatePath } from "next/cache";
 
 function str(formData: FormData, name: string): string {
@@ -465,12 +447,6 @@ export async function updateCategory(formData: FormData): Promise<void> {
 // ── Deal tracker ────────────────────────────────────────────
 
 const DEAL_MAX_PRICE_AGE_HOURS = Number(process.env.DEAL_MAX_PRICE_AGE_HOURS ?? 1);
-const DEAL_POST_MAX_LENGTH = Number(process.env.DEAL_POST_MAX_LENGTH ?? 300);
-
-/** The affiliate tag; deal actions refuse to store a bare link without it. */
-function associateTag(): string {
-  return process.env.AMAZON_ASSOCIATE_TAG ?? "";
-}
 
 /**
  * Whether a queued deal would actually publish — read from the worker's
@@ -484,206 +460,6 @@ async function workerInDryRun(): Promise<boolean> {
   });
   return hb?.dryRun ?? true; // unknown worker → assume dry run (safe)
 }
-
-export async function addTrackedListing(formData: FormData): Promise<void> {
-  const tag = associateTag();
-  if (!tag) return; // never store a bare (untagged) affiliate link
-  const url = str(formData, "url");
-  const title = str(formData, "title");
-  const fullCents = parseCents(str(formData, "fullPrice"));
-  const targetCents = parseCents(str(formData, "targetPrice"));
-  const asin = extractAsin(url);
-  // Need a title, a valid ASIN, and at least one usable price (full or alert).
-  const effective = targetCents ?? fullCents;
-  if (!title || !asin || effective === null || effective <= 0) return;
-
-  // Marketplace from the pasted host (prices are marketplace-specific).
-  let marketplace = "www.amazon.com";
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    if (isAmazonHost(host)) marketplace = host.startsWith("www.") ? host : `www.${host}`;
-  } catch {
-    /* extractAsin accepts a bare ASIN too; keep the default marketplace */
-  }
-  const productUrl = canonicalAmazonUrl(asin, marketplace);
-
-  const rawImage = str(formData, "imageUrl");
-  let imageUrl: string | null = null;
-  if (rawImage) {
-    try {
-      if (isAmazonHost(new URL(rawImage).hostname)) imageUrl = rawImage;
-    } catch {
-      /* ignore an unparseable image URL */
-    }
-  }
-
-  await prisma.trackedListing.upsert({
-    where: { asin_marketplace: { asin, marketplace } },
-    create: {
-      asin,
-      marketplace,
-      productUrl,
-      title,
-      imageUrl,
-      fullPriceCents: fullCents,
-      targetPriceCents: targetCents,
-    },
-    update: {
-      title,
-      productUrl,
-      fullPriceCents: fullCents,
-      targetPriceCents: targetCents,
-      ...(imageUrl ? { imageUrl } : {}),
-    },
-  });
-  revalidatePath("/deals");
-}
-
-export async function updateListingPricing(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  const fullCents = parseCents(str(formData, "fullPrice"));
-  const targetCents = parseCents(str(formData, "targetPrice"));
-  const effective = targetCents ?? fullCents;
-  if (!id || effective === null || effective <= 0) return; // need at least one price
-  const listing = await prisma.trackedListing.findUnique({ where: { id } });
-  if (!listing) return;
-  // If the last known price sits above the new threshold, re-arm so the next
-  // drop fires; clear the dedup memory so a prior identical price can re-post.
-  const rearm = listing.lastPriceCents != null && listing.lastPriceCents > effective;
-  await prisma.trackedListing.update({
-    where: { id },
-    data: {
-      fullPriceCents: fullCents,
-      targetPriceCents: targetCents,
-      ...(rearm ? { armState: DealArmState.ARMED, lastPostedPriceCents: null } : {}),
-    },
-  });
-  revalidatePath("/deals");
-}
-
-export async function toggleListingActive(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  const listing = await prisma.trackedListing.findUnique({ where: { id } });
-  if (!listing) return;
-  await prisma.trackedListing.update({ where: { id }, data: { isActive: !listing.isActive } });
-  revalidatePath("/deals");
-}
-
-export async function deleteListing(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  if (!id) return;
-  // Never delete while a deal is mid-publish — that would orphan the live post.
-  const inFlight = await prisma.dealPost.findFirst({
-    where: { listingId: id, status: DealPostStatus.POSTING },
-    select: { id: true },
-  });
-  if (inFlight) return;
-  await prisma.trackedListing.delete({ where: { id } });
-  revalidatePath("/deals");
-}
-
-/** Force the worker to re-poll this listing on its next tick (worker-only —
- *  the dashboard never calls Amazon itself). */
-export async function requestCheckNow(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  if (!id) return;
-  await prisma.trackedListing.updateMany({
-    where: { id, isActive: true },
-    data: { lastCheckedAt: null, nextCheckAt: null, lastCheckError: null },
-  });
-  revalidatePath("/deals");
-}
-
-/**
- * Manual fallback: queue a standalone deal post immediately from an
- * operator-supplied sale price — no PA-API needed. Disarms the listing (one
- * post per sale) and honors the same freshness + dedup guards as the poller.
- */
-export async function postDealNow(formData: FormData): Promise<void> {
-  const tag = associateTag();
-  if (!tag) return;
-  const id = str(formData, "id");
-  const saleCents = parseCents(str(formData, "salePrice"));
-  if (!id || saleCents === null || saleCents <= 0) return;
-  const listing = await prisma.trackedListing.findUnique({ where: { id } });
-  if (!listing) return;
-
-  // priceAsOf: operator-supplied or now; must be fresh and not in the future.
-  const rawAsOf = str(formData, "priceAsOf");
-  let priceAsOf = new Date();
-  if (rawAsOf) {
-    const parsed = new Date(rawAsOf);
-    if (Number.isNaN(parsed.getTime())) return;
-    priceAsOf = parsed;
-  }
-  const ageMs = Date.now() - priceAsOf.getTime();
-  if (ageMs < -60_000) return; // dated in the future
-  if (ageMs > DEAL_MAX_PRICE_AGE_HOURS * 3_600_000) return; // too stale to advertise
-
-  // In-flight dedup: at most one queued/posting deal per listing.
-  const pending = await prisma.dealPost.findFirst({
-    where: {
-      listingId: id,
-      status: { in: [DealPostStatus.PENDING, DealPostStatus.READY, DealPostStatus.POSTING] },
-    },
-    select: { id: true },
-  });
-  if (pending) return;
-
-  const linkUrl = withAffiliateTag(listing.productUrl, tag);
-  try {
-    if (!isAmazonHost(new URL(linkUrl).hostname)) return;
-  } catch {
-    return;
-  }
-  // The % discount is computed against the operator's full price (their
-  // stated normal value), shown as the "was" price.
-  const composed = composeDealPost({
-    title: listing.title,
-    salePriceCents: saleCents,
-    wasPriceCents: listing.fullPriceCents,
-    currency: listing.currency,
-    priceAsOf,
-    linkUrl,
-    maxLength: DEAL_POST_MAX_LENGTH,
-    style: parseDealPostStyle(process.env.DEAL_POST_STYLE),
-  });
-  if ("error" in composed) return;
-
-  const effectiveTarget = listing.targetPriceCents ?? listing.fullPriceCents ?? saleCents;
-  const dryRun = await workerInDryRun();
-  await prisma.$transaction([
-    prisma.dealPost.create({
-      data: {
-        listingId: id,
-        source: DealSource.MANUAL,
-        status: dryRun ? DealPostStatus.DRY_RUN : DealPostStatus.READY,
-        salePriceCents: saleCents,
-        targetPriceCents: effectiveTarget,
-        wasPriceCents: listing.fullPriceCents,
-        currency: listing.currency,
-        priceAsOf,
-        linkUrl,
-        postText: composed.text,
-        linkAnchor: composed.anchor,
-      },
-    }),
-    prisma.trackedListing.update({
-      where: { id },
-      data: {
-        armState: DealArmState.DISARMED,
-        lastPriceCents: saleCents,
-        lastPriceAsOf: priceAsOf,
-        lastPostedPriceCents: saleCents,
-        source: "MANUAL",
-        ...(dryRun ? {} : { lastPostedAt: new Date() }),
-      },
-    }),
-  ]);
-  revalidatePath("/deals");
-}
-
-// ── Deal feeds (Wario64-style sale discovery) ───────────────
 
 /** Bounded positive int from a form field; null when absent/invalid. */
 function intField(formData: FormData, name: string, min: number, max: number): number | null {
@@ -779,6 +555,23 @@ export async function runDealFeedNow(formData: FormData): Promise<void> {
  * older than the freshness ceiling can never be advertised, so approving a
  * stale one closes it out instead of queuing a post the poster would refuse.
  */
+/** Ban/allow an ASIN for the automated deal channel: a deactivated
+ *  DISCOVERED listing is skipped by both the RSS pipeline and PA-API feeds. */
+export async function toggleListingActive(formData: FormData): Promise<void> {
+  const id = str(formData, "id");
+  if (!id) return;
+  const listing = await prisma.trackedListing.findUnique({
+    where: { id },
+    select: { isActive: true },
+  });
+  if (!listing) return;
+  await prisma.trackedListing.update({
+    where: { id },
+    data: { isActive: !listing.isActive },
+  });
+  revalidatePath("/deals");
+}
+
 export async function approveDealPost(formData: FormData): Promise<void> {
   const id = str(formData, "id");
   if (!id) return;
@@ -894,127 +687,5 @@ export async function fetchSuggestionSourceNow(formData: FormData): Promise<void
     where: { id, isActive: true },
     data: { lastFetchedAt: null, lastFetchError: null },
   });
-  revalidatePath("/deals");
-}
-
-export async function dismissSuggestion(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  if (!id) return;
-  await prisma.dealSuggestion.updateMany({
-    where: { id, status: SuggestionStatus.NEW },
-    data: { status: SuggestionStatus.DISMISSED },
-  });
-  revalidatePath("/deals");
-}
-
-/**
- * The operator confirmed a suggested deal: they checked the price on Amazon
- * just now and attest it (priceAsOf = now — same trust model as postDealNow).
- * Creates/updates the per-ASIN listing row and queues a MANUAL deal post with
- * the operator's title, sale price, and optional full price for the % off.
- */
-export async function queueSuggestedDeal(formData: FormData): Promise<void> {
-  const tag = associateTag();
-  if (!tag) return;
-  const id = str(formData, "id");
-  const title = str(formData, "title");
-  const saleCents = parseCents(str(formData, "salePrice"));
-  const fullCents = parseCents(str(formData, "fullPrice"));
-  if (!id || !title || saleCents === null || saleCents <= 0) return;
-  if (fullCents != null && fullCents <= saleCents) return; // "full" must exceed sale
-  const suggestion = await prisma.dealSuggestion.findUnique({ where: { id } });
-  if (!suggestion || suggestion.status !== SuggestionStatus.NEW) return;
-
-  const productUrl = canonicalAmazonUrl(suggestion.asin, suggestion.marketplace);
-  const linkUrl = withAffiliateTag(productUrl, tag);
-  try {
-    if (!isAmazonHost(new URL(linkUrl).hostname)) return;
-  } catch {
-    return;
-  }
-
-  const listing = await prisma.trackedListing.upsert({
-    where: {
-      asin_marketplace: { asin: suggestion.asin, marketplace: suggestion.marketplace },
-    },
-    create: {
-      asin: suggestion.asin,
-      marketplace: suggestion.marketplace,
-      productUrl,
-      title,
-      fullPriceCents: fullCents,
-      origin: ListingOrigin.DISCOVERED,
-      armState: DealArmState.DISARMED, // dedup state only — never polled
-    },
-    update: {
-      title,
-      ...(fullCents != null ? { fullPriceCents: fullCents } : {}),
-    },
-  });
-  if (!listing.isActive) return; // operator banned this ASIN earlier
-
-  // In-flight dedup: at most one queued/posting deal per listing.
-  const pending = await prisma.dealPost.findFirst({
-    where: {
-      listingId: listing.id,
-      status: {
-        in: [
-          DealPostStatus.PENDING,
-          DealPostStatus.PENDING_APPROVAL,
-          DealPostStatus.READY,
-          DealPostStatus.POSTING,
-        ],
-      },
-    },
-    select: { id: true },
-  });
-  if (pending) return;
-
-  const priceAsOf = new Date(); // operator attests the price as of NOW
-  const composed = composeDealPost({
-    title,
-    salePriceCents: saleCents,
-    wasPriceCents: fullCents,
-    currency: listing.currency,
-    priceAsOf,
-    linkUrl,
-    maxLength: DEAL_POST_MAX_LENGTH,
-    style: parseDealPostStyle(process.env.DEAL_POST_STYLE),
-  });
-  if ("error" in composed) return;
-
-  const dryRun = await workerInDryRun();
-  await prisma.$transaction([
-    prisma.dealPost.create({
-      data: {
-        listingId: listing.id,
-        source: DealSource.MANUAL,
-        status: dryRun ? DealPostStatus.DRY_RUN : DealPostStatus.READY,
-        salePriceCents: saleCents,
-        targetPriceCents: saleCents,
-        wasPriceCents: fullCents,
-        currency: listing.currency,
-        priceAsOf,
-        linkUrl,
-        postText: composed.text,
-        linkAnchor: composed.anchor,
-      },
-    }),
-    prisma.trackedListing.update({
-      where: { id: listing.id },
-      data: {
-        armState: DealArmState.DISARMED,
-        lastPriceCents: saleCents,
-        lastPriceAsOf: priceAsOf,
-        lastPostedPriceCents: saleCents,
-        source: "MANUAL",
-        ...(dryRun ? {} : { lastPostedAt: new Date() }),
-      },
-    }),
-    prisma.dealSuggestion.updateMany({
-      where: { id, status: SuggestionStatus.NEW },
-      data: { status: SuggestionStatus.QUEUED },
-    }),
-  ]);
   revalidatePath("/deals");
 }

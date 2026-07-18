@@ -1,7 +1,6 @@
 import { prisma } from "@trendcart/db";
 import type { LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
-import { createDealChecker, type DealCheckStats } from "./deals/check.js";
 import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
 import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDealSuggester, newDealSuggestStats } from "./deals/suggest.js";
@@ -84,7 +83,6 @@ async function main(): Promise<void> {
   const takedownStats: TakedownStats = { removed: 0, errors: 0 };
   const reflectStats: ReflectStats = { reflections: 0, errors: 0 };
   const insightsStats: InsightsStats = { reports: 0, errors: 0 };
-  const dealCheckStats: DealCheckStats = { checked: 0, fired: 0, deferred: 0, errors: 0, backoffs: 0 };
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
   const dealDiscoverStats = newDealDiscoverStats();
   const dealSuggestStats = newDealSuggestStats();
@@ -101,7 +99,6 @@ async function main(): Promise<void> {
     takedown: takedownStats,
     reflect: reflectStats,
     insights: insightsStats,
-    dealCheck: dealCheckStats,
     dealPost: dealPostStats,
     dealDiscover: dealDiscoverStats,
     dealSuggest: dealSuggestStats,
@@ -128,16 +125,15 @@ async function main(): Promise<void> {
     console.warn("  mentions/opt-out:  disabled (no Bluesky credentials)");
   }
 
-  // Deal tracker: the whole feature ships dark behind DEALS_ENABLED. The
-  // checker self-disables without PA-API keys; the poster without Bluesky
-  // creds or under DRY_RUN — the manual "post deal now" path still queues.
+  // Deal channel: ships dark behind DEALS_ENABLED. Two automated paths feed
+  // one poster — RSS (no PA-API, price-free copy, DEAL_RSS_AUTOPOST) and
+  // PA-API feed discovery (attested prices, once credentials exist).
   const radar = createRadar(llm, radarStats);
   const notifier = createNotifier(notifyStats);
   if (!notifier) {
     console.log("  operator email:   disabled (set RESEND_API_KEY + NOTIFY_EMAIL_TO to enable)");
   }
 
-  const dealChecker = config.deals.enabled ? createDealChecker(dealCheckStats) : null;
   const dealDiscoverer = config.deals.enabled ? createDealDiscoverer(dealDiscoverStats) : null;
   const dealPoster = config.deals.enabled ? createDealPoster(dealPostStats) : null;
   // RSS suggestions need no Amazon keys — the point is bridging the
@@ -177,9 +173,6 @@ async function main(): Promise<void> {
     // Daily funnel/insights report (one small LLM call — no-ops until stale).
     startLoop("insights", 6 * 3_600_000, () => insightsTick(insightsStats)),
     // Deal tracker loops (only when enabled + preconditions met).
-    ...(dealChecker
-      ? [startLoop("dealCheck", config.deals.checkIntervalMs, () => dealChecker.tick())]
-      : []),
     // Ticks every minute; each feed is only due once per its interval, and
     // feedsPerTick caps the per-minute API burst.
     ...(dealDiscoverer?.enabled
@@ -226,8 +219,7 @@ async function main(): Promise<void> {
         `lessons=${reflectStats.reflections}` +
         (blueskyBackoffSeconds() > 0 ? ` | BLUESKY DOWN (retry ${blueskyBackoffSeconds()}s)` : "") +
         (config.deals.enabled
-          ? ` | dealChecked=${dealCheckStats.checked} dealFired=${dealCheckStats.fired} ` +
-            `dealDefer=${dealCheckStats.deferred} dealPosted=${dealPostStats.posted} ` +
+          ? ` | dealPosted=${dealPostStats.posted} ` +
             `feedRuns=${dealDiscoverStats.feeds} feedFound=${dealDiscoverStats.found} ` +
             `feedQueued=${dealDiscoverStats.queued} rssItems=${dealSuggestStats.items} ` +
             `rssSuggested=${dealSuggestStats.suggested}`

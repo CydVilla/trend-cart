@@ -3,6 +3,39 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-18 — Automated deal channel, manual deal surfaces removed
+
+### Changed
+- **The bot's primary channel is now its OWN PROFILE** (deal posts + radar);
+  replies are secondary. Trending-reply volume cut hard — defaults now
+  `MAX_REPLIES_PER_DAY=3`, `MAX_REPLIES_PER_HOUR=1`,
+  `GLOBAL_REPLY_COOLDOWN_MINUTES=90` — and the quality bars raised:
+  `MIN_PRODUCT_INTENT_SCORE` 70→85, `MIN_LINK_CONFIDENCE` 60→75,
+  `AUTO_MIN_INTENT_SCORE` 80→90, `AUTO_MIN_LINK_CONFIDENCE` 75→85. The
+  caps/cooldown apply to UNSOLICITED replies only: mentions still get prompt
+  answers and operator injections are the deliberate "post more" lever.
+  Rationale: replies risk annoying strangers; own-timeline posts don't.
+- **RSS deal channel went LIVE** (`DEAL_RSS_AUTOPOST=true` on prod): the
+  price-free poster skips the price-freshness gate (no price is advertised,
+  so staleness doesn't apply — caps could otherwise delay the 2nd daily post
+  past the 1h window and kill it).
+- **The RSS deal path is now fully automated** (`DEAL_RSS_AUTOPOST`, default
+  off = audit-only): RSS items are keyword- and LLM-lane-gated as before, then
+  web-search corroborated (fail-closed) and SELF-POSTED with **price-free**,
+  source-attributed copy ("spotted via Slickdeals — see the deal on Amazon
+  #ad"). ADR-0013's compliance rule survives by inversion: no third-party
+  price is ever advertised, so nothing needs human attestation. Budgeted by
+  `DEAL_RSS_MAX_POSTS_PER_DAY` (2), same per-ASIN 7-day cooldown, per-item
+  ban from "Discovered by feeds". PA-API feed discovery (real attested
+  prices) is unchanged and takes over once credentials exist.
+
+### Removed
+- **All manual deal surfaces**: the operator-curated watchlist (add/edit/
+  price-confirm UI and the worker's price-check loop), the "Post deal now"
+  manual path, and the RSS suggestion confirm/dismiss queue. The Deals page
+  is now: pending feed approvals, deal feeds (PA-API, future), RSS sources
+  (the live automated channel), discovered-ASIN ban list, recent posts.
+
 ## 2026-07-17 — Audience replies as feedback
 
 ### Added

@@ -1,25 +1,18 @@
-import { prisma, DealPostStatus, ListingOrigin, SuggestionStatus } from "@trendcart/db";
-import { PAAPI_SEARCH_INDEXES, cleanDealTitle } from "@trendcart/shared";
+import { prisma, DealPostStatus, ListingOrigin } from "@trendcart/db";
+import { PAAPI_SEARCH_INDEXES } from "@trendcart/shared";
 import {
-  addTrackedListing,
   approveDealPost,
+  toggleListingActive,
   createDealFeed,
   createSuggestionSource,
   deleteDealFeed,
-  deleteListing,
   deleteSuggestionSource,
-  dismissSuggestion,
   fetchSuggestionSourceNow,
-  postDealNow,
-  queueSuggestedDeal,
   rejectDealPost,
-  requestCheckNow,
   runDealFeedNow,
   toggleDealFeedActive,
-  toggleListingActive,
   toggleSuggestionSourceActive,
   updateDealFeed,
-  updateListingPricing,
   updateSuggestionSource,
 } from "../actions";
 import { SubmitButton } from "../submit-button";
@@ -27,7 +20,6 @@ import {
   Badge,
   EmptyState,
   SectionHeading,
-  armStateTone,
   bskyPostUrl,
   dealPostTone,
   formatDate,
@@ -53,12 +45,7 @@ function pctOff(saleCents: number, wasCents: number | null): number | null {
 }
 
 export default async function DealsPage() {
-  const [listings, discovered, feeds, suggestionSources, suggestions, pendingApproval, recent, heartbeat] = await Promise.all([
-    prisma.trackedListing.findMany({
-      where: { origin: ListingOrigin.WATCHLIST },
-      orderBy: { createdAt: "desc" },
-      include: { _count: { select: { dealPosts: true } } },
-    }),
+  const [discovered, feeds, suggestionSources, pendingApproval, recent, heartbeat] = await Promise.all([
     prisma.trackedListing.findMany({
       where: { origin: ListingOrigin.DISCOVERED },
       orderBy: { updatedAt: "desc" },
@@ -67,12 +54,6 @@ export default async function DealsPage() {
     }),
     prisma.dealFeed.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.dealSuggestionSource.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.dealSuggestion.findMany({
-      where: { status: SuggestionStatus.NEW },
-      include: { source: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-    }),
     prisma.dealPost.findMany({
       where: { status: DealPostStatus.PENDING_APPROVAL },
       include: { listing: { select: { title: true, asin: true } }, feed: { select: { name: true } } },
@@ -91,18 +72,20 @@ export default async function DealsPage() {
 
   return (
     <div>
-      <h1 className="mb-1 text-2xl font-bold">Deal tracker</h1>
+      <h1 className="mb-1 text-2xl font-bold">Deal channel</h1>
       <p className="mb-4 text-sm text-zinc-500">
-        Two ways deals land on the bot&apos;s profile: <strong>deal feeds</strong> search Amazon
-        for products currently on sale (Wario64-style — real strikethrough discounts only) and{" "}
-        <strong>the watchlist</strong> fires when a specific listing you track drops below your
-        price. Every post carries your affiliate link and an in-post <code>#ad</code> disclosure.
+        Fully automated, two paths into one poster: <strong>deal RSS sources</strong> (live today,
+        no Amazon keys — items are lane-gated, web-search corroborated, and self-posted with
+        PRICE-FREE copy attributed to the source) and <strong>deal feeds</strong> (Wario64-style
+        PA-API sale discovery with real attested prices — lights up once you have API keys).
+        Every post carries your affiliate link and an in-post <code>#ad</code> disclosure.
       </p>
 
       {!DEALS_ENABLED && (
         <div className="mb-4 rounded-lg border border-zinc-300 bg-zinc-50 p-3 text-sm text-zinc-700">
-          <strong>Deal tracker is off on the worker.</strong> You can add listings and queue deals
-          now, but nothing publishes until <code>DEALS_ENABLED=true</code> is set on the worker.
+          <strong>Deal channel is off on the worker.</strong> Configure sources and feeds now;
+          nothing runs until <code>DEALS_ENABLED=true</code> is set on the worker (and{" "}
+          <code>DEAL_RSS_AUTOPOST=true</code> for the RSS channel to publish).
         </div>
       )}
       {heartbeat?.dryRun ? (
@@ -112,15 +95,14 @@ export default async function DealsPage() {
         </div>
       ) : (
         <div className="mb-4 rounded-lg border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
-          <strong>Worker is LIVE</strong> — a fired or manually-queued deal will post to the
-          bot&apos;s profile.
+          <strong>Worker is LIVE</strong> — a discovered deal that clears the gates will post to
+          the bot&apos;s profile.
         </div>
       )}
       <div className="mb-6 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-500">
-        Deal feeds and automated price polling run only when Amazon PA-API keys are configured on
-        the worker (<code>PA_API_ACCESS_KEY</code>/<code>PA_API_SECRET_KEY</code>). Until then,
-        use <strong>Post deal now</strong> on a listing to publish a deal manually — it needs no
-        API keys.
+        Deal feeds (attested prices) run only when Amazon PA-API keys are configured on the worker
+        (<code>PA_API_ACCESS_KEY</code>/<code>PA_API_SECRET_KEY</code>). Until then, the RSS
+        sources below are the whole channel — automated, price-free posts that need no API keys.
       </div>
 
       {/* Feed-discovered deals awaiting approval */}
@@ -193,117 +175,6 @@ export default async function DealsPage() {
                         className="rounded border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-50"
                       >
                         Reject
-                      </SubmitButton>
-                    </form>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* RSS-suggested deals: the no-PA-API path. Operator attests the price. */}
-      {suggestions.length > 0 && (
-        <>
-          <SectionHeading>Suggested deals ({suggestions.length})</SectionHeading>
-          <p className="-mt-2 mb-3 text-xs text-zinc-500">
-            Found in your deal RSS sources — <strong>no PA-API needed</strong>. Open the deal,
-            check the price on Amazon, then confirm it here to queue a post (the parsed price is
-            only a hint). Unactioned suggestions expire on their own.
-          </p>
-          <div className="mb-8 space-y-3">
-            {suggestions.map((s) => {
-              const verdict = s.gateVerdict as { confidence?: number; reason?: string } | null;
-              return (
-                <div key={s.id} className="rounded-lg border border-zinc-200 bg-white p-4">
-                  <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-                    <Badge tone="blue">SUGGESTED</Badge>
-                    <span className="font-medium text-zinc-700">{s.title}</span>
-                  </div>
-                  <div className="mb-3 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
-                    <code>{s.asin}</code>
-                    {s.hintPriceCents != null && (
-                      <span>seen at ~{formatMoney(s.hintPriceCents, "USD")}</span>
-                    )}
-                    <span>via {s.source.name}</span>
-                    {verdict?.confidence != null && <span>lane fit {verdict.confidence}%</span>}
-                    <span>{formatDate(s.createdAt)}</span>
-                    <a
-                      href={s.productUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline"
-                    >
-                      check on Amazon ↗
-                    </a>
-                    {s.sourceUrl && (
-                      <a
-                        href={s.sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        deal thread ↗
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap items-end gap-2">
-                    <form
-                      action={queueSuggestedDeal}
-                      className="flex grow flex-wrap items-end gap-2 rounded border border-blue-200 bg-blue-50/40 p-3"
-                    >
-                      <input type="hidden" name="id" value={s.id} />
-                      <label className="block grow basis-64">
-                        <span className="text-xs font-medium uppercase text-blue-800">
-                          Post title
-                        </span>
-                        <input
-                          name="title"
-                          required
-                          defaultValue={cleanDealTitle(s.title)}
-                          className="mt-1 w-full rounded border border-blue-200 px-2 py-1.5 text-sm"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-medium uppercase text-blue-800">
-                          Confirmed price ($)
-                        </span>
-                        <input
-                          name="salePrice"
-                          inputMode="decimal"
-                          required
-                          defaultValue={
-                            s.hintPriceCents != null ? (s.hintPriceCents / 100).toFixed(2) : ""
-                          }
-                          className="mt-1 w-28 rounded border border-blue-200 px-2 py-1.5 text-sm"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-medium uppercase text-blue-800">
-                          Reg. price ($, opt.)
-                        </span>
-                        <input
-                          name="fullPrice"
-                          inputMode="decimal"
-                          placeholder="for % off"
-                          className="mt-1 w-28 rounded border border-blue-200 px-2 py-1.5 text-sm"
-                        />
-                      </label>
-                      <SubmitButton
-                        pendingLabel="Queuing…"
-                        className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                      >
-                        Queue post
-                      </SubmitButton>
-                    </form>
-                    <form action={dismissSuggestion}>
-                      <input type="hidden" name="id" value={s.id} />
-                      <SubmitButton
-                        pendingLabel="Dismissing…"
-                        className="rounded border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-100"
-                      >
-                        Dismiss
                       </SubmitButton>
                     </form>
                   </div>
@@ -580,13 +451,15 @@ export default async function DealsPage() {
         </div>
       )}
 
-      {/* RSS suggestion sources — work before PA-API keys exist */}
+      {/* RSS deal sources — the automated no-PA-API channel */}
       <SectionHeading>Deal RSS sources ({suggestionSources.length})</SectionHeading>
       <p className="-mt-2 mb-3 text-xs text-zinc-500">
         Deal-site RSS feeds (e.g. Slickdeals) the worker reads for Amazon items —{" "}
-        <strong>works without PA-API keys</strong>. Each source keeps one topical lane: an LLM
-        judges every headline against the lane description, keyword filters run first, and
-        matches land above as suggestions for you to confirm. Nothing posts without you.
+        <strong>works without PA-API keys, fully automated</strong>. Each source keeps one topical
+        lane: keyword filters run first, an LLM judges every headline against the lane
+        description, a web-search fact check corroborates the deal, and survivors self-post with
+        price-free copy attributed to the source (max{" "}
+        <code>DEAL_RSS_MAX_POSTS_PER_DAY</code>/day). No third-party price is ever advertised.
       </p>
 
       <form
@@ -672,7 +545,7 @@ export default async function DealsPage() {
       </form>
 
       {suggestionSources.length === 0 ? (
-        <EmptyState>No RSS sources yet — add one above to get suggestions without PA-API.</EmptyState>
+        <EmptyState>No RSS sources yet — add one above; it&apos;s the automated no-PA-API deal channel.</EmptyState>
       ) : (
         <div className="mb-8 space-y-3">
           {suggestionSources.map((source) => (
@@ -800,247 +673,6 @@ export default async function DealsPage() {
         </div>
       )}
 
-      {/* Add listing */}
-      <form
-        action={addTrackedListing}
-        className="mb-8 space-y-3 rounded-lg border border-zinc-200 bg-white p-4"
-      >
-        <SectionHeading>Track a new listing</SectionHeading>
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="block md:col-span-2">
-            <span className="text-xs font-medium uppercase text-zinc-500">Amazon product URL</span>
-            <input
-              name="url"
-              required
-              placeholder="https://www.amazon.com/dp/B0CL5KNB9M"
-              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-            />
-          </label>
-          <label className="block md:col-span-2">
-            <span className="text-xs font-medium uppercase text-zinc-500">Title (shown in post)</span>
-            <input
-              name="title"
-              required
-              placeholder="Sony PS5 Slim console"
-              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium uppercase text-zinc-500">Full price ($)</span>
-            <input
-              name="fullPrice"
-              inputMode="decimal"
-              placeholder="499.99"
-              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium uppercase text-zinc-500">
-              Alert price ($, optional)
-            </span>
-            <input
-              name="targetPrice"
-              inputMode="decimal"
-              placeholder="any drop below full"
-              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-            />
-          </label>
-          <label className="block md:col-span-2">
-            <span className="text-xs font-medium uppercase text-zinc-500">
-              Image URL (optional, Amazon-hosted)
-            </span>
-            <input
-              name="imageUrl"
-              placeholder="https://m.media-amazon.com/images/I/....jpg"
-              className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-            />
-          </label>
-        </div>
-        <p className="text-xs text-zinc-500">
-          Set the <strong>full price</strong> to post on any drop below it, with the % off shown
-          against it. Add an <strong>alert price</strong> only if you want to hold out for a
-          steeper discount (post at or below that instead).
-        </p>
-        <SubmitButton
-          pendingLabel="Tracking…"
-          className="rounded bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-        >
-          Track listing
-        </SubmitButton>
-      </form>
-
-      <SectionHeading>Watchlist ({listings.length})</SectionHeading>
-      {listings.length === 0 ? (
-        <EmptyState>No tracked listings yet. Add one above.</EmptyState>
-      ) : (
-        <div className="space-y-3">
-          {listings.map((listing) => {
-            const threshold = listing.targetPriceCents ?? listing.fullPriceCents ?? null;
-            const belowTarget =
-              listing.lastPriceCents != null &&
-              threshold != null &&
-              listing.lastPriceCents <= threshold;
-            return (
-              <details key={listing.id} className="rounded-lg border border-zinc-200 bg-white">
-                <summary className="flex flex-wrap items-center gap-2 px-4 py-3">
-                  <span className="font-medium">{listing.title}</span>
-                  <code className="text-xs text-zinc-400">{listing.asin}</code>
-                  <Badge tone={armStateTone(listing.armState)}>{listing.armState}</Badge>
-                  <Badge tone={listing.isActive ? "green" : "zinc"}>
-                    {listing.isActive ? "active" : "paused"}
-                  </Badge>
-                  <span className="text-sm">
-                    <span className={belowTarget ? "font-semibold text-emerald-700" : "text-zinc-600"}>
-                      {listing.lastPriceCents != null
-                        ? formatMoney(listing.lastPriceCents, listing.currency)
-                        : "no price yet"}
-                    </span>
-                    <span className="text-zinc-400">
-                      {listing.fullPriceCents != null &&
-                        ` / full ${formatMoney(listing.fullPriceCents, listing.currency)}`}
-                      {listing.targetPriceCents != null &&
-                        ` · alert ${formatMoney(listing.targetPriceCents, listing.currency)}`}
-                    </span>
-                  </span>
-                  {listing.lastPriceAsOf && (
-                    <span className="text-xs text-zinc-400">
-                      as of {formatDate(listing.lastPriceAsOf)}
-                      {isStale(listing.lastPriceAsOf) && (
-                        <span className="ml-1">
-                          <Badge tone="amber">STALE</Badge>
-                        </span>
-                      )}
-                    </span>
-                  )}
-                  {listing.lastCheckError && (
-                    <span className="text-xs text-red-600">{listing.lastCheckError}</span>
-                  )}
-                </summary>
-
-                <div className="space-y-4 border-t border-zinc-100 p-4 text-sm">
-                  <div className="flex flex-wrap items-end gap-3">
-                    <form action={updateListingPricing} className="flex items-end gap-2">
-                      <input type="hidden" name="id" value={listing.id} />
-                      <label className="block">
-                        <span className="text-xs font-medium uppercase text-zinc-500">Full ($)</span>
-                        <input
-                          name="fullPrice"
-                          inputMode="decimal"
-                          defaultValue={
-                            listing.fullPriceCents != null
-                              ? (listing.fullPriceCents / 100).toFixed(2)
-                              : ""
-                          }
-                          className="mt-1 w-24 rounded border border-zinc-300 px-2 py-1.5"
-                        />
-                      </label>
-                      <label className="block">
-                        <span className="text-xs font-medium uppercase text-zinc-500">
-                          Alert ($)
-                        </span>
-                        <input
-                          name="targetPrice"
-                          inputMode="decimal"
-                          placeholder="optional"
-                          defaultValue={
-                            listing.targetPriceCents != null
-                              ? (listing.targetPriceCents / 100).toFixed(2)
-                              : ""
-                          }
-                          className="mt-1 w-24 rounded border border-zinc-300 px-2 py-1.5"
-                        />
-                      </label>
-                      <SubmitButton
-                        pendingLabel="Saving…"
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
-                      >
-                        Save prices
-                      </SubmitButton>
-                    </form>
-                    <form action={toggleListingActive}>
-                      <input type="hidden" name="id" value={listing.id} />
-                      <SubmitButton className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100">
-                        {listing.isActive ? "Pause" : "Activate"}
-                      </SubmitButton>
-                    </form>
-                    <form action={requestCheckNow}>
-                      <input type="hidden" name="id" value={listing.id} />
-                      <SubmitButton
-                        title="Ask the worker to re-poll on its next tick (needs PA-API keys)"
-                        pendingLabel="Queuing…"
-                        className="rounded border border-zinc-300 px-2 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
-                      >
-                        Check now
-                      </SubmitButton>
-                    </form>
-                    <form action={deleteListing}>
-                      <input type="hidden" name="id" value={listing.id} />
-                      <SubmitButton
-                        pendingLabel="Deleting…"
-                        className="rounded border border-red-300 px-2 py-1.5 text-xs text-red-700 hover:bg-red-50"
-                      >
-                        Delete
-                      </SubmitButton>
-                    </form>
-                  </div>
-
-                  <form
-                    action={postDealNow}
-                    className="flex flex-wrap items-end gap-2 rounded border border-blue-200 bg-blue-50/40 p-3"
-                  >
-                    <input type="hidden" name="id" value={listing.id} />
-                    <label className="block">
-                      <span className="text-xs font-medium uppercase text-blue-800">
-                        Sale price ($)
-                      </span>
-                      <input
-                        name="salePrice"
-                        inputMode="decimal"
-                        required
-                        placeholder="399.99"
-                        className="mt-1 w-28 rounded border border-blue-200 px-2 py-1.5"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-xs font-medium uppercase text-blue-800">
-                        Seen at (optional)
-                      </span>
-                      <input
-                        type="datetime-local"
-                        name="priceAsOf"
-                        className="mt-1 rounded border border-blue-200 px-2 py-1.5"
-                      />
-                    </label>
-                    <SubmitButton
-                      pendingLabel="Posting…"
-                      className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                    >
-                      Post deal now
-                    </SubmitButton>
-                    <span className="text-xs text-blue-700/70">
-                      Queues a standalone #ad post now — works without PA-API. Price must be under{" "}
-                      {MAX_PRICE_AGE_HOURS}h old.
-                    </span>
-                  </form>
-
-                  <div className="text-xs text-zinc-400">
-                    <a
-                      href={listing.productUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline"
-                    >
-                      {listing.productUrl}
-                    </a>{" "}
-                    · {listing._count.dealPosts} deal post(s) · {listing.marketplace}
-                  </div>
-                </div>
-              </details>
-            );
-          })}
-        </div>
-      )}
-
       {/* Feed-discovered listings: dedup/cooldown state per ASIN. */}
       {discovered.length > 0 && (
         <>
@@ -1099,23 +731,19 @@ export default async function DealsPage() {
                       </Badge>
                     </td>
                     <td className="px-3 py-2">
-                      <div className="flex gap-2">
-                        <form action={toggleListingActive}>
-                          <input type="hidden" name="id" value={listing.id} />
-                          <SubmitButton className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100">
-                            {listing.isActive ? "Pause" : "Allow"}
-                          </SubmitButton>
-                        </form>
-                        <form action={deleteListing}>
-                          <input type="hidden" name="id" value={listing.id} />
-                          <SubmitButton
-                            pendingLabel="Deleting…"
-                            className="rounded border border-red-300 px-2 py-1 text-xs text-red-700 hover:bg-red-50"
-                          >
-                            Delete
-                          </SubmitButton>
-                        </form>
-                      </div>
+                      <form action={toggleListingActive}>
+                        <input type="hidden" name="id" value={listing.id} />
+                        <SubmitButton
+                          title={
+                            listing.isActive
+                              ? "Ban this ASIN — the automated channel will never post it again"
+                              : "Allow this ASIN to be posted again"
+                          }
+                          className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100"
+                        >
+                          {listing.isActive ? "Ban" : "Allow"}
+                        </SubmitButton>
+                      </form>
                     </td>
                   </tr>
                 ))}
