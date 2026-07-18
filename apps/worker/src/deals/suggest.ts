@@ -124,6 +124,13 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     });
   }
 
+  /** "Tech & electronics (Slickdeals)" → "Slickdeals": the attribution names
+   *  the deal SITE, not our internal lane. */
+  function attributionLabel(sourceName: string): string {
+    const site = sourceName.match(/\(([^)]+)\)\s*$/);
+    return site ? site[1]! : sourceName;
+  }
+
   /** Compose the PRICE-FREE deal alert. Returns null if it can't validate. */
   function composeRssDeal(
     rawTitle: string,
@@ -139,7 +146,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       .replace(/[\s\-–—:,+@&]+$/g, "")
       .trim();
     if (title.length < 8) return null; // nothing meaningful left to say
-    const text = `${title} is on sale right now (spotted via ${sourceName}) — ${RSS_DEAL_ANCHOR} #ad`;
+    const text = `${title} is on sale right now (spotted on ${attributionLabel(sourceName)}) — ${RSS_DEAL_ANCHOR} #ad`;
     const validation = validateDealText(text, linkUrl, config.deals.postMaxLength, RSS_DEAL_ANCHOR);
     return validation.ok ? { text, anchor: RSS_DEAL_ANCHOR } : null;
   }
