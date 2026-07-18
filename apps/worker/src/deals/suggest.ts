@@ -171,7 +171,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       return false;
     }
 
-    const ref = extractAmazonRef(item.link, item.description);
+    const ref = extractAmazonRef(item.link, item.description, item.content);
     if (!ref) {
       skip("no_amazon_link");
       return false;
@@ -184,7 +184,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
 
     // The hint price is used ONLY for the source's price-band filter and the
     // audit row — it is never advertised.
-    const hintPriceCents = extractPriceHintCents(item.title, item.description);
+    const hintPriceCents = extractPriceHintCents(item.title, item.description, item.content);
     if (hintPriceCents != null) {
       if (source.minPriceCents != null && hintPriceCents < source.minPriceCents) {
         skip("below_price_floor");

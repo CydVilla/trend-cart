@@ -18,6 +18,9 @@ export type RssItem = {
   /** guid, falling back to link — the per-source dedup key. */
   guid: string;
   description: string;
+  /** Raw content:encoded HTML (entity-decoded) — Slickdeals puts the store
+   *  link attributes (incl. the ASIN) here, not in the description. */
+  content: string;
 };
 
 /** Minimal HTML/XML entity decode for the fields we read. &amp; goes LAST so
@@ -54,14 +57,19 @@ export function parseRssItems(xml: string): RssItem[] {
     const title = field(block, "title");
     const link = field(block, "link") || null;
     const guid = field(block, "guid") || link || "";
-    // The description is HTML; keep it RAW here (URLs may hide in attributes)
-    // but entity-decoded so &amp; inside hrefs doesn't break URL parsing.
-    const descMatch = block.match(/<description[^>]*>([\s\S]*?)<\/description>/i);
-    const rawDesc = descMatch?.[1] ?? "";
-    const cdata = rawDesc.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
-    const description = decodeEntities((cdata ? cdata[1]! : rawDesc).trim());
+    // description and content:encoded are HTML; keep them RAW here (URLs and
+    // ASINs hide in attributes) but entity-decoded so &amp; inside hrefs
+    // doesn't break URL parsing.
+    const rawHtml = (tagRe: string): string => {
+      const m = block.match(new RegExp(`<${tagRe}[^>]*>([\\s\\S]*?)</${tagRe}>`, "i"));
+      const raw = m?.[1] ?? "";
+      const cdata = raw.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
+      return decodeEntities((cdata ? cdata[1]! : raw).trim());
+    };
+    const description = rawHtml("description");
+    const content = rawHtml("content:encoded");
     if (!title || !guid) continue; // no stable identity → unusable
-    items.push({ title, link, guid, description });
+    items.push({ title, link, guid, description, content });
   }
   return items;
 }
@@ -112,6 +120,19 @@ export function extractAmazonRef(...texts: Array<string | null>): AmazonRef | nu
         if (!/^https?:\/\//i.test(value)) continue;
         const embedded = directAmazonRef(value);
         if (embedded) return embedded;
+      }
+    }
+    // Slickdeals form: outbound links are opaque /click redirects, but the
+    // anchor tag carries Amazon Product Services attributes — the ASIN in
+    // data-aps-asin, with the store identified alongside. Only trust an ASIN
+    // whose own tag says the store is Amazon.
+    for (const anchor of text.matchAll(/<a\s[^>]*data-aps-asin="([A-Z0-9]{10})"[^>]*>/gi)) {
+      const tag = anchor[0]!;
+      if (
+        /data-store-slug="amazon"/i.test(tag) ||
+        /data-product-exitwebsite="amazon\.com"/i.test(tag)
+      ) {
+        return { asin: anchor[1]!.toUpperCase(), marketplace: "www.amazon.com" };
       }
     }
   }
