@@ -1,5 +1,6 @@
 import { prisma, ReplyStatus, type CandidateEvaluation, type Post, type Prisma } from "@trendcart/db";
 import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
+import { checkSearchAvailability } from "./availability.js";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
@@ -215,7 +216,8 @@ export function truncateReplyToFit(body: string, anchor: string, maxLength: numb
  * Pick the single link a reply will carry, by priority:
  *  1. an operator-provided link (the human already decided),
  *  2. a tagged Amazon search for the SPECIFIC product the LLM identified —
- *     but only when its linkConfidence says the results will be relevant,
+ *     but only when its linkConfidence says the results will be relevant
+ *     AND (with PA-API keys) Amazon confirms something is orderable,
  *  3. a tagged Amazon search for the category name (generic product-type
  *     queries reliably land well; niche titles are the risky ones).
  * No link the bot isn't confident in ships: null = permanent skip.
@@ -236,12 +238,23 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
     evaluation.recommendedSearchQuery &&
     evaluation.linkConfidence >= config.bot.minLinkConfidence
   ) {
-    return {
-      kind: "search",
-      url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
-      anchor: searchAnchor(evaluation.recommendedSearchQuery),
-      categoryName: null,
-    };
+    // linkConfidence is the model's belief the results will be relevant AND
+    // orderable; with PA-API keys the orderable half stops being a belief —
+    // a query with zero new/in-stock results (unreleased, sold out,
+    // collector-only) demotes to the category fallback instead of shipping
+    // a link to junk. "unknown" (no keys / API down) changes nothing.
+    const availability = await checkSearchAvailability(evaluation.recommendedSearchQuery);
+    if (availability !== "unavailable") {
+      return {
+        kind: "search",
+        url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
+        anchor: searchAnchor(evaluation.recommendedSearchQuery),
+        categoryName: null,
+      };
+    }
+    console.log(
+      `[reply] query "${evaluation.recommendedSearchQuery}" has no orderable Amazon results — falling back to category link`,
+    );
   }
   if (evaluation.recommendedCategory) {
     const category = await prisma.productCategory.findUnique({

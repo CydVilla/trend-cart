@@ -45,6 +45,8 @@ export type FunnelReport = {
     postedCount: number;
     likes: number;
     replies: number;
+    reposts: number;
+    quotes: number;
     /** Affiliate-link clicks on reply links (tracked /r/ redirects) — the
      *  revenue-proximate signal; 0 until click tracking is enabled. */
     clicks: number;
@@ -110,7 +112,12 @@ export async function computeFunnel(
     }),
     prisma.botReply.aggregate({
       where: { ...replyWhen, status: "POSTED" },
-      _sum: { replyLikeCount: true, replyReplyCount: true },
+      _sum: {
+        replyLikeCount: true,
+        replyReplyCount: true,
+        replyRepostCount: true,
+        replyQuoteCount: true,
+      },
       _count: true,
     }),
     prisma.trackedLink.aggregate({
@@ -170,6 +177,8 @@ export async function computeFunnel(
       postedCount: engagementAgg._count,
       likes: engagementAgg._sum.replyLikeCount ?? 0,
       replies: engagementAgg._sum.replyReplyCount ?? 0,
+      reposts: engagementAgg._sum.replyRepostCount ?? 0,
+      quotes: engagementAgg._sum.replyQuoteCount ?? 0,
       clicks: clickAgg._sum.clickCount ?? 0,
       trackedLinks: clickAgg._count,
     },

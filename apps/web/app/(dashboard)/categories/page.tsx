@@ -15,7 +15,7 @@ export default async function CategoriesPage() {
       <h1 className="mb-1 text-2xl font-bold">Categories</h1>
       <p className="mb-4 text-sm text-zinc-500">
         Keywords are the Bluesky <strong>search queries</strong> used to discover trending
-        candidates (top posts of the last 24h per query; the first 6 per category are polled each
+        candidates (top posts of the last 24h per query; the first 12 per category are polled each
         cycle). One query per line — phrase them like searches. Changes apply on the next
         discovery cycle.
       </p>
@@ -63,6 +63,23 @@ export default async function CategoriesPage() {
                     />
                   </label>
                 </div>
+                <label className="block md:w-1/2">
+                  <span className="text-xs font-medium uppercase text-zinc-500">
+                    Min engagement floor
+                  </span>
+                  <input
+                    name="minEngagementScore"
+                    type="number"
+                    min={0}
+                    defaultValue={category.minEngagementScore ?? ""}
+                    placeholder="global default"
+                    className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5"
+                  />
+                  <span className="mt-1 block text-xs text-zinc-400">
+                    Blank = the global MIN_ENGAGEMENT_SCORE. Lower it for high-conviction
+                    categories whose candidates expire waiting; raise it for noisy ones.
+                  </span>
+                </label>
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="block">
                     <span className="text-xs font-medium uppercase text-zinc-500">Keywords</span>

@@ -56,7 +56,7 @@ function fmtFunnel(label: string, f: FunnelReport): string {
     `Discovered: ${c.total}. Never evaluated: ${c.belowFloor} below the engagement floor (${f.floor}), ${c.aboveFloorPending} above-floor still pending, ${c.dead} deleted.`,
     `Evaluated: ${e.total} (${e.policyGated} cheap policy rejections + ${e.llmEvaluated} reached the LLM). Judged worth replying: ${e.wouldReply}.`,
     `Replies: ${r.posted} posted, ${r.pendingApproval} awaiting approval, ${r.skipped} skipped, ${r.failed} failed.`,
-    `Posted-reply engagement: ${f.engagement.likes} likes, ${f.engagement.replies} replies across ${f.engagement.postedCount} posts.`,
+    `Posted-reply engagement: ${f.engagement.likes} likes, ${f.engagement.replies} replies, ${f.engagement.reposts} reposts, ${f.engagement.quotes} quotes across ${f.engagement.postedCount} posts.`,
     ...(f.engagement.trackedLinks > 0
       ? [
           `Affiliate-link clicks: ${f.engagement.clicks} across ${f.engagement.trackedLinks} tracked reply links.`,

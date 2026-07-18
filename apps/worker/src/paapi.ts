@@ -313,7 +313,8 @@ async function callSearchItems(params: SearchItemsParams): Promise<PaapiItem[]> 
     SearchIndex: params.searchIndex,
     // Server-side sale filter: only items discounted at least this % off the
     // list price. The discovery gates re-verify — never trust it alone.
-    MinSavingPercent: params.minSavingPercent,
+    // 0 = no sale filter (availability checks search the full catalog).
+    ...(params.minSavingPercent > 0 ? { MinSavingPercent: params.minSavingPercent } : {}),
     ...(params.minPriceCents ? { MinPrice: params.minPriceCents } : {}),
     ...(params.maxPriceCents ? { MaxPrice: params.maxPriceCents } : {}),
     ...(params.minReviewRating ? { MinReviewsRating: params.minReviewRating } : {}),

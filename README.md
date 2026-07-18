@@ -48,10 +48,15 @@ render as clickable anchor text via rich-text facets — never raw URLs.
 **Autonomous mode** (Overview-page toggle, off by default): the bot
 self-approves replies with intent ≥ 80 and link confidence ≥ 75 (or an
 operator directive); weaker replies still queue for manual approval.
-**Learning loop**: hourly it measures engagement on its own posted replies —
-including the text of what people reply back (audience feedback); daily one
-small LLM call distills your approvals/edits/rejections plus those reactions
-into guidelines injected into its prompts (shown on the Overview page).
+**Learning loop**: hourly it measures engagement (likes, replies, reposts,
+quotes) on everything it posted — replies, radar posts, deal alerts — plus
+affiliate-link clicks and the text of what people reply back (audience
+feedback), keeping both live counts and an `EngagementSnapshot` time series;
+daily one small LLM call distills your approvals/edits/rejections plus those
+reactions into guidelines injected into its prompts (shown on the Overview
+page). The labeled dataset is exportable as JSONL
+(`pnpm --filter @trendcart/worker export:dataset`) for offline analysis or a
+future fine-tuning loop.
 
 ## Prerequisites
 

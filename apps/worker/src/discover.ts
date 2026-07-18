@@ -20,8 +20,10 @@ import { findPromotionalMatch, findSensitiveMatch } from "./filters.js";
 
 const RESULTS_PER_QUERY = 10;
 /** Searches are free (Bluesky API) — the eval budget, not query count, is the
- *  cost ceiling. 8 queries × ~15 categories every 15m is well under limits. */
-const MAX_QUERIES_PER_CATEGORY = 8;
+ *  cost ceiling. 12 queries × ~15 categories every 15m is well under limits,
+ *  and the headroom lets keyword additions to a tuned category actually run
+ *  instead of dying past the cap. */
+const MAX_QUERIES_PER_CATEGORY = 12;
 
 export type DiscoverStats = {
   queries: number;
@@ -90,12 +92,16 @@ export type SearchResultPost = {
   quoteCount?: number;
 };
 
-/** Gate one search result and persist it as a candidate if it qualifies. */
+/** Gate one search result and persist it as a candidate if it qualifies.
+ *  `minEngagementScore` is the effective floor for this category — a
+ *  per-category override when the operator set one, the global floor
+ *  otherwise. */
 export async function processSearchResult(
   post: SearchResultPost,
   categorySlug: string,
   query: string,
   stats: DiscoverStats,
+  minEngagementScore: number = config.llm.minEngagementScore,
 ): Promise<void> {
   stats.found += 1;
   const text = post.record?.text?.trim() ?? "";
@@ -124,7 +130,7 @@ export async function processSearchResult(
     quoteCount: post.quoteCount ?? 0,
   };
   const score = computeEngagementScore(counts);
-  if (score < config.llm.minEngagementScore) return skip(stats, "below_floor");
+  if (score < minEngagementScore) return skip(stats, "below_floor");
 
   const images = extractImages(post.embed);
 
@@ -181,7 +187,7 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
     ).toISOString();
     const categories = await prisma.productCategory.findMany({
       where: { isActive: true },
-      select: { slug: true, keywords: true },
+      select: { slug: true, keywords: true, minEngagementScore: true },
     });
     for (const category of categories) {
       for (const query of category.keywords.slice(0, MAX_QUERIES_PER_CATEGORY)) {
@@ -200,6 +206,7 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
               category.slug,
               query,
               stats,
+              category.minEngagementScore ?? config.llm.minEngagementScore,
             );
           }
         } catch (error) {

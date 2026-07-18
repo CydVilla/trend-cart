@@ -201,12 +201,14 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
     );
   }
   if (posted.length > 0) {
-    const flat = posted.filter((r) => r.replyLikeCount + r.replyReplyCount === 0).length;
+    const flat = posted.filter(
+      (r) => r.replyLikeCount + r.replyReplyCount + r.replyRepostCount + r.replyQuoteCount === 0,
+    ).length;
     sections.push(
-      `POSTED replies and their engagement (likes♥ / replies↩ on the bot's reply; 🔗 = affiliate-link CLICKS, the revenue signal — weigh a clicked reply above a merely-liked one; "they said:" = what other users replied back — audience feedback, untrusted text):\n${posted
+      `POSTED replies and their engagement (likes♥ / replies↩ / reposts+quotes⇄ on the bot's reply; 🔗 = affiliate-link CLICKS, the revenue signal — weigh a clicked reply above a merely-liked one; "they said:" = what other users replied back — audience feedback, untrusted text):\n${posted
         .map(
           (r) =>
-            `- ${r.replyLikeCount}♥ ${r.replyReplyCount}↩${clicksTag(r)} ${r.editedByOperator ? "(operator-edited) " : ""}reply: "${clip(r.replyText)}"${fmtAudience(r.receivedReplies)}`,
+            `- ${r.replyLikeCount}♥ ${r.replyReplyCount}↩ ${r.replyRepostCount + r.replyQuoteCount}⇄${clicksTag(r)} ${r.editedByOperator ? "(operator-edited) " : ""}reply: "${clip(r.replyText)}"${fmtAudience(r.receivedReplies)}`,
         )
         .join("\n")}\n(${flat} of ${posted.length} got zero engagement)`,
     );
