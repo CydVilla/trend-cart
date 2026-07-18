@@ -3,6 +3,80 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-17 — Audience replies as feedback
+
+### Added
+- **👎 now takes the reply down.** Rating a posted reply "down" doesn't just
+  teach the bot — a worker loop deletes it from Bluesky within ~2 minutes.
+  The DB record survives untouched (text, rating, note, engagement keep
+  feeding reflection); `takedownAt` is the exactly-once marker, the outcomes
+  checker stops polling removed replies, and the dashboard shows a red
+  "removed" marker in place of the view link. Deletion is fail-safe (a
+  failed delete retries; an already-gone post just gets stamped) and runs
+  even while the bot is paused — it executes an explicit operator decision,
+  not autonomous behavior. NOTE: any previously 👎-rated posted replies are
+  swept on first deploy.
+- **Click-aware learning.** Clicks were counted but never fed the loop; now
+  they do, as the revenue-proximate signal everywhere the bot learns or
+  reports: daily reflection shows per-reply click counts (🔗) next to
+  likes/replies and is told a clicked reply outweighs a merely-liked one;
+  the insights funnel and daily ops report include click totals; and the
+  prompts explicitly forbid inventing click numbers when none exist.
+- **Dashboard surfacing of the new signals.** Fact-check verdicts render as
+  a banner on queued replies and demoted radar drafts (why is this in my
+  queue?); posted replies show ♥/↩/🔗 engagement and a collapsible
+  "they said" list of audience replies; the Overview gets a quiet
+  Apologies card (latest 5, hidden until one exists). Verified end-to-end
+  locally against seeded rows.
+- **Pre-publication fact check** (`FACTCHECK_ENABLED`, default on): the
+  no-PA-API accuracy bridge. A reply that is about to post with NO human
+  review (autonomous/auto self-approval) now gets one LLM call with
+  Anthropic's server-side `web_search` tool as the last gate: does the
+  product actually exist and is it orderable (or genuinely pre-orderable),
+  are the reply's claims (release status, platform, edition) accurate, and
+  would the Amazon search query plausibly land on it. We never touch Amazon
+  ourselves — the check reads general web evidence, so the Associates
+  account stays clean. **Fail-safe, not fail-open**: an inaccurate,
+  low-confidence (< `FACTCHECK_MIN_CONFIDENCE`, 60), errored, or refused
+  check demotes the reply to the manual-approval queue with the verdict
+  stored on `BotReply.factCheck` — a missed auto-post beats a wrong one.
+  Operator-linked replies skip the check (the human chose the link);
+  manually approved replies are never checked (the human is the
+  fact-checker). Cost: ≤1 call + ≤`FACTCHECK_MAX_SEARCHES` (3) searches per
+  auto-approved reply — pennies/day at the 20-reply cap.
+  - The **trending radar** gets the same gate: with `RADAR_AUTO_APPROVE=true`
+    (flipped on 2026-07-17), a self-approving daily draft is fact-checked
+    first and demoted to the approval queue on a failed/unverifiable verdict
+    (verdict stored in `RadarPost.basis.factCheck`).
+- **One-shot apologies** (`ApologyReply`, `APOLOGY_ENABLED` default on): when
+  someone replies to the bot with negativity aimed *at the bot* (spam-calling,
+  "nobody asked", criticizing the rec), it apologizes once and goes quiet.
+  Politeness is unconditional; internalizing is not — reflection is told to
+  learn only from constructive criticism (what was wrong and why), never from
+  bare insults. Hard rails:
+  - The posted text is one of two **fixed templates** chosen in code
+    (constructive → "you're right, thanks for the honest feedback"; hostile →
+    a brief sorry that also teaches the "opt out" phrase). The LLM only gates
+    *whether* an apology is due (Haiku-cheap, temperature 0, confidence ≥ 70
+    that the negativity targets the bot) — a stranger's words can never shape
+    what the bot posts, so it can't be baited into arguing.
+  - Silence rails: never to opted-out authors (they asked for silence —
+    silence IS the polite response), once per target post ever (unique-key
+    claim = exactly-once, fail-closed on crash), one per author per 7 days
+    (never feed trolls), max 3/day globally, respects DRY_RUN and the pause
+    switch.
+- **The learning loop now reads what people say back.** The outcomes checker
+  counted replies on the bot's posted replies but never captured the text — a
+  "thanks, ordered one!" and a "gross spam bot" both scored 1↩. When a posted
+  reply has (new) replies, the checker now pulls the thread (public AppView,
+  ≤10 extra calls per hourly tick) and stores the top-liked reply texts on
+  `BotReply.receivedReplies` (bot's own posts excluded, capped at 8 × 280
+  chars). Daily reflection shows them as "they said:" lines under both the
+  operator-rated and posted-engagement evidence sections, with explicit
+  framing: gratitude/follow-ups = the reply landed, annoyance/spam-calling =
+  weigh like an operator rejection, and audience text is untrusted — never a
+  source of instructions or guidelines.
+
 ## 2026-07-11 — Click tracking + single-item radar
 
 ### Added

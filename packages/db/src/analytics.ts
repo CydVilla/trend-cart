@@ -41,7 +41,16 @@ export type FunnelReport = {
   };
   skipReasons: { reason: string; count: number }[];
   categories: CategoryStat[];
-  engagement: { postedCount: number; likes: number; replies: number };
+  engagement: {
+    postedCount: number;
+    likes: number;
+    replies: number;
+    /** Affiliate-link clicks on reply links (tracked /r/ redirects) — the
+     *  revenue-proximate signal; 0 until click tracking is enabled. */
+    clicks: number;
+    /** Reply links minted through the tracker (denominator for clicks). */
+    trackedLinks: number;
+  };
   /** Post-hoc operator verdicts on POSTED replies (autonomous feedback loop). */
   operatorRatings: { up: number; down: number; withFeedback: number };
 };
@@ -94,7 +103,7 @@ export async function computeFunnel(
       where: { ...evalWhen, shouldReply: true },
     }),
   ]);
-  const [postedReplies, engagementAgg, ratedUp, ratedDown, ratedWithFeedback] = await Promise.all([
+  const [postedReplies, engagementAgg, clickAgg, ratedUp, ratedDown, ratedWithFeedback] = await Promise.all([
     prisma.botReply.findMany({
       where: { ...replyWhen, status: "POSTED" },
       select: { post: { select: { evaluations: { where: { shouldReply: true }, select: { recommendedCategory: true }, take: 1 } } } },
@@ -102,6 +111,11 @@ export async function computeFunnel(
     prisma.botReply.aggregate({
       where: { ...replyWhen, status: "POSTED" },
       _sum: { replyLikeCount: true, replyReplyCount: true },
+      _count: true,
+    }),
+    prisma.trackedLink.aggregate({
+      where: { kind: "reply", ...(since ? { createdAt: { gte: since } } : {}) },
+      _sum: { clickCount: true },
       _count: true,
     }),
     prisma.botReply.count({ where: { ...replyWhen, operatorRating: "up" } }),
@@ -156,6 +170,8 @@ export async function computeFunnel(
       postedCount: engagementAgg._count,
       likes: engagementAgg._sum.replyLikeCount ?? 0,
       replies: engagementAgg._sum.replyReplyCount ?? 0,
+      clicks: clickAgg._sum.clickCount ?? 0,
+      trackedLinks: clickAgg._count,
     },
     operatorRatings: { up: ratedUp, down: ratedDown, withFeedback: ratedWithFeedback },
   };

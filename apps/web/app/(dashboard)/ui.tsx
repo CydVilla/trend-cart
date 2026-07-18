@@ -73,6 +73,72 @@ export function truncate(text: string, max = 120): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
+/** BotReply.factCheck / RadarPost.basis.factCheck payload, parsed defensively
+ *  (it's a JSON column written by the worker — never trust the shape). */
+export type FactCheckVerdict = {
+  accurate: boolean;
+  confidence: number;
+  issues: string[];
+  summary: string;
+};
+
+export function parseFactCheck(raw: unknown): FactCheckVerdict | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.accurate !== "boolean" || typeof o.confidence !== "number") return null;
+  return {
+    accurate: o.accurate,
+    confidence: o.confidence,
+    issues: Array.isArray(o.issues) ? o.issues.filter((i): i is string => typeof i === "string") : [],
+    summary: typeof o.summary === "string" ? o.summary : "",
+  };
+}
+
+/** Compact fact-check banner: amber when the check failed (why the item is in
+ *  the approval queue), quiet green when it passed. Renders nothing when the
+ *  row was never fact-checked. */
+export function FactCheckNote({ raw }: { raw: unknown }) {
+  const verdict = parseFactCheck(raw);
+  if (!verdict) return null;
+  const failed = !verdict.accurate || verdict.confidence < 60;
+  return (
+    <div
+      className={`mt-2 rounded border p-2 text-xs ${
+        failed ? "border-amber-300 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50/50 text-emerald-800"
+      }`}
+    >
+      <span className="font-medium">
+        Fact check {failed ? "⚠ flagged" : "✓ passed"} (confidence {Math.round(verdict.confidence)})
+      </span>
+      {verdict.summary ? <span> — {verdict.summary}</span> : null}
+      {verdict.issues.length > 0 && (
+        <ul className="mt-1 list-inside list-disc">
+          {verdict.issues.map((issue, i) => (
+            <li key={i}>{issue}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** BotReply.receivedReplies payload — what other users said back. */
+export type AudienceReply = { text: string; likeCount: number; authorHandle: string };
+
+export function parseAudienceReplies(raw: unknown): AudienceReply[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (r): r is Record<string, unknown> =>
+        typeof r === "object" && r !== null && typeof (r as Record<string, unknown>).text === "string",
+    )
+    .map((r) => ({
+      text: r.text as string,
+      likeCount: typeof r.likeCount === "number" ? r.likeCount : 0,
+      authorHandle: typeof r.authorHandle === "string" ? r.authorHandle : "unknown",
+    }));
+}
+
 /** at://did:plc:xyz/app.bsky.feed.post/rkey → https://bsky.app/profile/did:plc:xyz/post/rkey */
 export function bskyPostUrl(atUri: string): string | null {
   const match = atUri.match(/^at:\/\/([^/]+)\/app\.bsky\.feed\.post\/([^/]+)$/);

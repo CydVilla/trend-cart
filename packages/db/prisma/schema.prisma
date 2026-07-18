@@ -198,14 +198,27 @@ model BotReply {
   /// operator hand-edited the text before approving
   replyLikeCount    Int       @default(0)
   replyReplyCount   Int       @default(0)
+  /// What OTHER users actually said in reply to the bot's posted reply —
+  /// array of { text, likeCount, authorHandle }, captured by the outcomes
+  /// checker. Audience feedback the reflection job reads alongside the counts
+  /// ("thanks, ordered one" vs "spam bot" mean opposite things at 1 reply each).
+  receivedReplies   Json?
   outcomeCheckedAt  DateTime?
   editedByOperator  Boolean   @default(false)
   /// Original text before the operator's first edit — before/after pairs are
   /// the strongest style signal the reflection job learns from
   preEditText       String?
+  /// Pre-publication web-search fact check, run only when the reply was about
+  /// to self-approve: { accurate, confidence, issues, summary, model,
+  /// checkedAt }. A failing/missing verdict demoted it to manual approval.
+  factCheck         Json?
   /// Post-hoc operator verdict on a POSTED reply ("up" | "down") — the main
-  /// feedback channel for autonomously posted replies
+  /// feedback channel for autonomously posted replies. A "down" also DELETES
+  /// the reply from Bluesky (worker takedown loop); the row stays for learning.
   operatorRating    String?
+  /// When the worker deleted this reply from Bluesky after a 👎. The record
+  /// (text, rating, note, engagement) is kept — only the public post goes.
+  takedownAt        DateTime?
   /// Optional free-text note explaining the rating (fed to reflection/insights)
   operatorFeedback  String?
   ratedAt           DateTime?
@@ -252,6 +265,34 @@ model CandidateEvaluation {
 
   @@index([postId])
   @@index([createdAt])
+}
+
+/// One-shot apology: when someone replies to the bot with negativity, it
+/// apologizes once with a FIXED template (audience text never shapes the
+/// posted words — the LLM only gates whether an apology is due). Politeness
+/// only; whether the feedback gets internalized is reflection's job, and only
+/// when it's constructive. Unique targetUri = exactly-once per negative reply.
+model ApologyReply {
+  id           String  @id @default(cuid())
+  /// AT URI of the negative reply we responded to (the dedupe/claim key).
+  targetUri    String  @unique
+  authorDid    String
+  authorHandle String?
+  /// What they said, clipped (audit + reflection context).
+  targetText   String
+  /// Verdict that gated this: { negativeTowardBot, constructive, confidence,
+  /// reason, model }.
+  verdict      Json?
+  /// The template text posted (or that would post, for DRY_RUN/SKIPPED rows).
+  replyText    String
+  replyUri     String?
+  status       ReplyStatus
+  skipReason   String?
+  postedAt     DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([authorDid, createdAt])
+  @@index([status, createdAt])
 }
 
 /// Authors the bot must never reply to again. Populated automatically when

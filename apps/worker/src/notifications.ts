@@ -1,10 +1,11 @@
 import { AtpAgent } from "@atproto/api";
 import { prisma } from "@trendcart/db";
+import { considerApology } from "./apologize.js";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 
 /**
- * The bot's ears, two jobs:
+ * The bot's ears, three jobs:
  *
  * 1. OPT-OUT: any reply/mention/quote containing an opt-out phrase permanently
  *    silences the bot for that author.
@@ -13,9 +14,17 @@ import { config } from "./config.js";
  *    solicited, so it skips maturation and social cooldowns but still passes
  *    safety evaluation, rate caps, and (in manual mode) human approval.
  *    A fresh request is explicit re-consent: it clears a prior opt-out.
+ * 3. APOLOGIES: a reply that's negative toward the bot (but not an opt-out —
+ *    those get silence, as requested) earns one fixed-template apology.
+ *    See apologize.ts for the rails.
  */
 
-export type NotificationStats = { optOuts: number; requests: number; errors: number };
+export type NotificationStats = {
+  optOuts: number;
+  requests: number;
+  apologies: number;
+  errors: number;
+};
 
 /** Explicit, directed opt-out phrases — safe to honor from any interaction. */
 const STRONG_OPT_OUT_RE =
@@ -132,6 +141,25 @@ export function createNotificationListener(
           update: {},
         });
         stats.optOuts += 1;
+        continue;
+      }
+
+      // A non-opt-out reply to one of our posts: apologize once if it's
+      // negative toward the bot. Best-effort — considerApology never throws,
+      // so a failure here can't stall opt-out/mention processing behind it.
+      if (notification.reason === "reply") {
+        await considerApology(
+          {
+            uri: notification.uri,
+            cid: notification.cid,
+            authorDid: notification.author.did,
+            authorHandle: notification.author.handle ?? null,
+            text,
+            rootRef: record?.reply?.root ?? null,
+          },
+          agent,
+          stats,
+        );
         continue;
       }
 

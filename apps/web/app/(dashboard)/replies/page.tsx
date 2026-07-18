@@ -4,10 +4,12 @@ import { SubmitButton } from "../submit-button";
 import {
   Badge,
   EmptyState,
+  FactCheckNote,
   Pagination,
   SectionHeading,
   bskyPostUrl,
   formatDate,
+  parseAudienceReplies,
   replyStatusTone,
   truncate,
 } from "../ui";
@@ -45,6 +47,14 @@ export default async function RepliesPage({
 
   // Ground truth from the worker's heartbeat, not this web process's env.
   const heartbeat = await prisma.workerHeartbeat.findUnique({ where: { id: "worker" } });
+
+  // Affiliate-link clicks for the rows on screen (empty until click tracking
+  // has minted links).
+  const clickRows = await prisma.trackedLink.findMany({
+    where: { kind: "reply", sourceId: { in: recent.map((r) => r.id) } },
+    select: { sourceId: true, clickCount: true },
+  });
+  const clicksByReply = new Map(clickRows.map((l) => [l.sourceId as string, l.clickCount]));
 
   return (
     <div>
@@ -113,6 +123,9 @@ export default async function RepliesPage({
                     </div>
                   )}
                 </div>
+                {/* Why this landed in the queue: the pre-publication fact
+                    check flagged it instead of letting it auto-post. */}
+                <FactCheckNote raw={reply.factCheck} />
                 <div className="mt-3 flex gap-2">
                   <form action={approveReply}>
                     <input type="hidden" name="id" value={reply.id} />
@@ -202,15 +215,24 @@ export default async function RepliesPage({
                   <tr key={reply.id} className="align-top">
                     <td className="px-3 py-2">
                       <Badge tone={replyStatusTone(reply.status)}>{reply.status}</Badge>
-                      {replyUrl && (
-                        <a
-                          href={replyUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-2 text-xs underline"
+                      {reply.takedownAt ? (
+                        <span
+                          className="ml-2 text-xs text-red-600"
+                          title={`Deleted from Bluesky after your 👎 (${formatDate(reply.takedownAt)}). The record stays for learning.`}
                         >
-                          view
-                        </a>
+                          removed
+                        </span>
+                      ) : (
+                        replyUrl && (
+                          <a
+                            href={replyUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-2 text-xs underline"
+                          >
+                            view
+                          </a>
+                        )
                       )}
                     </td>
                     <td className="max-w-md px-3 py-2 text-xs text-zinc-600">
@@ -218,6 +240,40 @@ export default async function RepliesPage({
                       {reply.skipReason ? (
                         <div className="text-zinc-400">{truncate(reply.skipReason, 100)}</div>
                       ) : null}
+                      {reply.status === ReplyStatus.POSTED && (
+                        <div className="mt-1 text-zinc-400">
+                          ♥ {reply.replyLikeCount} · ↩ {reply.replyReplyCount}
+                          {clicksByReply.has(reply.id) && (
+                            <span title="Affiliate-link clicks — the revenue signal">
+                              {" "}
+                              · 🔗 {clicksByReply.get(reply.id)} click
+                              {clicksByReply.get(reply.id) === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {(() => {
+                        const audience = parseAudienceReplies(reply.receivedReplies);
+                        if (audience.length === 0) return null;
+                        return (
+                          <details className="mt-1">
+                            <summary className="cursor-pointer text-zinc-400 underline decoration-dotted">
+                              they said ({audience.length})
+                            </summary>
+                            <ul className="mt-1 space-y-1 border-l-2 border-zinc-200 pl-2">
+                              {audience.map((a, i) => (
+                                <li key={i} className="text-zinc-500">
+                                  <span className="text-zinc-400">@{a.authorHandle}:</span>{" "}
+                                  {truncate(a.text, 160)}
+                                  {a.likeCount > 0 && (
+                                    <span className="text-zinc-400"> ({a.likeCount}♥)</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        );
+                      })()}
                     </td>
                     <td className="max-w-xs px-3 py-2 text-xs text-zinc-500" title={reply.post.text}>
                       {truncate(reply.post.text, 80)}
@@ -247,7 +303,7 @@ export default async function RepliesPage({
                               <input type="hidden" name="id" value={reply.id} />
                               <input type="hidden" name="rating" value="down" />
                               <SubmitButton
-                                title="Bad reply — avoid this (feeds the bot's learning)"
+                                title="Bad reply — DELETES it from Bluesky (within ~2 min) and feeds the bot's learning. The record stays here."
                                 className={`rounded border px-2 py-0.5 text-sm ${
                                   reply.operatorRating === "down"
                                     ? "border-red-400 bg-red-100"

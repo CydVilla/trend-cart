@@ -9,7 +9,7 @@ import {
   updateOperatorGuidance,
 } from "./actions";
 import { SubmitButton } from "./submit-button";
-import { Badge, formatDate } from "./ui";
+import { Badge, FactCheckNote, formatDate, truncate } from "./ui";
 
 export const dynamic = "force-dynamic";
 
@@ -211,6 +211,17 @@ async function RadarCard() {
       <p className="whitespace-pre-wrap rounded border border-violet-200 bg-white px-3 py-2 text-zinc-700">
         {(pending ?? lastPosted)?.content}
       </p>
+      {/* When a self-approving draft was demoted here, show what the
+          pre-publication fact check objected to. */}
+      {pending && (
+        <FactCheckNote
+          raw={
+            typeof pending.basis === "object" && pending.basis !== null && !Array.isArray(pending.basis)
+              ? (pending.basis as Record<string, unknown>).factCheck
+              : null
+          }
+        />
+      )}
       {pending ? (
         <div className="mt-2 flex items-center gap-2">
           <form action={approveRadarPost}>
@@ -237,6 +248,48 @@ async function RadarCard() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Recent one-shot apologies (negative replies the bot answered with a fixed
+ * template). Quiet by design: renders nothing until one exists.
+ */
+async function ApologiesCard() {
+  const apologies = await prisma.apologyReply.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 5,
+  });
+  if (apologies.length === 0) return null;
+  return (
+    <details className="rounded-lg border border-zinc-200 bg-white p-4 text-sm">
+      <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="font-medium">Apologies</span>
+        <span className="text-xs text-zinc-400">
+          — negative replies the bot answered with a one-time fixed apology (latest{" "}
+          {apologies.length})
+        </span>
+      </summary>
+      <ul className="mt-3 space-y-2">
+        {apologies.map((a) => (
+          <li key={a.id} className="rounded border border-zinc-100 bg-zinc-50 p-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge
+                tone={a.status === "POSTED" ? "green" : a.status === "FAILED" ? "red" : "zinc"}
+              >
+                {a.status}
+              </Badge>
+              <span className="text-zinc-500">@{a.authorHandle ?? a.authorDid}</span>
+              <span className="ml-auto text-zinc-400">{formatDate(a.createdAt)}</span>
+            </div>
+            <div className="mt-1 text-zinc-500">
+              they said: &ldquo;{truncate(a.targetText, 140)}&rdquo;
+            </div>
+            <div className="mt-0.5 text-zinc-600">bot: &ldquo;{a.replyText}&rdquo;</div>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -319,6 +372,7 @@ export default async function HomePage() {
       <RadarCard />
       <OperatorGuidanceCard />
       <LessonsCard />
+      <ApologiesCard />
       <p className="text-sm text-zinc-500">
         The worker discovers trending Bluesky posts, evaluates them, and queues replies. Approve
         pending replies under <Link href="/replies" className="underline">Replies</Link>; tune the

@@ -3,6 +3,7 @@ import { prisma, ReplyStatus, type Prisma } from "@trendcart/db";
 import { amazonSearchUrl, type LlmClient, type RadarItem } from "@trendcart/shared";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
+import { factCheckReply, verdictPasses, type FactCheckVerdict } from "./factcheck.js";
 import { isPaused } from "./heartbeat.js";
 import { truncateReplyToFit } from "./reply.js";
 import { createTrackedLink } from "./tracking.js";
@@ -156,18 +157,43 @@ export function createRadar(llm: LlmClient, stats: RadarStats): { tick: () => Pr
     const body = await llm.generateRadarPost({ items: [headline], wordBudget });
     const composed = `${truncateReplyToFit(body, anchor, config.radar.maxLength - 4)} #ad`;
 
-    const status = config.bot.dryRun
+    let status = config.bot.dryRun
       ? ReplyStatus.DRY_RUN
       : config.radar.autoApprove
         ? ReplyStatus.APPROVED
         : ReplyStatus.PENDING_APPROVAL;
+
+    // Auto-approved radar posts get the same last gate as auto-approved
+    // replies: a web-search fact check. Fail-safe — an inaccurate,
+    // low-confidence, or errored verdict demotes to the approval queue.
+    let factCheck: FactCheckVerdict | null = null;
+    if (status === ReplyStatus.APPROVED && config.factCheck.enabled && !config.llm.useFake) {
+      factCheck = await factCheckReply({
+        postText: headline.sample,
+        replyText: composed,
+        linkKind: "search",
+        linkQuery: headline.label,
+        suggestedReplyAngle: null,
+      });
+      if (!verdictPasses(factCheck)) {
+        status = ReplyStatus.PENDING_APPROVAL;
+        console.log(
+          `[radar] fact check demoted draft to manual approval: ${
+            factCheck
+              ? `accurate=${factCheck.accurate} confidence=${factCheck.confidence} — ${factCheck.summary}`
+              : "check could not be completed"
+          }`,
+        );
+      }
+    }
+
     const tracked = await createTrackedLink(linkUrl, "radar");
     const draftRow = await prisma.radarPost.create({
       data: {
         content: composed,
         linkUrl: tracked.url,
         linkAnchor: anchor,
-        basis: { items } as unknown as Prisma.InputJsonValue,
+        basis: { items, ...(factCheck ? { factCheck } : {}) } as unknown as Prisma.InputJsonValue,
         status,
         approvedAt: status === ReplyStatus.APPROVED ? new Date() : null,
       },

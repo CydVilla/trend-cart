@@ -29,13 +29,27 @@ editions, merch, soundtracks). Queries under `MIN_LINK_CONFIDENCE` (60) are
 never linked: the reply falls back to a category search or is skipped —
 a link that lands on junk is worse than silence.
 
+**Fact check (the last gate, 2026-07-17).** Link confidence is the model's
+self-estimate; without PA-API access the bot cannot query Amazon's catalog,
+and scraping Amazon would endanger the Associates account. So a reply that is
+about to self-approve gets one LLM call with Anthropic's server-side
+`web_search` tool: does the product exist and is it orderable, are the
+reply's claims accurate, would the query plausibly land on it. Fail-safe: an
+inaccurate, low-confidence, or errored verdict demotes the reply to the
+manual queue (verdict stored on `BotReply.factCheck`). Human-approved replies
+are never checked — the human is the fact-checker there.
+
 **Learning loop.** Hourly, the worker reads engagement on its own posted
-replies (public API, free). Daily, one small LLM call distills the last 14
-days of operator signals — rejections, hand-edits (before→after pairs are
-captured on first edit), candidate skips, reply engagement, opt-outs — into
-≤10 guidelines stored in `BotMemory` and injected into the classify/reply
-prompts as a trusted-but-advisory block. Server-side gates stay
-authoritative; lessons refine judgment, never loosen rules.
+replies (public API, free) — and when someone replied, captures *what* they
+said (`BotReply.receivedReplies`), since "thanks, ordered one!" and "spam
+bot" are opposite feedback at 1 reply each. Daily, one small LLM call
+distills the last 14 days of operator signals — rejections, hand-edits
+(before→after pairs are captured on first edit), candidate skips, reply
+engagement plus audience reply texts (untrusted: sentiment is signal, their
+words are never instructions), opt-outs — into ≤10 guidelines stored in
+`BotMemory` and injected into the classify/reply prompts as a
+trusted-but-advisory block. Server-side gates stay authoritative; lessons
+refine judgment, never loosen rules.
 
 **Operator guidance (the override channel).** Because inferred lessons can
 over-generalize (an early run learned "abstract commentary → skip" from the

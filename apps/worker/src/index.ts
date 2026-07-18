@@ -20,6 +20,7 @@ import { createRadar, type RadarStats } from "./radar.js";
 import { reflectTick, type ReflectStats } from "./reflect.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
 import { generateDueReplies, type ReplyStats } from "./reply.js";
+import { createTakedown, type TakedownStats } from "./takedown.js";
 
 const STATS_LOG_MS = 30_000;
 
@@ -68,10 +69,19 @@ async function main(): Promise<void> {
   const discoverStats = newDiscoverStats();
   const rehydrateStats: RehydrateStats = { hydrated: 0, missing: 0, errors: 0 };
   const evalStats: EvaluateStats = { evaluated: 0, wouldReply: 0, rejected: 0, errors: 0 };
-  const replyStats: ReplyStats = { generated: 0, autoApproved: 0, skipped: 0, deferred: 0, failed: 0 };
+  const replyStats: ReplyStats = {
+    generated: 0,
+    autoApproved: 0,
+    factChecked: 0,
+    factFlagged: 0,
+    skipped: 0,
+    deferred: 0,
+    failed: 0,
+  };
   const posterStats: PosterStats = { posted: 0, postFailed: 0, disabled: false };
-  const notificationStats: NotificationStats = { optOuts: 0, requests: 0, errors: 0 };
+  const notificationStats: NotificationStats = { optOuts: 0, requests: 0, apologies: 0, errors: 0 };
   const outcomeStats: OutcomeStats = { checked: 0, errors: 0 };
+  const takedownStats: TakedownStats = { removed: 0, errors: 0 };
   const reflectStats: ReflectStats = { reflections: 0, errors: 0 };
   const insightsStats: InsightsStats = { reports: 0, errors: 0 };
   const dealCheckStats: DealCheckStats = { checked: 0, fired: 0, deferred: 0, errors: 0, backoffs: 0 };
@@ -88,6 +98,7 @@ async function main(): Promise<void> {
     poster: posterStats,
     notifications: notificationStats,
     outcomes: outcomeStats,
+    takedown: takedownStats,
     reflect: reflectStats,
     insights: insightsStats,
     dealCheck: dealCheckStats,
@@ -111,6 +122,7 @@ async function main(): Promise<void> {
     console.warn("  discovery:        disabled (no Bluesky credentials)");
   }
   const poster = createPoster(posterStats);
+  const takedown = createTakedown(takedownStats);
   const notificationListener = createNotificationListener(notificationStats);
   if (!notificationListener) {
     console.warn("  mentions/opt-out:  disabled (no Bluesky credentials)");
@@ -149,6 +161,9 @@ async function main(): Promise<void> {
     startLoop("evaluate", 60_000, () => evaluateDueCandidates(llm, evalStats)),
     startLoop("reply", 60_000, () => generateDueReplies(llm, replyStats)),
     startLoop("poster", 30_000, () => poster.tick()),
+    // 👎 takedowns: a down-rated posted reply is deleted from Bluesky within
+    // ~2 min (the DB row stays — it keeps feeding the learning loop).
+    ...(takedown ? [startLoop("takedown", 2 * 60_000, () => takedown.tick())] : []),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
     // Radar: internal gating makes each tick a cheap findFirst; the 60s
     // cadence just means dashboard approvals publish promptly.
@@ -202,10 +217,12 @@ async function main(): Promise<void> {
         `| evaluated=${evalStats.evaluated} wouldReply=${evalStats.wouldReply} ` +
         `rejected=${evalStats.rejected} evalErrors=${evalStats.errors} ` +
         `| replies=${replyStats.generated} autoApproved=${replyStats.autoApproved} ` +
+        `factChecked=${replyStats.factChecked} factFlagged=${replyStats.factFlagged} ` +
         `replySkips=${replyStats.skipped} ` +
         `replyDefer=${replyStats.deferred} replyFail=${replyStats.failed} ` +
         `posted=${posterStats.posted} requests=${notificationStats.requests} ` +
-        `optOuts=${notificationStats.optOuts} outcomes=${outcomeStats.checked} ` +
+        `optOuts=${notificationStats.optOuts} apologies=${notificationStats.apologies} ` +
+        `outcomes=${outcomeStats.checked} takedowns=${takedownStats.removed} ` +
         `lessons=${reflectStats.reflections}` +
         (blueskyBackoffSeconds() > 0 ? ` | BLUESKY DOWN (retry ${blueskyBackoffSeconds()}s)` : "") +
         (config.deals.enabled

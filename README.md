@@ -48,9 +48,10 @@ render as clickable anchor text via rich-text facets — never raw URLs.
 **Autonomous mode** (Overview-page toggle, off by default): the bot
 self-approves replies with intent ≥ 80 and link confidence ≥ 75 (or an
 operator directive); weaker replies still queue for manual approval.
-**Learning loop**: hourly it measures engagement on its own posted replies;
-daily one small LLM call distills your approvals/edits/rejections into
-guidelines injected into its prompts (shown on the Overview page).
+**Learning loop**: hourly it measures engagement on its own posted replies —
+including the text of what people reply back (audience feedback); daily one
+small LLM call distills your approvals/edits/rejections plus those reactions
+into guidelines injected into its prompts (shown on the Overview page).
 
 ## Prerequisites
 
@@ -124,7 +125,9 @@ radar** approval card (the daily what's-hot draft), the **Operator guidance**
 box (standing instructions the bot obeys above anything it learned), and an
 editable "What the bot has learned" card once the reflection job has run.
 Posted replies can be rated 👍/👎 (with an optional note) on the Replies
-page — those ratings are the strongest signal the learning loop gets.
+page — those ratings are the strongest signal the learning loop gets, and a
+👎 also DELETES the reply from Bluesky within ~2 minutes (the record stays
+in the dashboard and keeps feeding the learning loop).
 `/api/health` is public and returns 500 when the worker heartbeat goes stale —
 point a free uptime pinger at it.
 
@@ -218,6 +221,10 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `RADAR_ENABLED` / `RADAR_AUTO_APPROVE` | Daily trending-radar post from the bot's own discovery data (on / approval-gated by default) |
 | `RESEND_API_KEY` / `NOTIFY_EMAIL_TO` | Email pings when approvals wait (both required; dark otherwise) |
 | `CLICK_TRACKING_ENABLED` / `PUBLIC_BASE_URL` | Per-post click counting via first-party `/r/<id>` redirects (default off) |
+| `FACTCHECK_ENABLED` | Web-search fact check before any reply auto-posts unreviewed; failures demote to manual approval (default true) |
+| `FACTCHECK_MAX_SEARCHES` / `FACTCHECK_MIN_CONFIDENCE` | Cost bound per check (default 3) and verdict floor for auto-posting (default 60) |
+| `APOLOGY_ENABLED` | One-time fixed-template apology when someone replies negatively to the bot (default true) |
+| `APOLOGY_MAX_PER_DAY` | Daily apology cap (default 3); plus one per author per `APOLOGY_AUTHOR_COOLDOWN_DAYS` (default 7) |
 
 ## Safety model
 
@@ -291,10 +298,9 @@ Insights funnel), operator notifications (email pings), and the golden set
    in-stock) instead of tagged searches, and the deal channel's automated
    price polling + feed discovery light up. The PA-API client already exists
    (`apps/worker/src/paapi.ts`); wiring replies to it is a modest change.
-2. **Click-aware learning.** Clicks are counted but don't yet FEED the loop:
-   pull `TrackedLink.clickCount` into the outcomes job and let reflection /
-   insights rank categories and phrasings by click-through. Do this once
-   ~1–2 weeks of real click data exist.
+2. ~~**Click-aware learning.**~~ Shipped 2026-07-17: reflection sees
+   per-reply click counts (weighed as the revenue signal), and the insights
+   funnel/report include click totals.
 3. **Reflection guardrail.** Re-run calibration after each nightly distill
    and auto-revert a lesson set that drops agreement — needs a bigger golden
    set (~30+ per class) before the metric is stable enough to trigger on.

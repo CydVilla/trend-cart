@@ -26,3 +26,14 @@ disclosure statement.
 - A few characters of every Amazon-linked reply are spent on disclosure.
 - Honesty is also the growth posture: mention requests (ADR-0007) only work
   if people know the bot exists and what it does.
+
+## Addendum (2026-07-17): apologize, never argue
+A disclosed bot also owns its misses. When a reply to the bot is negative
+toward it, the bot apologizes ONCE with a fixed template chosen in code —
+the LLM only gates whether an apology is due, so a stranger's words can
+never shape what gets posted and the bot cannot be baited into arguing.
+Opt-outs get no apology (they asked for silence; silence is the polite
+response), and hard caps (one per post ever, one per author per week,
+3/day) keep politeness from becoming its own spam vector. Politeness is
+unconditional; the learning loop separately internalizes only feedback
+that is constructive.

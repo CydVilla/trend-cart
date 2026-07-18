@@ -80,6 +80,40 @@ export const config = {
     minLength: envInt("COMMENTS_MIN_LENGTH", 15),
   },
 
+  /* One-shot apologies: when someone replies to the bot with negativity, it
+     apologizes once with a FIXED template (the LLM only gates whether an
+     apology is due — a stranger's words never shape what gets posted).
+     Politeness only; reflection separately decides whether the feedback is
+     constructive enough to internalize. */
+  apology: {
+    enabled: envBool("APOLOGY_ENABLED", true),
+    /* Verdict floor: below this confidence that the reply is negative toward
+       the BOT (not the world in general), stay silent. */
+    minConfidence: envInt("APOLOGY_MIN_CONFIDENCE", 70),
+    /* Hard daily cap — being dogpiled must not turn the bot into an
+       apology-spam machine. */
+    maxPerDay: envInt("APOLOGY_MAX_PER_DAY", 3),
+    /* One apology per author per this many days — never argue, never feed
+       trolls: repeat negativity from the same person gets silence. */
+    authorCooldownDays: envInt("APOLOGY_AUTHOR_COOLDOWN_DAYS", 7),
+  },
+
+  /* Pre-publication fact check: replies about to post WITHOUT a human look
+     (autonomous/auto self-approvals) get one LLM call with Anthropic's
+     server-side web_search tool — does the product exist and is it orderable,
+     are the reply's claims right? Fail-safe: any failure or low-confidence
+     verdict demotes the reply to the manual-approval queue instead of
+     auto-posting. Manually approved replies are never checked (the human is
+     the fact-checker there). Cost: ≤1 call + ~1-3 searches per auto-approved
+     reply (~$0.01-0.04 each at the daily reply cap). */
+  factCheck: {
+    enabled: envBool("FACTCHECK_ENABLED", true),
+    /* Web searches the checker may run per reply (cost bound). */
+    maxSearches: envInt("FACTCHECK_MAX_SEARCHES", 3),
+    /* Verdict confidence floor: below this, auto-posting demotes to manual. */
+    minConfidence: envInt("FACTCHECK_MIN_CONFIDENCE", 60),
+  },
+
   site: {
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
   },

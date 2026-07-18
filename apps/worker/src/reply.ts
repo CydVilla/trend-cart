@@ -1,8 +1,9 @@
-import { prisma, ReplyStatus, type CandidateEvaluation, type Post } from "@trendcart/db";
+import { prisma, ReplyStatus, type CandidateEvaluation, type Post, type Prisma } from "@trendcart/db";
 import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
+import { factCheckReply, verdictPasses, type FactCheckVerdict } from "./factcheck.js";
 import { getOperatorFlags } from "./heartbeat.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
 import { createTrackedLink } from "./tracking.js";
@@ -24,6 +25,10 @@ export type ReplyStats = {
   generated: number;
   /** Of `generated`: how many the bot self-approved (autonomous mode). */
   autoApproved: number;
+  /** Pre-publication web-search fact checks run (auto-approve path only). */
+  factChecked: number;
+  /** Of `factChecked`: failed/unverifiable — demoted to manual approval. */
+  factFlagged: number;
   skipped: number;
   deferred: number;
   failed: number;
@@ -498,7 +503,48 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
-    const { status, approvedAt } = statusFor(evaluation, link, flags.autonomous);
+    let { status, approvedAt } = statusFor(evaluation, link, flags.autonomous);
+
+    // LAST GATE before an unreviewed post: a reply that self-approved gets a
+    // web-search fact check (does the product exist / is it orderable / are
+    // the claims right). Fail-safe — an inaccurate, unverifiable, or errored
+    // check demotes to the manual queue, where the operator sees the verdict.
+    // Operator-linked replies skip it (the human already chose that link),
+    // and manual approvals are never checked (the human is the fact-checker).
+    let factCheck: FactCheckVerdict | null = null;
+    let factChecked = false;
+    if (
+      status === ReplyStatus.APPROVED &&
+      config.factCheck.enabled &&
+      !config.llm.useFake &&
+      link.kind !== "operator"
+    ) {
+      factChecked = true;
+      factCheck = await factCheckReply({
+        postText: evaluation.post.text,
+        replyText: text,
+        linkKind: link.kind,
+        linkQuery:
+          link.kind === "search"
+            ? (evaluation.recommendedSearchQuery ?? link.anchor)
+            : (link.categoryName ?? link.anchor),
+        suggestedReplyAngle: evaluation.suggestedReplyAngle,
+      });
+      stats.factChecked += 1;
+      if (!verdictPasses(factCheck)) {
+        status = ReplyStatus.PENDING_APPROVAL;
+        approvedAt = null;
+        stats.factFlagged += 1;
+        console.log(
+          `[factcheck] demoted to manual approval: ${
+            factCheck
+              ? `accurate=${factCheck.accurate} confidence=${factCheck.confidence} — ${factCheck.summary}`
+              : "check could not be completed"
+          }`,
+        );
+      }
+    }
+
     // Route the link through a click-tracking redirect (no-op when disabled).
     const tracked = await createTrackedLink(link.url, "reply");
     const created = await prisma.botReply.create({
@@ -509,6 +555,18 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         linkAnchor: link.anchor,
         status,
         approvedAt,
+        ...(factChecked
+          ? {
+              factCheck: (factCheck ?? {
+                accurate: false,
+                confidence: 0,
+                issues: ["fact check could not be completed"],
+                summary: "check errored or was refused — unverified",
+                model: config.llm.model,
+                checkedAt: new Date().toISOString(),
+              }) as unknown as Prisma.InputJsonValue,
+            }
+          : {}),
       },
       select: { id: true },
     });
