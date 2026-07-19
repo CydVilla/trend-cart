@@ -10,11 +10,11 @@ import { config } from "./config.js";
  * revenue link — a working untracked link beats a tracked broken one.
  *
  * Returns the id too so the caller can backfill sourceId once the source row
- * (BotReply / RadarPost / DealPost) exists, for per-source click drill-down.
+ * (BotReply / DealPost) exists, for per-source click drill-down.
  */
 export async function createTrackedLink(
   targetUrl: string,
-  kind: "reply" | "radar" | "deal",
+  kind: "reply" | "deal",
   sourceId?: string,
 ): Promise<{ url: string; id: string | null }> {
   if (!config.clickTracking.enabled || !config.clickTracking.baseUrl) {

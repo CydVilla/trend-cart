@@ -3,7 +3,7 @@ import { config } from "./config.js";
 
 /**
  * Measure how OUR posted content actually performs: likes/reposts/replies/
- * quotes on the bot's replies, radar posts, and deal alerts are the
+ * quotes on the bot's replies and deal alerts are the
  * ground-truth signal the reflection job learns from. Uses the public
  * AppView (no credentials, no cost).
  *
@@ -33,7 +33,7 @@ export type OutcomeStats = { checked: number; errors: number };
 type OutcomeTarget = {
   id: string;
   uri: string;
-  kind: "reply" | "radar" | "deal";
+  kind: "reply" | "deal";
   /** reply-kind only: last-known reply count + captured texts, for staleness. */
   priorReplyCount?: number;
   priorReceived?: unknown;
@@ -100,7 +100,7 @@ function dueWhere(now: Date): {
 }
 
 /** Replies first (the learning loop's primary signal), then the bot's own
- *  radar and deal posts fill whatever batch room remains. */
+ *  deal posts fill whatever batch room remains. */
 async function gatherDue(now: Date): Promise<OutcomeTarget[]> {
   const targets: OutcomeTarget[] = [];
   const replies = await prisma.botReply.findMany({
@@ -125,15 +125,6 @@ async function gatherDue(now: Date): Promise<OutcomeTarget[]> {
     });
   }
 
-  if (targets.length < BATCH) {
-    const radars = await prisma.radarPost.findMany({
-      where: { status: ReplyStatus.POSTED, postUri: { not: null }, ...dueWhere(now) },
-      select: { id: true, postUri: true },
-      orderBy: { postedAt: "desc" },
-      take: BATCH - targets.length,
-    });
-    for (const r of radars) targets.push({ id: r.id, uri: r.postUri as string, kind: "radar" });
-  }
   if (targets.length < BATCH) {
     const deals = await prisma.dealPost.findMany({
       where: { status: DealPostStatus.POSTED, postUri: { not: null }, ...dueWhere(now) },
@@ -208,11 +199,6 @@ export async function outcomesTick(stats: OutcomeStats): Promise<void> {
             ? { receivedReplies: received as unknown as Prisma.InputJsonValue }
             : {}),
         },
-      });
-    } else if (target.kind === "radar") {
-      await prisma.radarPost.update({
-        where: { id: target.id },
-        data: { outcomeCheckedAt: now, ...(counts ?? {}) },
       });
     } else {
       await prisma.dealPost.update({

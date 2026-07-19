@@ -150,16 +150,24 @@ export const config = {
     dashboardUrl: envString("DASHBOARD_URL", ""),
   },
 
-  /* Trending radar: one standalone post per day on the bot's own profile,
-     synthesized from the last 24h of the bot's OWN discovery data. Approval-
-     gated (PENDING_APPROVAL) until RADAR_AUTO_APPROVE=true. */
-  radar: {
-    enabled: envBool("RADAR_ENABLED", true),
-    autoApprove: envBool("RADAR_AUTO_APPROVE", false),
-    /* Need at least this many worth-replying candidates in the last 24h —
-       no radar on thin days (a data-starved radar post reads as filler). */
-    minItems: envInt("RADAR_MIN_ITEMS", 3),
-    maxLength: envInt("RADAR_MAX_LENGTH", 300),
+  /* Trending banter: one humorous reply per day on a popular post under
+     Bluesky's trending topics — the organic-growth surface (no link, no ad;
+     it exists to draw people to the bot's deal feed). The bot reads the
+     post's top-liked replies to sense the room, then writes its OWN take. */
+  banter: {
+    enabled: envBool("BANTER_ENABLED", true),
+    /* Posts per day (DB-derived, restart-proof). */
+    perDay: envInt("BANTER_PER_DAY", 1),
+    /* LLM judgments per run — how many candidate posts it may consider
+       before giving up for the day (cost + quality bound). */
+    maxCandidates: envInt("BANTER_MAX_CANDIDATES", 3),
+    /* A candidate post must have at least this many likes — banter belongs
+       on posts with an audience. */
+    minLikes: envInt("BANTER_MIN_LIKES", 50),
+    /* Confidence floor from the humor judge: below this, stay silent
+       (silence beats cringe — the operator's 👎s taught us that). */
+    minConfidence: envInt("BANTER_MIN_CONFIDENCE", 70),
+    maxLength: envInt("BANTER_MAX_LENGTH", 240),
   },
 
   ingest: {
@@ -190,7 +198,7 @@ export const config = {
        earnest attempts at this genre — so they queue for manual approval even
        in autonomous mode until this is flipped on. */
     playfulAutoApprove: envBool("PLAYFUL_AUTO_APPROVE", false),
-    /* Replies are the SECONDARY channel (own-profile deal/radar posts carry
+    /* Replies are the SECONDARY channel (own-profile deal posts carry
        the volume): a trending reply must be rare and excellent. Caps apply to
        unsolicited replies only — mentions and operator injections are exempt. */
     maxRepliesPerHour: envInt("MAX_REPLIES_PER_HOUR", 1),

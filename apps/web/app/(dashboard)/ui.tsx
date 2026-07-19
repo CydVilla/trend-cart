@@ -73,7 +73,7 @@ export function truncate(text: string, max = 120): string {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
-/** BotReply.factCheck / RadarPost.basis.factCheck payload, parsed defensively
+/** BotReply.factCheck payload, parsed defensively
  *  (it's a JSON column written by the worker — never trust the shape). */
 export type FactCheckVerdict = {
   accurate: boolean;

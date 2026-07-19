@@ -6,8 +6,10 @@ with manual approval or confidence-gated autonomy — replies with a clickable
 link to a tagged Amazon search for the thing being discussed.
 
 **Design principle: this is not a spam bot.** The bot's PRIMARY channel is
-its own profile (automated deal posts + the daily trending radar) — posts
-there annoy nobody. Replies to strangers are the secondary channel: severely
+its own profile (automated deal posts) — posts there annoy nobody. A daily
+**trending-banter** reply (a genuinely funny, no-link take on a popular
+trending-topic post, skipped when nothing clears the humor bar) draws people
+to that profile organically. Replies to strangers are the secondary channel: severely
 rate-limited (3/day, 1/hour, 90-min gap by default), held to high intent and
 link-confidence bars, safety-filtered, opt-out-respecting, and never linking
 anywhere the bot isn't confident the results are relevant. Mentions and
@@ -54,7 +56,7 @@ render as clickable anchor text via rich-text facets — never raw URLs.
 self-approves replies with intent ≥ 80 and link confidence ≥ 75 (or an
 operator directive); weaker replies still queue for manual approval.
 **Learning loop**: hourly it measures engagement (likes, replies, reposts,
-quotes) on everything it posted — replies, radar posts, deal alerts — plus
+quotes) on everything it posted — replies, banter, deal alerts — plus
 affiliate-link clicks and the text of what people reply back (audience
 feedback), keeping both live counts and an `EngagementSnapshot` time series;
 daily one small LLM call distills your approvals/edits/rejections plus those
@@ -130,9 +132,8 @@ real heartbeat, not env guesses; pending replies can be edited inline or
 regenerated with a direction), **Categories** (the discovery control panel —
 keywords are the Bluesky search queries), **Insights** (the live funnel plus
 the bot's daily read on it), and — on Overview — a worker status card with
-the **Autonomous** toggle and a **Pause bot** kill switch, the **Trending
-radar** approval card (the daily what's-hot draft), the **Operator guidance**
-box (standing instructions the bot obeys above anything it learned), and an
+the **Autonomous** toggle and a **Pause bot** kill switch, the **Operator
+guidance** box (standing instructions the bot obeys above anything it learned), and an
 editable "What the bot has learned" card once the reflection job has run.
 Posted replies can be rated 👍/👎 (with an optional note) on the Replies
 page — those ratings are the strongest signal the learning loop gets, and a
@@ -228,7 +229,7 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `VISION_ENABLED` / `COMMENTS_ENABLED` | Multimodal context: post image thumbnails as vision input; top replies as conversation context (default true) |
 | `MAX_CANDIDATE_AGE_HOURS` | Never ingest posts older than this (default 16) — timeliness beats stale volume |
 | `PLAYFUL_AUTO_APPROVE` | Joke-first replies self-post in autonomous mode (default false — they queue for approval) |
-| `RADAR_ENABLED` / `RADAR_AUTO_APPROVE` | Daily trending-radar post from the bot's own discovery data (on / approval-gated by default) |
+| `BANTER_ENABLED` / `BANTER_MIN_CONFIDENCE` | Daily humor reply on a trending post — organic growth, no link (on / bar 70 by default) |
 | `RESEND_API_KEY` / `NOTIFY_EMAIL_TO` | Email pings when approvals wait (both required; dark otherwise) |
 | `CLICK_TRACKING_ENABLED` / `PUBLIC_BASE_URL` | Per-post click counting via first-party `/r/<id>` redirects (default off) |
 | `FACTCHECK_ENABLED` | Web-search fact check before any reply auto-posts unreviewed; failures demote to manual approval (default true) |

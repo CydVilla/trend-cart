@@ -3,6 +3,35 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-19 — Trending banter replaces the radar
+
+### Added
+- **Trending banter** (`BANTER_ENABLED`, default on; `BANTER_PER_DAY=1`): the
+  new organic-growth surface. Once a day the bot finds a popular post under
+  Bluesky's trending topics (the trends API's own `category` field plus a
+  name blocklist keep politics/news/tragedy out), reads the post's TOP-LIKED
+  replies to sense what the room finds funny, and — only if a humor judge
+  clears `BANTER_MIN_CONFIDENCE` (70) — replies with its OWN funny take. No
+  link, no ad, no product mention: it exists to earn profile visits, and the
+  profile is where the deal feed lives. "Silence beats cringe" is designed
+  in: sincere posts and taken angles are declined (verified live — the judge
+  declined wholesome nature posts at confidence 0 and only cleared a genuine
+  angle), and a skipped day is a feature. Banter rides the normal BotReply
+  rails: exactly-once poster, opt-out pre-flight, author cooldowns (shared
+  with product replies, so nobody gets banter + a rec in the same week),
+  engagement + audience-reply tracking, 👍/👎 rating, 👎 takedown, and
+  reflection (tagged [banter]; humor lessons learned separately from
+  product-fit lessons). Its daily budget is separate from the trending-reply
+  caps.
+
+### Removed
+- **The trending radar** (RadarPost model, worker loop, dashboard card,
+  `RADAR_*` env vars): superseded — it was a once-a-day, LLM-written "what's
+  hot" post synthesized from the bot's own discovery data; the automated
+  Slickdeals channel now posts real trending deals with real reach, making
+  the radar a lesser duplicate. Posted radar posts remain on the profile and
+  in `EngagementSnapshot` history.
+
 ## 2026-07-18 — Automated deal channel, manual deal surfaces removed
 
 ### Changed

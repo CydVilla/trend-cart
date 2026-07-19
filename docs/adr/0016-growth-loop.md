@@ -46,3 +46,18 @@ passed the posting window auto-expire with an audit row.
   dead items.
 - Two accepted costs: one more LLM call/day, and (when tracking is on) a
   cold-start delay of ~5–10s on the first click after the web dyno sleeps.
+
+## Addendum (2026-07-19): radar removed, banter takes the growth role
+The radar was a once-a-day LLM-written "what's hot" post synthesized from the
+bot's own discovery data. Once the automated Slickdeals channel (ADR-0013
+addendum) began posting real trending deals to the profile daily, the radar
+became a lesser duplicate and was removed entirely (model, loop, dashboard
+card, env vars). The organic-growth role passes to **trending banter**
+(`apps/worker/src/banter.ts`): one humorous, link-free reply per day on a
+popular post under Bluesky's trending topics. The bot reads the post's
+top-liked replies to sense the room, then writes its own take; a humor judge
+must clear `BANTER_MIN_CONFIDENCE` or the day is skipped — silence beats
+cringe. Banter rows are ordinary BotReplys on BANTER-source Posts, so every
+reply rail (exactly-once poster, opt-outs, cooldowns, ratings, takedowns,
+reflection) applies unchanged; reflection sees them tagged [banter] and
+learns humor lessons separately from product-fit lessons.

@@ -1,15 +1,13 @@
 import Link from "next/link";
 import { prisma, ReplyStatus } from "@trendcart/db";
 import {
-  approveRadarPost,
-  rejectRadarPost,
   toggleAutonomous,
   toggleWorkerPaused,
   updateLessons,
   updateOperatorGuidance,
 } from "./actions";
 import { SubmitButton } from "./submit-button";
-import { Badge, FactCheckNote, formatDate, truncate } from "./ui";
+import { Badge, formatDate, truncate } from "./ui";
 
 export const dynamic = "force-dynamic";
 
@@ -175,83 +173,6 @@ type Stats = {
 };
 
 /**
- * Today's trending-radar draft awaiting approval, or the latest posted one.
- * Renders nothing while the feature is quiet (no draft, nothing posted yet).
- */
-async function RadarCard() {
-  const pending = await prisma.radarPost.findFirst({
-    where: { status: ReplyStatus.PENDING_APPROVAL },
-    orderBy: { createdAt: "desc" },
-  });
-  const lastPosted = pending
-    ? null
-    : await prisma.radarPost.findFirst({
-        where: { status: ReplyStatus.POSTED },
-        orderBy: { postedAt: "desc" },
-      });
-  if (!pending && !lastPosted) return null;
-
-  return (
-    <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-4 text-sm">
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-medium text-violet-900">Trending radar</span>
-        <span className="text-xs font-normal text-violet-700/70">
-          — daily what&apos;s-hot post from the bot&apos;s own discovery data
-        </span>
-        {pending ? (
-          <span className="ml-auto text-xs font-medium text-amber-700">
-            draft awaiting approval · {formatDate(pending.createdAt)}
-          </span>
-        ) : lastPosted?.postedAt ? (
-          <span className="ml-auto text-xs font-medium text-violet-700/70">
-            ✓ posted {formatDate(lastPosted.postedAt)}
-          </span>
-        ) : null}
-      </div>
-      <p className="whitespace-pre-wrap rounded border border-violet-200 bg-white px-3 py-2 text-zinc-700">
-        {(pending ?? lastPosted)?.content}
-      </p>
-      {/* When a self-approving draft was demoted here, show what the
-          pre-publication fact check objected to. */}
-      {pending && (
-        <FactCheckNote
-          raw={
-            typeof pending.basis === "object" && pending.basis !== null && !Array.isArray(pending.basis)
-              ? (pending.basis as Record<string, unknown>).factCheck
-              : null
-          }
-        />
-      )}
-      {pending ? (
-        <div className="mt-2 flex items-center gap-2">
-          <form action={approveRadarPost}>
-            <input type="hidden" name="id" value={pending.id} />
-            <SubmitButton
-              pendingLabel="Approving…"
-              className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700"
-            >
-              Approve &amp; post
-            </SubmitButton>
-          </form>
-          <form action={rejectRadarPost}>
-            <input type="hidden" name="id" value={pending.id} />
-            <SubmitButton
-              pendingLabel="Rejecting…"
-              className="rounded border border-zinc-300 bg-white px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
-            >
-              Reject
-            </SubmitButton>
-          </form>
-          <span className="text-xs text-violet-700/60">
-            Posts within ~1 min of approval · drafts expire after 24h
-          </span>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-/**
  * Recent one-shot apologies (negative replies the bot answered with a fixed
  * template). Quiet by design: renders nothing until one exists.
  */
@@ -369,7 +290,6 @@ export default async function HomePage() {
           </Link>
         ))}
       </div>
-      <RadarCard />
       <OperatorGuidanceCard />
       <LessonsCard />
       <ApologiesCard />

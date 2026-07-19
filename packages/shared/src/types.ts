@@ -112,27 +112,6 @@ export type GenerateReplyInput = {
   learnedGuidelines?: string | null;
 };
 
-/** One trending item feeding the daily radar post, from the bot's own
- *  discovery data (worth-replying evaluations over the last 24h). */
-export type RadarItem = {
-  /** Human label for the item — the search query or category name. */
-  label: string;
-  /** How many distinct worth-replying candidates mentioned it. */
-  mentions: number;
-  /** Highest engagement score among those candidates. */
-  topEngagement: number;
-  /** Short sample of one underlying post, UNTRUSTED. */
-  sample: string;
-};
-
-export type GenerateRadarInput = {
-  /** Trending items, strongest first. The FIRST is the headline: the link
-   *  (appended in code) is a tagged Amazon search for it. */
-  items: RadarItem[];
-  /** Word budget for the post body (anchor + #ad are composed in code). */
-  wordBudget: number;
-};
-
 /** One RSS deal headline judged against a suggestion source's topical lane. */
 export type JudgeSuggestionInput = {
   /** Raw RSS item title — UNTRUSTED external text. */
@@ -157,6 +136,5 @@ export type SuggestionVerdict = {
 export interface LlmClient {
   classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult>;
   generateReply(input: GenerateReplyInput): Promise<string>;
-  generateRadarPost(input: GenerateRadarInput): Promise<string>;
   judgeDealSuggestion(input: JudgeSuggestionInput): Promise<SuggestionVerdict>;
 }

@@ -3,8 +3,8 @@ import { config } from "./config.js";
 
 /**
  * Operator ping: an EMAIL to the operator when actionable items are sitting in
- * the approval queues (pending replies, radar drafts, pending deal posts).
- * Without it the queues are silent — a PLAYFUL reply or radar draft waits
+ * the approval queues (pending replies, pending deal posts).
+ * Without it the queues are silent — a PLAYFUL reply waits
  * invisibly until the dashboard is visited, then lapses.
  *
  * Delivery is Resend (https://resend.com) — Heroku can't send mail itself.
@@ -38,7 +38,7 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
 
     // What's actionable right now, and is any of it NEW since the last ping?
     const newSince = last ?? new Date(0);
-    const [pendingReplies, newReplies, playful, pendingRadar, newRadar, pendingDeals, newDeals] =
+    const [pendingReplies, newReplies, playful, pendingDeals, newDeals] =
       await Promise.all([
         prisma.botReply.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
         prisma.botReply.count({
@@ -50,10 +50,6 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
             post: { evaluations: { some: { suggestedReplyAngle: { startsWith: "PLAYFUL" } } } },
           },
         }),
-        prisma.radarPost.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
-        prisma.radarPost.count({
-          where: { status: ReplyStatus.PENDING_APPROVAL, createdAt: { gt: newSince } },
-        }),
         config.deals.enabled
           ? prisma.dealPost.count({ where: { status: "PENDING_APPROVAL" } })
           : Promise.resolve(0),
@@ -64,8 +60,8 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
           : Promise.resolve(0),
       ]);
 
-    const total = pendingReplies + pendingRadar + pendingDeals;
-    const fresh = newReplies + newRadar + newDeals;
+    const total = pendingReplies + pendingDeals;
+    const fresh = newReplies + newDeals;
     if (total === 0 || fresh === 0) return; // nothing waiting, or nothing new to say
 
     const parts: string[] = [];
@@ -74,7 +70,6 @@ export function createNotifier(stats: NotifyStats): { tick: () => Promise<void> 
         `${pendingReplies} repl${pendingReplies === 1 ? "y" : "ies"}${playful > 0 ? ` (${playful} playful)` : ""}`,
       );
     }
-    if (pendingRadar > 0) parts.push(`${pendingRadar} radar draft${pendingRadar === 1 ? "" : "s"}`);
     if (pendingDeals > 0) parts.push(`${pendingDeals} deal post${pendingDeals === 1 ? "" : "s"}`);
     const summary = parts.join(", ");
     const subject = `TrendCart: ${total} item${total === 1 ? "" : "s"} awaiting your approval`;

@@ -36,6 +36,9 @@ enum PostSource {
   MANUAL
   /// Someone tagged the bot asking for a recommendation (solicited)
   MENTION
+  /// Daily humor target: a popular post under Bluesky's trending topics the
+  /// bot replies to with a joke (no link, no ad) — the organic-growth surface
+  BANTER
 }
 
 /// A candidate Bluesky post captured from the Jetstream firehose.
@@ -116,9 +119,9 @@ model TrackedLink {
   id           String    @id @default(cuid())
   /// The final tagged Amazon URL the redirect 302s to.
   targetUrl    String
-  /// Surface that posted it, for per-surface analytics: reply | radar | deal.
+  /// Surface that posted it, for per-surface analytics: reply | deal.
   kind         String
-  /// Id of the source row (BotReply / RadarPost / DealPost) for drill-down.
+  /// Id of the source row (BotReply / DealPost) for drill-down.
   sourceId     String?
   clickCount   Int       @default(0)
   firstClickAt DateTime?
@@ -127,37 +130,6 @@ model TrackedLink {
 
   @@index([kind, createdAt])
   @@index([sourceId])
-}
-
-/// Daily "trending radar" standalone post for the bot's own profile,
-/// synthesized from the last 24h of discovery data (what's actually trending
-/// across the bot's categories). Approval-gated like marginal replies; the
-/// same ReplyStatus lifecycle drives the dashboard queue and the poster.
-model RadarPost {
-  id         String      @id @default(cuid())
-  /// Post body (link anchor + #ad are composed at posting time).
-  content    String
-  /// Tagged Amazon search URL for the radar's headline item.
-  linkUrl    String
-  /// Clickable anchor text the URL rides on as a facet.
-  linkAnchor String
-  /// Snapshot of the trending items that fed the LLM (audit trail).
-  basis      Json?
-  status     ReplyStatus @default(PENDING_APPROVAL)
-  skipReason String?
-  postUri    String?
-  approvedAt DateTime?
-  postedAt   DateTime?
-  /// Engagement on the posted radar post (same outcome sweep as replies).
-  likeCount        Int       @default(0)
-  repostCount      Int       @default(0)
-  replyCount       Int       @default(0)
-  quoteCount       Int       @default(0)
-  outcomeCheckedAt DateTime?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-
-  @@index([status, createdAt])
 }
 
 /// Discovery control: each category's keywords run as Bluesky search queries,
@@ -335,15 +307,15 @@ model WorkerHeartbeat {
 }
 
 /// Point-in-time engagement reading for one of the bot's own posted items.
-/// The live counts on BotReply/RadarPost/DealPost are overwritten in place;
+/// The live counts on BotReply/DealPost are overwritten in place;
 /// this table keeps the history, so engagement-over-time (did a reply land
 /// immediately or slow-burn?) is answerable — and it accumulates the
 /// time-series a future fine-tuning/reward dataset needs.
 model EngagementSnapshot {
   id       String @id @default(cuid())
-  /// Surface: reply | radar | deal (mirrors TrackedLink.kind).
+  /// Surface: reply | deal (mirrors TrackedLink.kind; legacy 'radar' rows remain).
   kind     String
-  /// Id of the source row (BotReply / RadarPost / DealPost).
+  /// Id of the source row (BotReply / DealPost).
   sourceId String
   likeCount   Int @default(0)
   repostCount Int @default(0)

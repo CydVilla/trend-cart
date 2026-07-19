@@ -82,19 +82,22 @@ async function checkReplyPolicy(post: Post, categorySlug: string | null): Promis
   }
 
   // Hourly/daily caps — UNSOLICITED (trending) replies only. Replies are the
-  // bot's secondary channel now: the deal/radar posts on its own profile do
+  // bot's secondary channel now: the deal posts on its own profile do
   // the volume, and a trending reply must be rare and excellent. Solicited
   // replies are exempt: a mention deserves its answer, and manual injection
   // is the operator's deliberate "post more" lever.
   if (!solicited) {
+    // Banter replies (the daily humor lane) run on their own budget — they
+    // must not starve the already-tiny trending-reply allowance.
+    const notBanter = { post: { source: { not: "BANTER" as const } } };
     const hourCount = await prisma.botReply.count({
-      where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 3_600_000) } },
+      where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 3_600_000) }, ...notBanter },
     });
     if (hourCount >= config.bot.maxRepliesPerHour) {
       return { action: "defer", reason: "hourly reply limit reached" };
     }
     const dayCount = await prisma.botReply.count({
-      where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 24 * 3_600_000) } },
+      where: { status: { in: ACTIVE_STATUSES }, createdAt: { gte: new Date(now - 24 * 3_600_000) }, ...notBanter },
     });
     if (dayCount >= config.bot.maxRepliesPerDay) {
       return { action: "defer", reason: "daily reply limit reached" };

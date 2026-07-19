@@ -31,28 +31,6 @@ export async function approveReply(formData: FormData): Promise<void> {
   revalidatePath("/replies");
 }
 
-// ── Trending radar ──────────────────────────────────────────
-
-export async function approveRadarPost(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  if (!id) return;
-  await prisma.radarPost.updateMany({
-    where: { id, status: ReplyStatus.PENDING_APPROVAL },
-    data: { status: ReplyStatus.APPROVED, approvedAt: new Date() },
-  });
-  revalidatePath("/");
-}
-
-export async function rejectRadarPost(formData: FormData): Promise<void> {
-  const id = str(formData, "id");
-  if (!id) return;
-  await prisma.radarPost.updateMany({
-    where: { id, status: { in: [ReplyStatus.PENDING_APPROVAL, ReplyStatus.APPROVED] } },
-    data: { status: ReplyStatus.SKIPPED, skipReason: "rejected via dashboard" },
-  });
-  revalidatePath("/");
-}
-
 /** Operator edits the pending reply text directly (anchor must survive). */
 export async function editReply(formData: FormData): Promise<void> {
   const id = str(formData, "id");

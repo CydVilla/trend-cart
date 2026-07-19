@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
 import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDealSuggester, newDealSuggestStats } from "./deals/suggest.js";
+import { createBanter, type BanterStats } from "./banter.js";
 import { blueskyBackoffSeconds } from "./bluesky-health.js";
 import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
@@ -15,7 +16,6 @@ import { createNotificationListener, type NotificationStats } from "./notificati
 import { createNotifier, type NotifyStats } from "./notify.js";
 import { outcomesTick, type OutcomeStats } from "./outcomes.js";
 import { createPoster, type PosterStats } from "./poster.js";
-import { createRadar, type RadarStats } from "./radar.js";
 import { reflectTick, type ReflectStats } from "./reflect.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
 import { generateDueReplies, type ReplyStats } from "./reply.js";
@@ -81,12 +81,12 @@ async function main(): Promise<void> {
   const notificationStats: NotificationStats = { optOuts: 0, requests: 0, apologies: 0, errors: 0 };
   const outcomeStats: OutcomeStats = { checked: 0, errors: 0 };
   const takedownStats: TakedownStats = { removed: 0, errors: 0 };
+  const banterStats: BanterStats = { posted: 0, skippedDays: 0, errors: 0 };
   const reflectStats: ReflectStats = { reflections: 0, errors: 0 };
   const insightsStats: InsightsStats = { reports: 0, errors: 0 };
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
   const dealDiscoverStats = newDealDiscoverStats();
   const dealSuggestStats = newDealSuggestStats();
-  const radarStats: RadarStats = { drafted: 0, posted: 0, errors: 0, disabled: false };
   const notifyStats: NotifyStats = { pings: 0, errors: 0, disabled: false };
   setCountersRef({
     discover: discoverStats,
@@ -97,12 +97,12 @@ async function main(): Promise<void> {
     notifications: notificationStats,
     outcomes: outcomeStats,
     takedown: takedownStats,
+    banter: banterStats,
     reflect: reflectStats,
     insights: insightsStats,
     dealPost: dealPostStats,
     dealDiscover: dealDiscoverStats,
     dealSuggest: dealSuggestStats,
-    radar: radarStats,
     notify: notifyStats,
   });
 
@@ -120,6 +120,7 @@ async function main(): Promise<void> {
   }
   const poster = createPoster(posterStats);
   const takedown = createTakedown(takedownStats);
+  const banter = createBanter(banterStats);
   const notificationListener = createNotificationListener(notificationStats);
   if (!notificationListener) {
     console.warn("  mentions/opt-out:  disabled (no Bluesky credentials)");
@@ -128,7 +129,6 @@ async function main(): Promise<void> {
   // Deal channel: ships dark behind DEALS_ENABLED. Two automated paths feed
   // one poster — RSS (no PA-API, price-free copy, DEAL_RSS_AUTOPOST) and
   // PA-API feed discovery (attested prices, once credentials exist).
-  const radar = createRadar(llm, radarStats);
   const notifier = createNotifier(notifyStats);
   if (!notifier) {
     console.log("  operator email:   disabled (set RESEND_API_KEY + NOTIFY_EMAIL_TO to enable)");
@@ -160,10 +160,10 @@ async function main(): Promise<void> {
     // 👎 takedowns: a down-rated posted reply is deleted from Bluesky within
     // ~2 min (the DB row stays — it keeps feeding the learning loop).
     ...(takedown ? [startLoop("takedown", 2 * 60_000, () => takedown.tick())] : []),
+    // Daily trending-banter reply (internal daily budget + retry latch make
+    // each tick cheap; 30-min cadence just bounds how late in the day it runs).
+    ...(banter ? [startLoop("banter", 30 * 60_000, () => banter.tick())] : []),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
-    // Radar: internal gating makes each tick a cheap findFirst; the 60s
-    // cadence just means dashboard approvals publish promptly.
-    ...(radar ? [startLoop("radar", 60_000, () => radar.tick())] : []),
     // Operator DM ping — rate-limited internally (one per N hours, max).
     ...(notifier ? [startLoop("notify", 10 * 60_000, () => notifier.tick())] : []),
     // Learning loop: hourly outcome measurement (free public API), daily
@@ -216,6 +216,7 @@ async function main(): Promise<void> {
         `posted=${posterStats.posted} requests=${notificationStats.requests} ` +
         `optOuts=${notificationStats.optOuts} apologies=${notificationStats.apologies} ` +
         `outcomes=${outcomeStats.checked} takedowns=${takedownStats.removed} ` +
+        `banter=${banterStats.posted} ` +
         `lessons=${reflectStats.reflections}` +
         (blueskyBackoffSeconds() > 0 ? ` | BLUESKY DOWN (retry ${blueskyBackoffSeconds()}s)` : "") +
         (config.deals.enabled
