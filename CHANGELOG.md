@@ -6,6 +6,14 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 ## 2026-07-19 — Trending banter replaces the radar
 
 ### Changed
+- **Retro games link the modern remaster, never the original copy** (operator
+  directive off the FFX-25th-anniversary case): Amazon results for legacy-
+  hardware copies (PS2/PS1/GameCube era) are used/marketplace listings at
+  collector prices. The classifier now hard-queries the current remaster/
+  remake/re-release ("final fantasy x x-2 hd remaster", not "final fantasy x
+  ps2"), says so in the reply angle, and scores original-hardware queries low;
+  franchise merch/soundtrack remains the fallback only when no modern edition
+  exists. Also seeded into live operator guidance.
 - **Generic links are dead** (operator directive: "it should never be posting
   generic or general items"). The category-name link fallback ("video games on
   Amazon") is removed from `chooseLink` — a reply now carries either an
