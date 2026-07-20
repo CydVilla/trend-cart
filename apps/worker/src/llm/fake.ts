@@ -100,7 +100,7 @@ export class FakeLlmClient implements LlmClient {
   async generateReply(input: GenerateReplyInput): Promise<string> {
     // Mirror the real client: return TEXT ONLY within the budget; the caller
     // composes the anchor/facet, so truncation can never chop the link off.
-    let text = `This is usually fixable with a few ${(input.categoryName ?? "practical").toLowerCase()} pieces. Solid options here:`;
+    let text = "This is usually fixable with a specific well-reviewed pick. Solid option here:";
     if (text.length > input.textBudget) {
       text = `${text.slice(0, Math.max(0, input.textBudget - 1)).trimEnd()}…`;
     }

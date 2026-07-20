@@ -5,6 +5,16 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 
 ## 2026-07-19 — Trending banter replaces the radar
 
+### Changed
+- **Generic links are dead** (operator directive: "it should never be posting
+  generic or general items"). The category-name link fallback ("video games on
+  Amazon") is removed from `chooseLink` — a reply now carries either an
+  operator link or a confident SPECIFIC-product search, or it doesn't exist.
+  The classifier no longer treats a category fit as grounds to reply
+  (categories are discovery taxonomy only), broad genre asks get ONE concrete
+  named pick instead of a genre link even for direct requests, and the rule is
+  seeded into the live operator guidance so it binds immediately.
+
 ### Added
 - **Trending banter** (`BANTER_ENABLED`, default on; `BANTER_PER_DAY=1`): the
   new organic-growth surface. Once a day the bot finds a popular post under

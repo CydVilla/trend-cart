@@ -189,11 +189,10 @@ function statusFor(
 }
 
 type ReplyLink = {
-  kind: "operator" | "search" | "category";
+  kind: "operator" | "search";
   url: string;
   /** Human-readable clickable text — the URL rides on it as a facet. */
   anchor: string;
-  categoryName: string | null;
 };
 
 /** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
@@ -224,14 +223,14 @@ export function truncateReplyToFit(body: string, anchor: string, maxLength: numb
 }
 
 /**
- * Pick the single link a reply will carry, by priority:
- *  1. an operator-provided link (the human already decided),
+ * Pick the single link a reply will carry:
+ *  1. an operator-provided link (the human already decided), or
  *  2. a tagged Amazon search for the SPECIFIC product the LLM identified —
- *     but only when its linkConfidence says the results will be relevant
- *     AND (with PA-API keys) Amazon confirms something is orderable,
- *  3. a tagged Amazon search for the category name (generic product-type
- *     queries reliably land well; niche titles are the risky ones).
- * No link the bot isn't confident in ships: null = permanent skip.
+ *     only when its linkConfidence says the results will be relevant
+ *     AND (with PA-API keys) Amazon confirms something is orderable.
+ * There is NO generic fallback: the operator rejected category-name links
+ * ("video games on Amazon") as worthless — a reply either points at a
+ * specific, buyable thing or it doesn't happen. null = permanent skip.
  */
 async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<ReplyLink | null> {
   // No per-reply "(affiliate link)" suffix: the account bio discloses the
@@ -241,7 +240,6 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
       kind: "operator",
       url: post.operatorLinkUrl,
       anchor: "this one on Amazon",
-      categoryName: null,
     };
   }
   if (!config.site.amazonAssociateTag) return null;
@@ -252,34 +250,19 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
     // linkConfidence is the model's belief the results will be relevant AND
     // orderable; with PA-API keys the orderable half stops being a belief —
     // a query with zero new/in-stock results (unreleased, sold out,
-    // collector-only) demotes to the category fallback instead of shipping
-    // a link to junk. "unknown" (no keys / API down) changes nothing.
+    // collector-only) kills the reply instead of shipping a link to junk.
+    // "unknown" (no keys / API down) changes nothing.
     const availability = await checkSearchAvailability(evaluation.recommendedSearchQuery);
     if (availability !== "unavailable") {
       return {
         kind: "search",
         url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
         anchor: searchAnchor(evaluation.recommendedSearchQuery),
-        categoryName: null,
       };
     }
     console.log(
-      `[reply] query "${evaluation.recommendedSearchQuery}" has no orderable Amazon results — falling back to category link`,
+      `[reply] query "${evaluation.recommendedSearchQuery}" has no orderable Amazon results — skipping`,
     );
-  }
-  if (evaluation.recommendedCategory) {
-    const category = await prisma.productCategory.findUnique({
-      where: { slug: evaluation.recommendedCategory },
-      select: { name: true },
-    });
-    if (category) {
-      return {
-        kind: "category",
-        url: amazonSearchUrl(category.name.toLowerCase(), config.site.amazonAssociateTag),
-        anchor: searchAnchor(category.name.toLowerCase()),
-        categoryName: category.name,
-      };
-    }
   }
   return null;
 }
@@ -426,14 +409,6 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
 
     const replyInput = {
       postText: evaluation.post.text,
-      categoryName: link.categoryName,
-      // A specific product was identified but failed the link-confidence gate
-      // (often unbuyable: pre-release, out-of-print) — the link is a generic
-      // category search, and the reply must not pretend otherwise. This is
-      // the fix for the operator's "don't link to products that don't exist
-      // yet" 👎: honest copy when the link can't deliver the named item.
-      linkIsCategoryFallback:
-        link.kind === "category" && Boolean(evaluation.recommendedSearchQuery),
       suggestedReplyAngle: evaluation.suggestedReplyAngle,
       textBudget: config.bot.replyMaxLength - reserved,
       isDirectRequest: evaluation.post.source === "MENTION",
@@ -551,7 +526,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         linkQuery:
           link.kind === "search"
             ? (evaluation.recommendedSearchQuery ?? link.anchor)
-            : (link.categoryName ?? link.anchor),
+            : link.anchor,
         suggestedReplyAngle: evaluation.suggestedReplyAngle,
       });
       stats.factChecked += 1;

@@ -81,13 +81,6 @@ export type ClassifyPostInput = {
 
 export type GenerateReplyInput = {
   postText: string;
-  /** Null for dynamic search recommendations with no curated category. */
-  categoryName: string | null;
-  /** True when a SPECIFIC product was identified but couldn't be confidently
-   *  linked (low linkConfidence — often unbuyable: pre-release, out-of-print),
-   *  so the link falls back to a GENERAL category search. The reply must not
-   *  imply the link leads to the specific item. */
-  linkIsCategoryFallback?: boolean;
   suggestedReplyAngle: string | null;
   /**
    * Character budget for the model's TEXT ONLY. The caller composes the final
