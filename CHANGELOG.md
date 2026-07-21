@@ -25,6 +25,16 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   worker moved too (guaranteed uptime, no more shared-quota exposure).
 
 ### Added
+- **Prompt caching on the classifier** (the pipeline's highest-volume LLM
+  call): the classify prompt is split at its stability boundary and a
+  `cache_control` breakpoint at the end of the category list caches the
+  system prompt + categories together (~4.5k tokens — each alone is under
+  Haiku's 4096-token cacheable minimum). Within an eval tick, every
+  candidate after the first reads that prefix at ~0.1× input price (writes
+  cost 1.25×, so any tick with ≥2 evals nets positive). The suggestion-gate
+  and reply prompts are far below the minimum, so they're left unmarked — a
+  marker there would be a silent no-op. No prompt content or ordering
+  changed.
 - **Slickdeals Popular Deals feed** seeded as three new RSS sources on the
   highest-conviction lanes (tech, video games, LEGO — per the July insights).
   All six prior sources read the same frontpage feed, so the 4 daily slots

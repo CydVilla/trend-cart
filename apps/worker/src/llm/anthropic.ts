@@ -181,7 +181,12 @@ function buildContent(
   ];
 }
 
-function buildClassifyPrompt(input: ClassifyPostInput): string {
+/** The classify prompt split at its stability boundary: `stable` (the category
+ *  list) is byte-identical across every candidate in a tick, so a cache
+ *  breakpoint at its end caches the system prompt + categories together —
+ *  each alone is under Haiku's 4096-token cacheable minimum, but combined
+ *  they clear it. `variable` is the per-candidate remainder. */
+function buildClassifyPrompt(input: ClassifyPostInput): { stable: string; variable: string } {
   const categoryList = input.categories
     .map(
       (c) =>
@@ -195,9 +200,10 @@ function buildClassifyPrompt(input: ClassifyPostInput): string {
       (profile.bio ? `\nAuthor bio: <untrusted_bio>${sanitizeUntrusted(profile.bio)}</untrusted_bio>` : "")
     : `Author: @${input.authorHandle ?? "unknown"} (profile unavailable)`;
 
-  return `Categories (recommendedCategorySlug must be one of these slugs, or null):
+  const stable = `Categories (recommendedCategorySlug must be one of these slugs, or null):
 ${categoryList}
-
+`;
+  const variable = `
 ${input.isDirectRequest ? "THIS IS A DIRECT REQUEST — the author tagged the bot.\n" : ""}Keyword pre-filter matched: ${input.keywordMatches.join(", ") || "none"}
 ${authorBlock}
 Post age: ${Math.round(input.postAgeMinutes)} minutes. Engagement so far: ${input.engagement.likeCount} likes, ${input.engagement.repostCount} reposts, ${input.engagement.replyCount} replies, ${input.engagement.quoteCount} quotes.
@@ -213,6 +219,7 @@ ${
 <untrusted_post>
 ${sanitizeUntrusted(input.postText)}
 </untrusted_post>`;
+  return { stable, variable };
 }
 
 function buildReplyPrompt(input: GenerateReplyInput, wordBudget: number): string {
@@ -255,6 +262,15 @@ export class AnthropicLlmClient implements LlmClient {
   }
 
   async classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult> {
+    const { stable, variable } = buildClassifyPrompt(input);
+    const rest = buildContent(variable, input.images);
+    const content: Anthropic.ContentBlockParam[] = [
+      // Breakpoint at the end of the stable prefix: caches system prompt +
+      // category list (~4.5k tokens, above Haiku's 4096 minimum). Within a
+      // tick every candidate after the first reads this at ~0.1× price.
+      { type: "text", text: stable, cache_control: { type: "ephemeral" } },
+      ...(typeof rest === "string" ? [{ type: "text" as const, text: rest }] : rest),
+    ];
     const response = await this.client.messages.parse({
       model: this.model,
       max_tokens: 1024,
@@ -266,7 +282,7 @@ export class AnthropicLlmClient implements LlmClient {
         ? { effort: "low", format: zodOutputFormat(EvaluationSchema) }
         : { format: zodOutputFormat(EvaluationSchema) },
       system: CLASSIFY_SYSTEM,
-      messages: [{ role: "user", content: buildContent(buildClassifyPrompt(input), input.images) }],
+      messages: [{ role: "user", content }],
     });
     if (response.stop_reason === "refusal" || !response.parsed_output) {
       throw new Error(`classification produced no parseable output (stop: ${response.stop_reason})`);
