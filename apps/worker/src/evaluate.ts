@@ -408,12 +408,17 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     }
 
     // Per-author fairness: one prolific account can't monopolize the budget.
-    const authorEvals = await prisma.candidateEvaluation.count({
-      where: {
-        createdAt: { gte: new Date(now - 24 * 3_600_000) },
-        post: { authorDid: post.authorDid },
-      },
-    });
+    // Solicited posts are exempt — an operator injection or a mention must
+    // ALWAYS evaluate, whatever the author's trending posts already spent.
+    const authorEvals =
+      post.source === "MANUAL" || post.source === "MENTION"
+        ? 0
+        : await prisma.candidateEvaluation.count({
+            where: {
+              createdAt: { gte: new Date(now - 24 * 3_600_000) },
+              post: { authorDid: post.authorDid },
+            },
+          });
     if (authorEvals >= MAX_EVALS_PER_AUTHOR_PER_DAY) {
       await prisma.$transaction([
         prisma.candidateEvaluation.create({
