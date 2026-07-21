@@ -3,6 +3,28 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-21 — Ranked, sale-verified autonomous deals
+
+### Added
+- RSS deals now enter a cross-source high-intent queue scored by purchase
+  intent, exact Amazon-ASIN match strength, freshness, and eight gaming-led
+  conversion lanes. Posting slots are re-ranked after every winner so one
+  topic cannot monopolize the profile.
+- Deal-link clicks and profile-post engagement now produce a bounded,
+  decaying lane boost. Successful topics earn more future slots; same-day
+  diversity and no-click penalties keep exploration alive.
+- The public `/about` funnel now offers an action-oriented Bluesky request
+  template, concrete examples, latest-deals CTA, and plain-language bot and
+  affiliate disclosure. The Deals dashboard surfaces the staged queue,
+  assigned lane/score, sale-verification time, and per-post clicks.
+
+### Changed
+- Autonomous RSS posting fails closed unless the feed has a fresh timestamp,
+  an unambiguous exact Amazon product link, and a recent web-search verdict
+  explicitly confirming that exact item is currently discounted on Amazon.
+  Copy remains price-free until PA-API is available; a third-party price or
+  percentage can never leak into the post.
+
 ## 2026-07-21 — Solicited-path gate fixes
 
 ### Fixed

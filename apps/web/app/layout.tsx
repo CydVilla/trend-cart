@@ -3,7 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: { default: "TrendCart", template: "%s · TrendCart" },
-  description: "Practical product picks for problems people actually have.",
+  description:
+    "Ask a disclosed Bluesky bot for one relevant Amazon recommendation by product, budget, and use.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

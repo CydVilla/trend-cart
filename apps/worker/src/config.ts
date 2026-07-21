@@ -123,11 +123,10 @@ export const config = {
 
   /* Click tracking: route posted affiliate links through a first-party
      /r/<id> redirect so clicks can be counted (the one revenue-proximate
-     signal Amazon never gives per-post). OFF by default — enabling puts the
-     web dyno in front of every link, so it's the operator's explicit call;
-     off means links go straight to Amazon exactly as before. */
+     signal Amazon never gives per-post). ON by default when PUBLIC_BASE_URL
+     is present; explicitly disable to send links straight to Amazon. */
   clickTracking: {
-    enabled: envBool("CLICK_TRACKING_ENABLED", false),
+    enabled: envBool("CLICK_TRACKING_ENABLED", true),
     /* Public origin of the web app (no trailing slash) where /r/<id> lives,
        e.g. https://trend-cart-xxxx.herokuapp.com. Empty disables tracking
        regardless of the flag — a link with no reachable redirect is worse
@@ -279,11 +278,25 @@ export const config = {
       /* Newest-first cap per fetch — bounds first-run floods. */
       maxItemsPerFetch: envInt("DEAL_SUGGEST_MAX_ITEMS_PER_FETCH", 30),
       /* Suggestion audit rows older than this auto-expire (deals rot fast). */
-      expireHours: envInt("DEAL_SUGGEST_EXPIRE_HOURS", 48),
+      expireHours: envInt("DEAL_SUGGEST_EXPIRE_HOURS", 6),
       /* Topical-gate floor: below this confidence an item is off-lane. */
       minTopicConfidence: envInt("DEAL_SUGGEST_MIN_TOPIC_CONFIDENCE", 70),
       /* LLM lane judgments per tick across all sources (cost bound). */
       maxLlmPerTick: envInt("DEAL_SUGGEST_MAX_LLM_PER_TICK", 20),
+      /* Stage first, then let candidates across sources compete before the
+         best one spends a posting slot or a web-search fact check. */
+      stagingMinutes: envInt("DEAL_RSS_STAGING_MINUTES", 5),
+      candidatePoolSize: envInt("DEAL_RSS_CANDIDATE_POOL_SIZE", 100),
+      minCandidateScore: envInt("DEAL_RSS_MIN_CANDIDATE_SCORE", 65),
+      /* Exact-ASIN matching floor before a candidate can enter the queue. */
+      minAmazonMatchConfidence: envInt("DEAL_RSS_MIN_AMAZON_MATCH_CONFIDENCE", 80),
+      /* Expensive strict sale-verification calls attempted per worker tick. */
+      maxFactChecksPerTick: envInt("DEAL_RSS_MAX_FACTCHECKS_PER_TICK", 3),
+      /* External evidence must explicitly confirm a current Amazon sale
+         inside this window. The poster then enforces a shorter verification
+         TTL so a staged deal cannot publish much later. */
+      maxSaleEvidenceAgeHours: envInt("DEAL_RSS_SALE_EVIDENCE_MAX_AGE_HOURS", 6),
+      verificationTtlMinutes: envInt("DEAL_RSS_VERIFICATION_TTL_MINUTES", 60),
     },
   },
 

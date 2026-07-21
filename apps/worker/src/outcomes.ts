@@ -20,6 +20,9 @@ import { config } from "./config.js";
 const GETPOSTS_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts";
 const GETTHREAD_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread";
 const BATCH = 25; // getPosts hard limit
+/** The autonomous profile channel needs timely feedback for lane ranking;
+ * reserve a small part of every batch so a reply backlog cannot starve it. */
+const DEAL_RESERVED = 5;
 const RECHECK_MS = 6 * 3_600_000;
 const WINDOW_MS = 14 * 24 * 3_600_000;
 /** Thread fetches per tick (one per reply that has new replies) — cost bound. */
@@ -99,10 +102,16 @@ function dueWhere(now: Date): {
   };
 }
 
-/** Replies first (the learning loop's primary signal), then the bot's own
- *  deal posts fill whatever batch room remains. */
+/** Replies remain the primary signal, while up to DEAL_RESERVED profile deals
+ * are guaranteed room so click/engagement-driven lane promotion stays fresh. */
 async function gatherDue(now: Date): Promise<OutcomeTarget[]> {
   const targets: OutcomeTarget[] = [];
+  const deals = await prisma.dealPost.findMany({
+    where: { status: DealPostStatus.POSTED, postUri: { not: null }, ...dueWhere(now) },
+    select: { id: true, postUri: true },
+    orderBy: { postedAt: "desc" },
+    take: DEAL_RESERVED,
+  });
   const replies = await prisma.botReply.findMany({
     where: {
       status: ReplyStatus.POSTED,
@@ -113,7 +122,7 @@ async function gatherDue(now: Date): Promise<OutcomeTarget[]> {
     },
     select: { id: true, replyUri: true, replyReplyCount: true, receivedReplies: true },
     orderBy: { postedAt: "desc" },
-    take: BATCH,
+    take: BATCH - deals.length,
   });
   for (const r of replies) {
     targets.push({
@@ -125,15 +134,7 @@ async function gatherDue(now: Date): Promise<OutcomeTarget[]> {
     });
   }
 
-  if (targets.length < BATCH) {
-    const deals = await prisma.dealPost.findMany({
-      where: { status: DealPostStatus.POSTED, postUri: { not: null }, ...dueWhere(now) },
-      select: { id: true, postUri: true },
-      orderBy: { postedAt: "desc" },
-      take: BATCH - targets.length,
-    });
-    for (const d of deals) targets.push({ id: d.id, uri: d.postUri as string, kind: "deal" });
-  }
+  for (const d of deals) targets.push({ id: d.id, uri: d.postUri as string, kind: "deal" });
   return targets;
 }
 

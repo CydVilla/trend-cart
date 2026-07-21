@@ -21,6 +21,9 @@ export type RssItem = {
   /** Raw content:encoded HTML (entity-decoded) — Slickdeals puts the store
    *  link attributes (incl. the ASIN) here, not in the description. */
   content: string;
+  /** Feed publication time when supplied and parseable. Ranking and strict
+   * sale verification treat a missing timestamp conservatively. */
+  publishedAt: Date | null;
 };
 
 /** Minimal HTML/XML entity decode for the fields we read. &amp; goes LAST so
@@ -68,13 +71,24 @@ export function parseRssItems(xml: string): RssItem[] {
     };
     const description = rawHtml("description");
     const content = rawHtml("content:encoded");
+    const publishedRaw = field(block, "pubDate") || field(block, "dc:date");
+    const parsedPublished = publishedRaw ? new Date(publishedRaw) : null;
+    const publishedAt =
+      parsedPublished && !Number.isNaN(parsedPublished.getTime()) ? parsedPublished : null;
     if (!title || !guid) continue; // no stable identity → unusable
-    items.push({ title, link, guid, description, content });
+    items.push({ title, link, guid, description, content, publishedAt });
   }
   return items;
 }
 
 export type AmazonRef = { asin: string; marketplace: string };
+
+export type AmazonMatch = AmazonRef & {
+  /** Confidence that this exact ASIN is the product named by the RSS item,
+   * not an unrelated Amazon link embedded elsewhere in the feed markup. */
+  matchConfidence: number;
+  evidence: "direct-item-link" | "embedded-target" | "amazon-product-attribute" | "direct-body-link";
+};
 
 const URL_RE = /https?:\/\/[^\s"'<>\\]+/gi;
 
@@ -95,6 +109,141 @@ function directAmazonRef(candidate: string): AmazonRef | null {
   }
 }
 
+const TITLE_STOP_WORDS = new Set([
+  "amazon",
+  "deal",
+  "sale",
+  "with",
+  "from",
+  "only",
+  "free",
+  "shipping",
+  "save",
+  "price",
+  "the",
+  "and",
+  "for",
+]);
+
+function meaningfulTokens(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/\$\s*[\d,.]+|\b\d{1,3}%\s*off\b/g, " ")
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 3 && !TITLE_STOP_WORDS.has(token)),
+  );
+}
+
+function slugOverlap(candidate: string, title: string): number {
+  try {
+    const url = new URL(candidate);
+    const slug = url.pathname.split(/\/(?:dp|gp\/product)\//i)[0] ?? "";
+    const titleTokens = meaningfulTokens(title);
+    let overlap = 0;
+    for (const token of meaningfulTokens(slug)) {
+      if (titleTokens.has(token)) overlap += 1;
+    }
+    return overlap;
+  } catch {
+    return 0;
+  }
+}
+
+type MatchCandidate = AmazonMatch & { score: number };
+
+function urlCandidate(
+  candidate: string,
+  title: string,
+  baseScore: number,
+  evidence: AmazonMatch["evidence"],
+): MatchCandidate | null {
+  const ref = directAmazonRef(candidate);
+  if (!ref) return null;
+  const score = Math.min(100, baseScore + Math.min(12, slugOverlap(candidate, title) * 4));
+  return { ...ref, matchConfidence: score, evidence, score };
+}
+
+function attr(tag: string, name: string): string | null {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "i"));
+  return match?.[2] ?? null;
+}
+
+/**
+ * Resolve the exact Amazon product an RSS item names. Unlike the legacy
+ * first-link-wins extractor, this collects every candidate, ranks evidence,
+ * deduplicates by ASIN, and rejects an ambiguous near-tie. That prevents an
+ * unrelated recommendation/ad link in feed HTML from becoming our post.
+ */
+export function matchAmazonProduct(item: RssItem): AmazonMatch | null {
+  const candidates: MatchCandidate[] = [];
+  const fields: Array<{ text: string | null; directBase: number; embeddedBase: number; body: boolean }> = [
+    { text: item.link, directBase: 96, embeddedBase: 92, body: false },
+    { text: item.description, directBase: 80, embeddedBase: 86, body: true },
+    { text: item.content, directBase: 82, embeddedBase: 88, body: true },
+  ];
+
+  for (const field of fields) {
+    if (!field.text) continue;
+    for (const match of field.text.matchAll(URL_RE)) {
+      const candidate = match[0]!;
+      const direct = urlCandidate(
+        candidate,
+        item.title,
+        field.directBase,
+        field.body ? "direct-body-link" : "direct-item-link",
+      );
+      if (direct) candidates.push(direct);
+
+      let redirect: URL;
+      try {
+        redirect = new URL(candidate);
+      } catch {
+        continue;
+      }
+      for (const value of redirect.searchParams.values()) {
+        if (!/^https?:\/\//i.test(value)) continue;
+        const embedded = urlCandidate(value, item.title, field.embeddedBase, "embedded-target");
+        if (embedded) candidates.push(embedded);
+      }
+    }
+
+    // Attribute order and quote style vary by feed renderer. Parse the full
+    // anchor first, then read named attributes independently.
+    for (const anchor of field.text.matchAll(/<a\b[^>]*>/gi)) {
+      const tag = anchor[0]!;
+      const asin = attr(tag, "data-aps-asin")?.toUpperCase() ?? null;
+      const store = (attr(tag, "data-store-slug") ?? "").toLowerCase();
+      const exit = (attr(tag, "data-product-exitwebsite") ?? "").toLowerCase();
+      if (!asin || !/^[A-Z0-9]{10}$/.test(asin)) continue;
+      if (store !== "amazon" && !/(^|\.)amazon\.com$/.test(exit)) continue;
+      candidates.push({
+        asin,
+        marketplace: "www.amazon.com",
+        matchConfidence: 90,
+        evidence: "amazon-product-attribute",
+        score: 90,
+      });
+    }
+  }
+
+  const byAsin = new Map<string, MatchCandidate>();
+  for (const candidate of candidates) {
+    const prior = byAsin.get(candidate.asin);
+    if (!prior || candidate.score > prior.score) byAsin.set(candidate.asin, candidate);
+  }
+  const ranked = [...byAsin.values()].sort((a, b) => b.score - a.score);
+  if (ranked.length === 0) return null;
+  if (ranked.length > 1 && ranked[0]!.score - ranked[1]!.score <= 4) return null;
+  const best = ranked[0]!;
+  return {
+    asin: best.asin,
+    marketplace: best.marketplace,
+    matchConfidence: best.matchConfidence,
+    evidence: best.evidence,
+  };
+}
+
 /**
  * Find the first Amazon product reference in the given texts (item link
  * first, then description HTML). Handles both direct product URLs and deal-
@@ -103,40 +252,15 @@ function directAmazonRef(candidate: string): AmazonRef | null {
  * Shortener links (amzn.to / a.co) stay unresolvable offline → null.
  */
 export function extractAmazonRef(...texts: Array<string | null>): AmazonRef | null {
-  for (const text of texts) {
-    if (!text) continue;
-    for (const match of text.matchAll(URL_RE)) {
-      const candidate = match[0]!;
-      const direct = directAmazonRef(candidate);
-      if (direct) return direct;
-      // Redirect form: scan every query-param value for an embedded URL.
-      let url: URL;
-      try {
-        url = new URL(candidate);
-      } catch {
-        continue;
-      }
-      for (const value of url.searchParams.values()) {
-        if (!/^https?:\/\//i.test(value)) continue;
-        const embedded = directAmazonRef(value);
-        if (embedded) return embedded;
-      }
-    }
-    // Slickdeals form: outbound links are opaque /click redirects, but the
-    // anchor tag carries Amazon Product Services attributes — the ASIN in
-    // data-aps-asin, with the store identified alongside. Only trust an ASIN
-    // whose own tag says the store is Amazon.
-    for (const anchor of text.matchAll(/<a\s[^>]*data-aps-asin="([A-Z0-9]{10})"[^>]*>/gi)) {
-      const tag = anchor[0]!;
-      if (
-        /data-store-slug="amazon"/i.test(tag) ||
-        /data-product-exitwebsite="amazon\.com"/i.test(tag)
-      ) {
-        return { asin: anchor[1]!.toUpperCase(), marketplace: "www.amazon.com" };
-      }
-    }
-  }
-  return null;
+  const match = matchAmazonProduct({
+    title: "",
+    link: texts[0] ?? null,
+    guid: "legacy-extractor",
+    description: texts[1] ?? "",
+    content: texts.slice(2).filter(Boolean).join(" "),
+    publishedAt: null,
+  });
+  return match ? { asin: match.asin, marketplace: match.marketplace } : null;
 }
 
 const PRICE_RE = /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/;
@@ -158,4 +282,23 @@ export function extractPriceHintCents(...texts: Array<string | null>): number | 
     }
   }
   return null;
+}
+
+/** Remove monetary and discount claims copied from an external feed before
+ * composing no-PA-API autonomous text. Product numbers/capacities survive;
+ * only recognizable price/percentage language is removed. */
+export function stripUnverifiedPriceClaims(text: string): string {
+  return text
+    .replace(/(?:US\$|USD\s*|\$)\s*[0-9][\d,.]*/gi, " ")
+    .replace(/\b[0-9][\d,.]*\s*(?:dollars?|usd)\b/gi, " ")
+    .replace(
+      /\b(?:save\s+)?\d{1,3}\s*(?:%|percent)\s*(?:off|discount|coupon|savings?)?\b/gi,
+      " ",
+    )
+    .replace(/\b(?:half|one[ -]third|two[ -]thirds?)\s+off\b/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,;:])/g, "$1")
+    .replace(/\b(?:with|plus|for|at|now|only|save)\s*$/i, "")
+    .replace(/[\s\-–—:,+@&]+$/g, "")
+    .trim();
 }

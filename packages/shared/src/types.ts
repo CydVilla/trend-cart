@@ -105,6 +105,20 @@ export type GenerateReplyInput = {
   learnedGuidelines?: string | null;
 };
 
+/** Revenue-oriented lane assigned to an RSS deal candidate. `other` is never
+ * eligible for autonomous promotion; it exists so uncertain classifications
+ * fail closed without inventing a fit. */
+export type HighConversionLane =
+  | "nintendo-switch"
+  | "playstation-xbox"
+  | "pc-gaming"
+  | "storage-ssd"
+  | "controllers-parts"
+  | "collectibles-fandom"
+  | "recent-games"
+  | "giftable-under-75"
+  | "other";
+
 /** One RSS deal headline judged against a suggestion source's topical lane. */
 export type JudgeSuggestionInput = {
   /** Raw RSS item title — UNTRUSTED external text. */
@@ -118,6 +132,11 @@ export type SuggestionVerdict = {
   matches: boolean;
   /** 0–100: how confidently the item fits the lane. */
   confidence: number;
+  /** The single best revenue-oriented lane. `other` is not postable. */
+  highConversionLane: HighConversionLane;
+  /** 0–100: likelihood that a deal-account follower would click with real
+   * purchase intent, independent of the reported discount amount. */
+  purchaseIntentScore: number;
   /** One short line for the audit trail. */
   reason: string;
 };

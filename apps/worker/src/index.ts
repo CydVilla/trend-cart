@@ -223,7 +223,8 @@ async function main(): Promise<void> {
           ? ` | dealPosted=${dealPostStats.posted} ` +
             `feedRuns=${dealDiscoverStats.feeds} feedFound=${dealDiscoverStats.found} ` +
             `feedQueued=${dealDiscoverStats.queued} rssItems=${dealSuggestStats.items} ` +
-            `rssSuggested=${dealSuggestStats.suggested}`
+            `rssCandidates=${dealSuggestStats.candidates} ` +
+            `rssPromoted=${dealSuggestStats.promoted} rssSuggested=${dealSuggestStats.suggested}`
           : ""),
     );
   }, STATS_LOG_MS);

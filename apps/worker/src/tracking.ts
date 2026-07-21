@@ -21,6 +21,19 @@ export async function createTrackedLink(
     return { url: targetUrl, id: null };
   }
   try {
+    // Deal posts already exist when their publisher mints the redirect. Reuse
+    // the same row across transient Bluesky retries so one post has one click
+    // counter instead of a trail of abandoned trackers.
+    if (sourceId) {
+      const existing = await prisma.trackedLink.findFirst({
+        where: { targetUrl, kind, sourceId },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (existing) {
+        return { url: `${config.clickTracking.baseUrl}/r/${existing.id}`, id: existing.id };
+      }
+    }
     const link = await prisma.trackedLink.create({
       data: { targetUrl, kind, sourceId: sourceId ?? null },
       select: { id: true },

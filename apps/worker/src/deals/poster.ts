@@ -1,9 +1,17 @@
 import { AtpAgent, type AppBskyRichtextFacet } from "@atproto/api";
 import { prisma, DealPostStatus, DealSource, type DealPost, type TrackedListing } from "@trendcart/db";
-import { composeDealPost, DEAL_ANCHOR, formatMoney, isAmazonHost, validateDealText } from "@trendcart/shared";
+import {
+  composeDealPost,
+  DEAL_ANCHOR,
+  extractAsin,
+  formatMoney,
+  isAmazonHost,
+  validateDealText,
+} from "@trendcart/shared";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "../bluesky-health.js";
 import { config } from "../config.js";
 import { isPaused } from "../heartbeat.js";
+import { createTrackedLink } from "../tracking.js";
 
 const MAX_LOGIN_FAILURES = 3;
 const MAX_POST_ATTEMPTS = 3;
@@ -137,7 +145,11 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     // are rate-limited here, so a burst of fires can't flood the profile.
     if (candidate.source !== DealSource.MANUAL) {
       const lastPosted = await prisma.dealPost.findFirst({
-        where: { status: DealPostStatus.POSTED, postedAt: { not: null } },
+        where: {
+          source: { not: DealSource.MANUAL },
+          status: DealPostStatus.POSTED,
+          postedAt: { not: null },
+        },
         orderBy: { postedAt: "desc" },
         select: { postedAt: true },
       });
@@ -149,6 +161,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       }
       const postedToday = await prisma.dealPost.count({
         where: {
+          source: { not: DealSource.MANUAL },
           status: DealPostStatus.POSTED,
           postedAt: { gte: new Date(Date.now() - 24 * 3_600_000) },
         },
@@ -174,14 +187,37 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     // no priced embed may ever render (salePriceCents is an unattested hint).
     const priceFree =
       (deal.source === DealSource.DISCOVERED && !deal.feedId) || deal.salePriceCents <= 0;
+    const rssAutonomous = deal.source === DealSource.DISCOVERED && !deal.feedId;
 
     // Pre-flight: paused listing, or a price snapshot too stale to advertise.
     if (!listing.isActive) {
       await terminal(deal.id, DealPostStatus.SKIPPED, "listing was deactivated before posting");
       return;
     }
+    if (
+      rssAutonomous &&
+      listing.lastPostedAt &&
+      Date.now() - listing.lastPostedAt.getTime() <
+        config.deals.perListingCooldownHours * 3_600_000
+    ) {
+      await terminal(deal.id, DealPostStatus.SKIPPED, "listing cooldown became active before posting");
+      return;
+    }
     if (!priceFree && Date.now() - deal.priceAsOf.getTime() > config.deals.maxPriceAgeHours * 3_600_000) {
       await terminal(deal.id, DealPostStatus.SKIPPED, "price snapshot too stale to post");
+      return;
+    }
+    if (
+      rssAutonomous &&
+      (!deal.saleVerifiedAt ||
+        Date.now() - deal.saleVerifiedAt.getTime() >
+          config.deals.suggestions.verificationTtlMinutes * 60_000)
+    ) {
+      await terminal(
+        deal.id,
+        DealPostStatus.SKIPPED,
+        "strict Amazon sale verification missing or stale before posting",
+      );
       return;
     }
 
@@ -217,6 +253,10 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         await terminal(deal.id, DealPostStatus.FAILED, "link is not an Amazon URL");
         return;
       }
+      if (rssAutonomous && extractAsin(deal.linkUrl) !== listing.asin) {
+        await terminal(deal.id, DealPostStatus.FAILED, "affiliate link ASIN does not match listing");
+        return;
+      }
     } catch {
       await terminal(deal.id, DealPostStatus.FAILED, "invalid link URL");
       return;
@@ -232,7 +272,8 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     }
 
     try {
-      const facets = buildFacets(text, deal.linkUrl, anchor);
+      const tracked = await createTrackedLink(deal.linkUrl, "deal", deal.id);
+      const facets = buildFacets(text, tracked.url, anchor);
       const thumb = priceFree ? null : await uploadThumb(activeAgent, listing.imageUrl);
       const wasClause =
         deal.wasPriceCents && deal.wasPriceCents > deal.salePriceCents

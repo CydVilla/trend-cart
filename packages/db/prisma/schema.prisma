@@ -469,6 +469,19 @@ model DealPost {
   /// The deal feed that discovered this deal (DISCOVERED source only).
   feedId           String?
   feed             DealFeed? @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  /// RSS candidate that produced this post. Unique relation is the DB-level
+  /// exactly-once guard if more than one worker tries to promote it.
+  suggestionId     String? @unique
+  suggestion       DealSuggestion? @relation(fields: [suggestionId], references: [id], onDelete: SetNull)
+  /// Stable high-conversion lane for RSS deals. Null for manual/watchlist and
+  /// legacy PA-API rows. Kept directly on the post so deleting an RSS source
+  /// cannot erase the click/outcome attribution history.
+  laneKey           String?
+  /// Queue score at promotion time (0–125 after bounded performance boost).
+  candidateScore    Int?
+  /// Strict exact-ASIN/current-Amazon-sale verification time for autonomous
+  /// price-free RSS posts. The poster refuses stale/missing verification.
+  saleVerifiedAt    DateTime?
   /// AT URI once POSTED.
   postUri          String?
   skipReason       String?
@@ -486,24 +499,25 @@ model DealPost {
 
   @@index([listingId])
   @@index([status, createdAt])
+  @@index([laneKey, postedAt])
   @@index([createdAt])
 }
 
-/// Lifecycle of an RSS-sourced deal suggestion. NEW = awaiting the operator;
-/// QUEUED = operator confirmed the price and a DealPost was queued; DISMISSED
-/// = operator passed; EXPIRED = nobody acted before the deal went stale.
+/// Lifecycle of an RSS-sourced deal candidate. NEW = staged in the ranked
+/// high-intent queue; VERIFYING = atomically claimed by the strict sale check;
+/// QUEUED = verification passed and a DealPost was minted; DISMISSED = a gate
+/// failed; EXPIRED = it aged out before promotion.
 enum SuggestionStatus {
   NEW
+  VERIFYING
   QUEUED
   DISMISSED
   EXPIRED
 }
 
-/// One RSS feed of deals (e.g. a Slickdeals feed) the worker polls for
-/// Amazon items, plus the topical lane it should keep ("tech & electronics",
-/// "pop-culture apparel"). Bridges the no-PA-API gap: suggestions carry a
-/// price HINT only — the operator confirms the real price before anything
-/// posts, so no third-party price is ever advertised unattested.
+/// One RSS feed of deals (e.g. a Slickdeals feed) the worker polls for Amazon
+/// items. Suggestions carry a price HINT for ranking only; no third-party
+/// price is ever advertised without PA-API.
 model DealSuggestionSource {
   id   String @id @default(cuid())
   /// Display name, unique so seeding stays idempotent.
@@ -537,8 +551,9 @@ model DealSuggestionSource {
   @@index([isActive, lastFetchedAt])
 }
 
-/// One Amazon item found in a deal RSS feed, waiting for the operator to
-/// confirm the price and queue a post (or dismiss it). Never posts by itself.
+/// One Amazon item found in a deal RSS feed. NEW rows form the ranked,
+/// high-intent staging queue; only the best candidates receive strict sale
+/// verification and become autonomous DealPosts.
 model DealSuggestion {
   id       String               @id @default(cuid())
   sourceId String
@@ -552,14 +567,19 @@ model DealSuggestion {
   /// Canonical, tag-FREE product URL rebuilt from the ASIN — the source's
   /// affiliate/redirect params never survive.
   productUrl String
-  /// Price parsed from the deal headline, integer cents — a HINT the operator
-  /// must confirm; never advertised as-is.
+  /// Price parsed from the deal headline, integer cents — an unverified HINT
+  /// used only for candidate eligibility/ranking; never advertised.
   hintPriceCents Int?
-  /// The deal thread/page for the operator to double-check.
+  /// The deal thread/page retained for strict verification and audit.
   sourceUrl String?
   status    SuggestionStatus @default(NEW)
-  /// Topical-gate audit: verdict + confidence + model (or "keywords-only").
+  /// Claim timestamp while the expensive external sale verifier runs. Stale
+  /// claims are released automatically after a worker crash.
+  verificationStartedAt DateTime?
+  /// Candidate scoring, topical gate, promotion, and evidence audit payload.
   gateVerdict Json?
+
+  dealPost DealPost?
 
   createdAt DateTime @default(now())
 

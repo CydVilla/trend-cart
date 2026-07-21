@@ -175,17 +175,22 @@ Two automated paths feed the same exactly-once poster:
   per-ASIN cooldown/dedup row keeps any item from reposting within 7 days —
   pause one in "Discovered by feeds" to ban it permanently.
 - **RSS deal channel** (ADR-0013, **no PA-API needed, fully automated**):
-  deal-site RSS feeds (Slickdeals seeded, two lanes: tech & electronics,
-  pop-culture apparel) are polled for Amazon items; keyword filters run
-  first, an LLM judges each headline against its lane ("fandom clothing only
-  — plain apparel doesn't match"), a web-search fact check corroborates the
-  deal, and survivors self-post with **price-free copy** attributed to the
-  source ("spotted via Slickdeals"). No third-party price is ever advertised
-  — that's what keeps automation compliant without PA-API; the reader sees
-  the real price on Amazon. Gated by `DEAL_RSS_AUTOPOST` (default off =
+  deal-site RSS feeds are polled for Amazon items; exact-ASIN matching and an
+  LLM place candidates into high-conversion lanes (Nintendo/Switch,
+  PlayStation/Xbox, PC gaming, storage/SSDs, controllers/parts,
+  collectibles/fandom, recent games, and giftable-under-$75). Candidates
+  stage in a global high-intent queue and compete on purchase intent,
+  freshness, exact-link confidence, prior clicks, and topic momentum. Only
+  the winners spend a strict web-search verification call, which must confirm
+  fresh evidence that the exact ASIN is currently discounted on Amazon. A
+  merely plausible sale fails closed. Survivors self-post with **price-free
+  copy** attributed to the source. No third-party price or percentage is ever
+  advertised without PA-API. Gated by `DEAL_RSS_AUTOPOST` (default off =
   audit-only DRY_RUN rows), budgeted by `DEAL_RSS_MAX_POSTS_PER_DAY`
   (default 2), deduped per ASIN with the same 7-day cooldown, and bannable
-  per item from "Discovered by feeds".
+  per item from "Discovered by feeds". Set `PUBLIC_BASE_URL` (click tracking
+  defaults on) so real deal-link clicks can reallocate future lane slots;
+  missing trackers are treated as unknown, never as zero-click failures.
 
 PA-API needs an approved Associate account (3 qualifying sales in 180 days).
 The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
@@ -235,7 +240,7 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `PLAYFUL_AUTO_APPROVE` | Joke-first replies self-post in autonomous mode (default false — they queue for approval) |
 | `BANTER_ENABLED` / `BANTER_MIN_CONFIDENCE` | Daily humor reply on a trending post — organic growth, no link (on / bar 70 by default) |
 | `RESEND_API_KEY` / `NOTIFY_EMAIL_TO` | Email pings when approvals wait (both required; dark otherwise) |
-| `CLICK_TRACKING_ENABLED` / `PUBLIC_BASE_URL` | Per-post click counting via first-party `/r/<id>` redirects (default off) |
+| `CLICK_TRACKING_ENABLED` / `PUBLIC_BASE_URL` | Per-post click counting via first-party `/r/<id>` redirects (default on when the base URL is set) |
 | `FACTCHECK_ENABLED` | Web-search fact check before any reply auto-posts unreviewed; failures demote to manual approval (default true) |
 | `FACTCHECK_MAX_SEARCHES` / `FACTCHECK_MIN_CONFIDENCE` | Cost bound per check (default 3) and verdict floor for auto-posting (default 60) |
 | `APOLOGY_ENABLED` | One-time fixed-template apology when someone replies negatively to the bot (default true) |
@@ -265,8 +270,9 @@ Every skip is recorded with a reason (`BotReply.skipReason`, `CandidateEvaluatio
 ## Affiliate compliance notes
 
 - The public `/about` page carries the standard disclosure ("As an Amazon
-  Associate, TrendCart earns from qualifying purchases") plus opt-out
-  instructions — it's where the bot's profile link points.
+  Associate, TrendCart earns from qualifying purchases"), an ask-the-bot CTA,
+  concrete request examples, and opt-out instructions — it is where the bot's
+  profile link points.
 - The bot account bio discloses automation + affiliate funding; anchor text
   names Amazon explicitly on every link.
 - Add the deployed site URL and the Bluesky account to your Amazon Associates
@@ -340,7 +346,7 @@ Live-era additions (bot went live 2026-07-03; see CHANGELOG + ADRs 0009–0016):
 - [x] Autonomous mode with escalation + the learning loop (ratings → nightly
       reflection → editable lessons; operator guidance override channel)
 - [x] Deal channel: watchlist alerts, feed discovery (dark until PA-API),
-      RSS suggestions with human-attested prices
+      ranked RSS candidates with strict price-free Amazon-sale verification
 - [x] Multimodal evaluation: image thumbnails as vision input, top replies
       as conversation context, purchasability-aware link confidence
 - [x] Learning measurement: weekly calibration vs the operator's own labels
@@ -353,8 +359,13 @@ Live-era additions (bot went live 2026-07-03; see CHANGELOG + ADRs 0009–0016):
 
 ## Going live checklist
 
-1. Fill the bot account's profile: display name, avatar, and a bio that
-   **discloses it is a bot** and links to the site.
+1. Fill the bot account's profile and pin a short onboarding post. Suggested
+   conversion-oriented copy (edit the handle if needed):
+
+   - Display name: `TrendCart · Amazon Deal Bot`
+   - Bio: `🤖 Automated Amazon deal finder. Tag me with what you need, your budget, and where you'll use it. As an Amazon Associate I earn from qualifying purchases. “Opt out” anytime.`
+   - Website: the deployed `/about` URL
+   - Pinned post: `Need a recommendation? Tag @trend-cart.bsky.social with what you need, your budget, and device/use. Example: “Switch controller under $50 for smaller hands.” If I find a confident match, I’ll reply with one Amazon link. I’m an automated bot; links may earn commissions.`
 2. Give the account organic life first — a few own-timeline posts (e.g. its
    recommendation lists) before it ever replies to anyone.
 3. Add the deployed site URL to your Amazon Associates account's site list.

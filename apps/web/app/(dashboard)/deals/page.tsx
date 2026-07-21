@@ -1,4 +1,4 @@
-import { prisma, DealPostStatus, ListingOrigin } from "@trendcart/db";
+import { prisma, DealPostStatus, ListingOrigin, SuggestionStatus } from "@trendcart/db";
 import { PAAPI_SEARCH_INDEXES } from "@trendcart/shared";
 import {
   approveDealPost,
@@ -33,6 +33,8 @@ const MAX_PRICE_AGE_HOURS = Number(process.env.DEAL_MAX_PRICE_AGE_HOURS ?? 1);
 // operator whether the worker's deal loops are actually running.
 const DEALS_ENABLED = process.env.DEALS_ENABLED === "true";
 const FEED_AUTOPOST = process.env.DEAL_FEED_AUTOPOST === "true";
+const CLICK_TRACKING_ACTIVE =
+  process.env.CLICK_TRACKING_ENABLED !== "false" && Boolean(process.env.PUBLIC_BASE_URL);
 
 function isStale(asOf: Date | null): boolean {
   return !!asOf && Date.now() - asOf.getTime() > MAX_PRICE_AGE_HOURS * 3_600_000;
@@ -44,8 +46,37 @@ function pctOff(saleCents: number, wasCents: number | null): number | null {
   return Math.round(((wasCents - saleCents) / wasCents) * 100);
 }
 
+function candidateMeta(value: unknown): { lane: string; score: number } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { lane: "unknown", score: 0 };
+  const candidate = (value as Record<string, unknown>).candidate;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return { lane: "unknown", score: 0 };
+  }
+  const row = candidate as Record<string, unknown>;
+  return {
+    lane: typeof row.lane === "string" ? row.lane : "unknown",
+    score: typeof row.baseScore === "number" ? row.baseScore : 0,
+  };
+}
+
+function verifiedSaleEvidenceUrl(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const promotion = (value as Record<string, unknown>).promotion;
+  if (!promotion || typeof promotion !== "object" || Array.isArray(promotion)) return null;
+  const factCheck = (promotion as Record<string, unknown>).factCheck;
+  if (!factCheck || typeof factCheck !== "object" || Array.isArray(factCheck)) return null;
+  const raw = (factCheck as Record<string, unknown>).saleEvidenceUrl;
+  if (typeof raw !== "string") return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function DealsPage() {
-  const [discovered, feeds, suggestionSources, pendingApproval, recent, heartbeat] = await Promise.all([
+  const [discovered, feeds, suggestionSources, pendingApproval, recent, heartbeat, stagedRaw] = await Promise.all([
     prisma.trackedListing.findMany({
       where: { origin: ListingOrigin.DISCOVERED },
       orderBy: { updatedAt: "desc" },
@@ -63,19 +94,43 @@ export default async function DealsPage() {
       include: {
         listing: { select: { title: true } },
         feed: { select: { name: true } },
+        suggestion: { select: { gateVerdict: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 30,
     }),
     prisma.workerHeartbeat.findUnique({ where: { id: "worker" } }),
+    prisma.dealSuggestion.findMany({
+      where: { status: SuggestionStatus.NEW },
+      include: { source: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    }),
   ]);
+  const staged = stagedRaw
+    .map((candidate) => ({ candidate, meta: candidateMeta(candidate.gateVerdict) }))
+    .sort((a, b) => b.meta.score - a.meta.score || b.candidate.createdAt.getTime() - a.candidate.createdAt.getTime())
+    .slice(0, 30);
+  const clickRows =
+    recent.length > 0
+      ? await prisma.trackedLink.findMany({
+          where: { kind: "deal", sourceId: { in: recent.map((post) => post.id) } },
+          select: { sourceId: true, clickCount: true },
+        })
+      : [];
+  const clicksByDeal = new Map<string, number>();
+  for (const link of clickRows) {
+    if (!link.sourceId) continue;
+    clicksByDeal.set(link.sourceId, (clicksByDeal.get(link.sourceId) ?? 0) + link.clickCount);
+  }
 
   return (
     <div>
       <h1 className="mb-1 text-2xl font-bold">Deal channel</h1>
       <p className="mb-4 text-sm text-zinc-500">
         Fully automated, two paths into one poster: <strong>deal RSS sources</strong> (live today,
-        no Amazon keys — items are lane-gated, web-search corroborated, and self-posted with
+        no Amazon keys — items enter a ranked high-intent queue, then exact-ASIN/current-sale
+        evidence is verified before the winner self-posts with
         PRICE-FREE copy attributed to the source) and <strong>deal feeds</strong> (Wario64-style
         PA-API sale discovery with real attested prices — lights up once you have API keys).
         Every post carries your affiliate link and an in-post <code>#ad</code> disclosure.
@@ -104,6 +159,54 @@ export default async function DealsPage() {
         (<code>PA_API_ACCESS_KEY</code>/<code>PA_API_SECRET_KEY</code>). Until then, the RSS
         sources below are the whole channel — automated, price-free posts that need no API keys.
       </div>
+      {!CLICK_TRACKING_ACTIVE && (
+        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          <strong>Click-based lane learning is inactive.</strong> Set{" "}
+          <code>CLICK_TRACKING_ENABLED=true</code> and <code>PUBLIC_BASE_URL</code> on both dynos;
+          engagement can still influence lanes, but untracked posts are never treated as zero-click
+          failures.
+        </div>
+      )}
+
+      <SectionHeading>High-intent RSS candidate queue ({stagedRaw.length})</SectionHeading>
+      <p className="-mt-2 mb-3 text-xs text-zinc-500">
+        Candidates across every source compete here before a posting slot or expensive sale check
+        is spent. Scores combine purchase intent, exact Amazon-link confidence, freshness, lane
+        value, and a bounded click-performance boost at promotion time. Showing the top 30.
+      </p>
+      {staged.length === 0 ? (
+        <EmptyState>No staged RSS candidates right now.</EmptyState>
+      ) : (
+        <div className="mb-8 overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-zinc-100 text-xs uppercase text-zinc-400">
+              <tr>
+                <th className="px-3 py-2">Score</th>
+                <th className="px-3 py-2">Lane</th>
+                <th className="px-3 py-2">Candidate</th>
+                <th className="px-3 py-2">Source</th>
+                <th className="px-3 py-2">Staged</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staged.map(({ candidate, meta }) => (
+                <tr key={candidate.id} className="border-b border-zinc-50 last:border-0">
+                  <td className="px-3 py-2 font-semibold">{meta.score}</td>
+                  <td className="px-3 py-2"><Badge tone="blue">{meta.lane}</Badge></td>
+                  <td className="max-w-md px-3 py-2">
+                    <a href={candidate.productUrl} target="_blank" rel="noopener noreferrer" className="underline">
+                      {candidate.title.length > 90 ? `${candidate.title.slice(0, 90)}…` : candidate.title}
+                    </a>
+                    <div className="text-xs text-zinc-400"><code>{candidate.asin}</code></div>
+                  </td>
+                  <td className="px-3 py-2 text-zinc-500">{candidate.source.name}</td>
+                  <td className="px-3 py-2 text-zinc-500">{formatDate(candidate.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Feed-discovered deals awaiting approval */}
       {pendingApproval.length > 0 && (
@@ -456,8 +559,9 @@ export default async function DealsPage() {
       <p className="-mt-2 mb-3 text-xs text-zinc-500">
         Deal-site RSS feeds (e.g. Slickdeals) the worker reads for Amazon items —{" "}
         <strong>works without PA-API keys, fully automated</strong>. Each source keeps one topical
-        lane: keyword filters run first, an LLM judges every headline against the lane
-        description, a web-search fact check corroborates the deal, and survivors self-post with
+        lane: keyword filters run first, an LLM assigns a high-conversion lane and purchase-intent
+        score, candidates compete globally, and strict web verification must confirm the exact
+        ASIN is currently discounted on Amazon before a survivor can self-post with
         price-free copy attributed to the source (max{" "}
         <code>DEAL_RSS_MAX_POSTS_PER_DAY</code>/day). No third-party price is ever advertised.
       </p>
@@ -557,7 +661,7 @@ export default async function DealsPage() {
                 </Badge>
                 <span className="text-xs text-zinc-400">
                   {source.lastFetchedAt
-                    ? `last fetch ${formatDate(source.lastFetchedAt)} — ${source.lastItemCount} items, ${source.lastQueuedCount} suggested`
+                    ? `last fetch ${formatDate(source.lastFetchedAt)} — ${source.lastItemCount} items, ${source.lastQueuedCount} candidates staged`
                     : "never fetched"}
                 </span>
                 {source.lastFetchError && (
@@ -772,6 +876,7 @@ export default async function DealsPage() {
             <tbody>
               {recent.map((dp) => {
                 const url = dp.postUri ? bskyPostUrl(dp.postUri) : null;
+                const evidenceUrl = verifiedSaleEvidenceUrl(dp.suggestion?.gateVerdict);
                 return (
                   <tr key={dp.id} className="border-b border-zinc-50 last:border-0">
                     <td className="px-3 py-2">
@@ -786,12 +891,34 @@ export default async function DealsPage() {
                         : dp.listing.title}
                     </td>
                     <td className="px-3 py-2">
-                      {formatMoney(dp.salePriceCents, dp.currency)}
-                      <div className="text-xs text-zinc-400">as of {formatDate(dp.priceAsOf)}</div>
+                      {dp.salePriceCents > 0 ? formatMoney(dp.salePriceCents, dp.currency) : "price-free"}
+                      <div className="text-xs text-zinc-400">
+                        {dp.saleVerifiedAt
+                          ? `sale verified ${formatDate(dp.saleVerifiedAt)}`
+                          : dp.status === DealPostStatus.DRY_RUN && dp.laneKey
+                            ? "simulated verification (dry run)"
+                          : `as of ${formatDate(dp.priceAsOf)}`}
+                      </div>
+                      {evidenceUrl && (
+                        <a
+                          href={evidenceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 underline"
+                        >
+                          sale evidence ↗
+                        </a>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-zinc-500">
                       {dp.source}
                       {dp.feed && <div className="text-xs text-zinc-400">{dp.feed.name}</div>}
+                      {dp.laneKey && <div className="text-xs text-zinc-400">{dp.laneKey} · score {dp.candidateScore ?? "—"}</div>}
+                      <div className="text-xs text-zinc-400">
+                        {clicksByDeal.has(dp.id)
+                          ? `${clicksByDeal.get(dp.id) ?? 0} clicks`
+                          : "clicks untracked"}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-zinc-500">{formatDate(dp.createdAt)}</td>
                     <td className="px-3 py-2">

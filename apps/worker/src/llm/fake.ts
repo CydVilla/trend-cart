@@ -121,9 +121,27 @@ export class FakeLlmClient implements LlmClient {
       .toLowerCase()
       .split(/[^a-z0-9]+/)
       .some((w) => words.has(w));
+    const title = input.itemTitle.toLowerCase();
+    const highConversionLane = /nintendo|switch|joy-?con/.test(title)
+      ? "nintendo-switch"
+      : /playstation|\bps[45]\b|xbox/.test(title)
+        ? "playstation-xbox"
+        : /ssd|micro\s*sd|memory card|storage/.test(title)
+          ? "storage-ssd"
+          : /controller|replacement|charging dock|thumbstick/.test(title)
+            ? "controllers-parts"
+            : /gaming|keyboard|mouse|headset|gpu|graphics card/.test(title)
+              ? "pc-gaming"
+              : /figure|collectible|lego|pokemon|zelda|mario|marvel|star wars/.test(title)
+                ? "collectibles-fandom"
+                : /game|pre-?order|new release/.test(title)
+                  ? "recent-games"
+                  : "other";
     return {
       matches,
       confidence: matches ? 75 : 40,
+      highConversionLane,
+      purchaseIntentScore: highConversionLane === "other" ? 35 : 72,
       reason: `fake: ${matches ? "shares a keyword with" : "no keyword overlap with"} the lane topic`,
     };
   }

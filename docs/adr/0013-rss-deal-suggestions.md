@@ -71,3 +71,28 @@ channel. When PA-API credentials arrive, ADR-0012's feed discovery takes over
 with real attested prices; this path remains for deals PA-API search wouldn't
 surface. The operator-confirmation UI, watchlist, and "Post deal now" manual
 path were removed with it.
+
+## Addendum (2026-07-21): ranked candidates and strict sale evidence
+
+Feed order no longer decides what posts. New RSS items enter a short-lived
+`DealSuggestion.NEW` staging queue with a high-conversion lane and an
+explainable base score. After all due sources contribute, the worker ranks the
+queue globally. A bounded rolling boost from real deal-link clicks and profile
+engagement promotes successful topics; a same-day lane penalty preserves
+diversity and exploration.
+
+Before promotion, Amazon references are collected and ranked instead of using
+the first link in feed markup; conflicting ASINs fail closed. The expensive
+web-search verifier receives the ASIN, canonical product URL, source URL, and
+feed publication time. It must separately affirm exact-product match,
+orderability, and fresh evidence that the item is discounted **on Amazon**.
+"Plausible sale" is no longer sufficient. Code also requires a successful
+search-result block, an exact-ASIN Amazon evidence URL, and a fresh sale-page
+URL/date returned by that search; those URLs stay in the audit verdict. The
+final post remains price-free, and its verification expires before posting if
+the queue is delayed.
+
+Promotion uses an atomic `VERIFYING` claim plus a unique candidate-to-post
+relation. Stale claims recover after a worker crash, paused sources cannot
+promote staged rows, and cooldown/capacity are rechecked in the serializable
+creation transaction and again by the poster.
