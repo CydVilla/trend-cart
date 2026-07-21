@@ -14,6 +14,12 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - `BANTER_PER_DAY` 1 → 2 on prod: banter is the only follower-growth surface
   and followers multiply every deal post's reach. The humor judge still
   declines freely — this raises attempts, not posts.
+- **Both dynos Eco → Basic** ($14/mo): with click tracking live, every
+  affiliate click routes through the web dyno's `/r/` redirect, and Eco web
+  dynos sleep after 30 idle minutes — a click in a sleep window stalled
+  10–30s on this app's slow boot, bleeding the exact clicks that must become
+  the first 3 qualifying sales. Heroku can't mix Eco with Basic, so the
+  worker moved too (guaranteed uptime, no more shared-quota exposure).
 
 ### Added
 - **Slickdeals Popular Deals feed** seeded as three new RSS sources on the
