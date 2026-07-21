@@ -3,6 +3,18 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-21 — Solicited-path gate fixes
+
+### Fixed
+- **Operator injections could silently never run.** Two gates ate solicited
+  posts: the per-author evaluation cap (2/24h, meant for trending fairness)
+  blocked operator re-runs of an author the pipeline had already looked at,
+  and the eval queue's 24h `createdAt` window orphaned re-injections of any
+  post discovered more than a day earlier (the dashboard's "re-paste to
+  reset" flow invited exactly that). Solicited posts (MANUAL/MENTION) now
+  bypass the author cap and get the reply side's 7-day window. Found while
+  re-running the FFX-anniversary candidate under the new retro-remaster rule.
+
 ## 2026-07-19 — Trending banter replaces the radar
 
 ### Changed

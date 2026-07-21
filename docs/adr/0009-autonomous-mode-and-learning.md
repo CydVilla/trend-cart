@@ -26,7 +26,8 @@ first page of Amazon results for its query shows the product or
 same-franchise items, and is instructed to retarget un-buyable things
 (digital-only games, services) to what Amazon actually sells (physical
 editions, merch, soundtracks). Queries under `MIN_LINK_CONFIDENCE` (60) are
-never linked: the reply falls back to a category search or is skipped —
+never linked: the reply is skipped (the category-search fallback was removed
+2026-07-21 — generic links are banned; see the fact-check addendum below) —
 a link that lands on junk is worse than silence.
 
 **Fact check (the last gate, 2026-07-17).** Link confidence is the model's

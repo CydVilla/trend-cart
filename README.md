@@ -46,14 +46,17 @@ signals, injection-hardened) → server-side gates → reply generation →
 validation → BotReply (dry_run / pending approval) → dashboard approval →
 posted to Bluesky.
 
-Reply links (one per reply, by priority): operator-provided link → tagged
-Amazon search for the specific product ("deltarune on Amazon", only when the
-evaluation's **link confidence** ≥ 60 that results will be relevant) → tagged
-Amazon search for the category name. No confident link → no reply. Links
-render as clickable anchor text via rich-text facets — never raw URLs.
+Reply links (one per reply): an operator-provided link, or a tagged Amazon
+search for the SPECIFIC product ("deltarune on Amazon" — only when the
+evaluation's **link confidence** ≥ 75 that results land on relevant,
+orderable items). There is NO generic fallback: category-name links are
+banned, retro games always link the modern remaster/re-release (never the
+used/overpriced original-hardware copy), and no confident specific link
+means no reply. Links render as clickable anchor text via rich-text
+facets — never raw URLs.
 
 **Autonomous mode** (Overview-page toggle, off by default): the bot
-self-approves replies with intent ≥ 80 and link confidence ≥ 75 (or an
+self-approves replies with intent ≥ 90 and link confidence ≥ 85 (or an
 operator directive); weaker replies still queue for manual approval.
 **Learning loop**: hourly it measures engagement (likes, replies, reposts,
 quotes) on everything it posted — replies, banter, deal alerts — plus
@@ -143,7 +146,8 @@ in the dashboard and keeps feeding the learning loop).
 point a free uptime pinger at it.
 
 The bot also answers **mention requests**: anyone who tags the bot gets a
-recommendation reply (still safety-evaluated, rate-capped, and approval-gated).
+recommendation reply — solicited, so it bypasses the reply caps/cooldowns
+(still safety-evaluated and, in manual mode, approval-gated).
 Opt-out is phrase-based ("opt out", "stop", "leave me alone") and permanent
 until the person mentions the bot again.
 
@@ -157,7 +161,7 @@ affiliate link (`DEAL_POST_STYLE=classic` restores the old copy):
 > reg. $59.99) #ad
 > (price as of Jul 6, 9:04 PM UTC — subject to change)
 
-Three paths feed the same exactly-once poster:
+Two automated paths feed the same exactly-once poster:
 
 - **Deal feeds** (ADR-0012, `DEALS_ENABLED=true` + `PA_API_*` keys): saved
   Amazon searches — keywords, category, minimum % off, price band, review
