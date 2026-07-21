@@ -14,7 +14,10 @@ a wrong LLM verdict (e.g. a post whose meaning lives in its image).
   candidate, evaluated immediately, exempt from author/category cooldowns
   (the asker chose the topic), threaded into the existing conversation via
   stored thread-root refs, with the parent post as classifier context. All
-  safety evaluation, rate caps, validation, and approval still apply.
+  safety evaluation, validation, and approval still apply. (2026-07-18
+  update: solicited requests are now EXEMPT from the reply caps/cooldowns
+  and the per-author evaluation cap — an asker deserves an answer and
+  operator injections are deliberate; only safety and opt-outs gate them.)
 - Opt-out is phrase-based ("opt out", "stop", "leave me alone") and
   permanent; a fresh mention is explicit re-consent and clears it.
 - Operator overrides ride the MANUAL injection lane: a trusted note (marked
