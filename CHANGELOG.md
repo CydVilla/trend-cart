@@ -3,6 +3,15 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-21 (later) — Profile cadence doubled (prod config)
+
+### Changed
+- Own-profile deal cadence raised on prod (v93): `DEAL_RSS_MAX_POSTS_PER_DAY`
+  2 → 4 and `DEAL_MAX_POSTS_PER_DAY` 3 → 6 (headroom so RSS can't be starved
+  and future PA-API feed posts fit). The 60-min global gap is unchanged, so
+  posts stay spread out; slots only fill when the ranked queue has verified
+  deals.
+
 ## 2026-07-21 — Ranked, sale-verified autonomous deals
 
 ### Added
