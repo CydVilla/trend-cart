@@ -215,7 +215,14 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   // is operator-bounded, and they must never starve behind trending posts
   // that already ate the budget. Trending only spends what budget remains.
   const solicited = await prisma.post.findMany({
-    where: { ...baseWhere, source: { in: ["MANUAL", "MENTION"] } },
+    where: {
+      ...baseWhere,
+      // 7-day window, mirroring the reply side's MANUAL window: a re-injected
+      // older post must still evaluate (the 24h baseWhere window silently
+      // orphaned re-injections of posts discovered more than a day ago).
+      createdAt: { gte: new Date(now - 7 * 24 * 3_600_000) },
+      source: { in: ["MANUAL", "MENTION"] },
+    },
     orderBy: { indexedAt: "asc" },
     take: BATCH_SIZE,
   });
