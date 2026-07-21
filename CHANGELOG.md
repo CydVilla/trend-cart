@@ -3,7 +3,7 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
-## 2026-07-21 (later) — Profile cadence doubled (prod config)
+## 2026-07-21 (later) — Profile cadence doubled, deal pool deepened
 
 ### Changed
 - Own-profile deal cadence raised on prod (v93): `DEAL_RSS_MAX_POSTS_PER_DAY`
@@ -11,6 +11,21 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   and future PA-API feed posts fit). The 60-min global gap is unchanged, so
   posts stay spread out; slots only fill when the ranked queue has verified
   deals.
+- `BANTER_PER_DAY` 1 → 2 on prod: banter is the only follower-growth surface
+  and followers multiply every deal post's reach. The humor judge still
+  declines freely — this raises attempts, not posts.
+
+### Added
+- **Slickdeals Popular Deals feed** seeded as three new RSS sources on the
+  highest-conviction lanes (tech, video games, LEGO — per the July insights).
+  All six prior sources read the same frontpage feed, so the 4 daily slots
+  were picking from one feed filtered six ways; Popular Deals adds ~25
+  higher-churn items whose ASIN attributes the extractor already resolves
+  (verified: 13/25 matched at confidence 90). Lane definitions are derived
+  from the frontpage entries, so tuning stays in one place. Prod
+  `DEAL_SUGGEST_SOURCES_PER_TICK` 2 → 3 keeps the full source rotation well
+  inside the 6h suggestion expiry; `DEAL_SUGGEST_MAX_LLM_PER_TICK` still caps
+  spend.
 
 ## 2026-07-21 — Ranked, sale-verified autonomous deals
 

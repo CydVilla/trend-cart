@@ -391,6 +391,31 @@ const suggestionSources: SourceSeed[] = [
   },
 ];
 
+/**
+ * Popular-deals variants of the highest-conviction lanes (operator conviction
+ * per the July insights: gaming/tech/LEGO). Same lane definitions, deeper
+ * feed — Popular Deals carries ~25 items with far more churn than the
+ * frontpage feed, and the extractor resolves its ASIN attributes identically
+ * (verified 2026-07-21: 13/25 items matched at confidence 90). The ranked
+ * cross-source queue dedupes any item that also hits the frontpage.
+ */
+const SLICKDEALS_POPULAR_RSS =
+  "https://slickdeals.net/newsearch.php?mode=popdeals&searcharea=deals&searchin=first&rss=1";
+
+const POPULAR_LANES = [
+  "Tech & electronics (Slickdeals)",
+  "Video games & gaming (Slickdeals)",
+  "LEGO & building sets (Slickdeals)",
+];
+
+const popularSources: SourceSeed[] = suggestionSources
+  .filter((s) => POPULAR_LANES.includes(s.name))
+  .map((s) => ({
+    ...s,
+    name: s.name.replace(" (Slickdeals)", " (Slickdeals popular)"),
+    url: SLICKDEALS_POPULAR_RSS,
+  }));
+
 async function main(): Promise<void> {
   for (const c of categories) {
     await prisma.productCategory.upsert({
@@ -418,7 +443,8 @@ async function main(): Promise<void> {
   }
   console.log(`Seeded ${dealFeeds.length} deal feeds (idle until DEALS_ENABLED + PA-API keys).`);
 
-  for (const s of suggestionSources) {
+  const allSources = [...suggestionSources, ...popularSources];
+  for (const s of allSources) {
     await prisma.dealSuggestionSource.upsert({
       where: { name: s.name },
       create: { ...s, isActive: true },
@@ -427,7 +453,7 @@ async function main(): Promise<void> {
     console.log(`  upserted suggestion source: ${s.name}`);
   }
   console.log(
-    `Seeded ${suggestionSources.length} RSS suggestion sources (run under DEALS_ENABLED, no PA-API needed).`,
+    `Seeded ${allSources.length} RSS suggestion sources (run under DEALS_ENABLED, no PA-API needed).`,
   );
 }
 
