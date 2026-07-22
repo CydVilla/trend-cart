@@ -14,9 +14,10 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 - `BANTER_PER_DAY` 1 → 2 on prod: banter is the only follower-growth surface
   and followers multiply every deal post's reach. The humor judge still
   declines freely — this raises attempts, not posts.
-- `MAX_REPLIES_PER_DAY` 3 → 5 on prod: a slight unsolicited-reply volume
-  bump; the 1/hour cap, 90-min global cooldown, and the raised quality bars
-  (intent ≥ 85, link conf ≥ 75) keep pacing and selectivity unchanged.
+- `MAX_REPLIES_PER_DAY` 3 → 5 → 10 on prod (operator call): unsolicited-reply
+  volume raised; the 1/hour cap, 90-min global cooldown, and the raised
+  quality bars (intent ≥ 85, link conf ≥ 75) keep pacing and selectivity
+  unchanged, so 10 only fires on days with 10 gate-clearing candidates.
 - **Both dynos Eco → Basic** ($14/mo): with click tracking live, every
   affiliate click routes through the web dyno's `/r/` redirect, and Eco web
   dynos sleep after 30 idle minutes — a click in a sleep window stalled
