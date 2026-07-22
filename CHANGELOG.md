@@ -6,6 +6,15 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 ## 2026-07-22 — Rejections carry the operator's "why"
 
 ### Added
+- **Queue-bound replies get the web-search fact check too.** The
+  existence/orderability/pre-order check used to run only on self-approving
+  replies (as the last gate before an unreviewed post); replies escalating to
+  the manual queue arrived unverified, leaving the operator to research
+  orderability themselves. Now both paths are checked: self-approvals keep
+  the fail-safe demotion, and queue-bound replies carry an informational
+  verdict the approval card already renders (green ✓ / amber ⚠ with issues).
+  Demotion stats/logs only count genuine demotions. Operator-linked replies
+  still skip the check. Cost: ≤1 call + 3 searches per queued reply.
 - **Rejecting a pending reply now captures feedback.** The approval card's
   four actions share one form (per-button `formAction`), so whatever the
   operator typed in the direction/refine input rides along with a Reject and

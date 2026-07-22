@@ -504,16 +504,19 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
 
     let { status, approvedAt } = statusFor(evaluation, link, flags.autonomous);
 
-    // LAST GATE before an unreviewed post: a reply that self-approved gets a
-    // web-search fact check (does the product exist / is it orderable / are
-    // the claims right). Fail-safe — an inaccurate, unverifiable, or errored
-    // check demotes to the manual queue, where the operator sees the verdict.
-    // Operator-linked replies skip it (the human already chose that link),
-    // and manual approvals are never checked (the human is the fact-checker).
+    // Web-search fact check (does the product exist / is it orderable or
+    // pre-orderable / are the claims right) runs on BOTH outcomes:
+    // - self-approved replies: the LAST GATE before an unreviewed post —
+    //   fail-safe, an inaccurate/unverifiable/errored check demotes to the
+    //   manual queue with the verdict attached;
+    // - queue-bound replies: informational — the verdict rides along so the
+    //   operator approves/rejects against real-world evidence instead of
+    //   having to research orderability themselves.
+    // Operator-linked replies skip it (the human already chose that link).
     let factCheck: FactCheckVerdict | null = null;
     let factChecked = false;
     if (
-      status === ReplyStatus.APPROVED &&
+      (status === ReplyStatus.APPROVED || status === ReplyStatus.PENDING_APPROVAL) &&
       config.factCheck.enabled &&
       !config.llm.useFake &&
       link.kind !== "operator"
@@ -530,7 +533,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         suggestedReplyAngle: evaluation.suggestedReplyAngle,
       });
       stats.factChecked += 1;
-      if (!verdictPasses(factCheck)) {
+      if (status === ReplyStatus.APPROVED && !verdictPasses(factCheck)) {
         status = ReplyStatus.PENDING_APPROVAL;
         approvedAt = null;
         stats.factFlagged += 1;
