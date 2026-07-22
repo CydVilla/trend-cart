@@ -183,8 +183,11 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
   }
   if (rejected.length > 0) {
     sections.push(
-      `REJECTED by operator (drafted reply was refused):\n${rejected
-        .map((r) => `- post: "${clip(r.post.text)}"\n  drafted reply: "${clip(r.replyText)}"`)
+      `REJECTED by operator (drafted reply was refused; a note is their own words for WHY — weigh it like a 👎 note):\n${rejected
+        .map(
+          (r) =>
+            `- post: "${clip(r.post.text)}"\n  drafted reply: "${clip(r.replyText)}"${r.operatorFeedback ? `\n  operator's rejection note: "${clip(r.operatorFeedback, 160)}"` : ""}`,
+        )
         .join("\n")}`,
     );
   }

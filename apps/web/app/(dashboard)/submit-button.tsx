@@ -14,12 +14,16 @@ export function SubmitButton({
   className = "",
   pendingLabel,
   title,
+  formAction,
 }: {
   children: ReactNode;
   className?: string;
   /** Optional label shown while pending (defaults to the normal children). */
   pendingLabel?: string;
   title?: string;
+  /** Per-button server action, for forms whose buttons submit to different
+   *  actions (all sharing the form's inputs). */
+  formAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const { pending } = useFormStatus();
   return (
@@ -28,6 +32,7 @@ export function SubmitButton({
       disabled={pending}
       aria-busy={pending}
       title={title}
+      formAction={formAction}
       className={`inline-flex items-center justify-center gap-1.5 ${
         pending ? "cursor-wait opacity-70" : ""
       } ${className}`}

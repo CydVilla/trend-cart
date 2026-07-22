@@ -126,67 +126,74 @@ export default async function RepliesPage({
                 {/* Why this landed in the queue: the pre-publication fact
                     check flagged it instead of letting it auto-post. */}
                 <FactCheckNote raw={reply.factCheck} />
-                <div className="mt-3 flex gap-2">
-                  <form action={approveReply}>
-                    <input type="hidden" name="id" value={reply.id} />
+                {/* ONE form per card: every button submits the same inputs to
+                    its own action via formAction, so the direction input's
+                    text rides along with a Reject as rejection feedback. */}
+                <form>
+                  {/* Swallows implicit (Enter-key) submission — a disabled
+                      default button means Enter in the direction input never
+                      fires Approve. */}
+                  <button type="submit" hidden disabled aria-hidden="true" tabIndex={-1} />
+                  <input type="hidden" name="id" value={reply.id} />
+                  <div className="mt-3 flex gap-2">
                     <SubmitButton
+                      formAction={approveReply}
                       pendingLabel="Approving…"
                       className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
                     >
                       Approve
                     </SubmitButton>
-                  </form>
-                  <form action={rejectReply}>
-                    <input type="hidden" name="id" value={reply.id} />
                     <SubmitButton
+                      formAction={rejectReply}
                       pendingLabel="Rejecting…"
                       className="rounded border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
                     >
                       Reject
                     </SubmitButton>
-                  </form>
-                </div>
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs text-zinc-500">
-                    Edit or refine before approving
-                  </summary>
-                  <form action={editReply} className="mt-2 space-y-1">
-                    <input type="hidden" name="id" value={reply.id} />
-                    <textarea
-                      name="text"
-                      rows={3}
-                      defaultValue={reply.replyText}
-                      className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    />
-                    <div className="flex items-center gap-2">
-                      <SubmitButton
-                        pendingLabel="Saving…"
-                        className="rounded border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                      >
-                        Save edit
-                      </SubmitButton>
-                      {reply.linkAnchor && (
-                        <span className="text-xs text-zinc-400">
-                          keep &ldquo;{reply.linkAnchor}&rdquo; in the text — it stays the clickable link
-                        </span>
-                      )}
+                  </div>
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs text-zinc-500">
+                      Edit or refine before approving — the direction box also saves as feedback
+                      when you Reject
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      <textarea
+                        name="text"
+                        rows={3}
+                        defaultValue={reply.replyText}
+                        className="w-full rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                      />
+                      <div className="flex items-center gap-2">
+                        <SubmitButton
+                          formAction={editReply}
+                          pendingLabel="Saving…"
+                          className="rounded border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                        >
+                          Save edit
+                        </SubmitButton>
+                        {reply.linkAnchor && (
+                          <span className="text-xs text-zinc-400">
+                            keep &ldquo;{reply.linkAnchor}&rdquo; in the text — it stays the clickable link
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </form>
-                  <form action={refineReply} className="mt-2 flex gap-2">
-                    <input type="hidden" name="id" value={reply.id} />
-                    <input
-                      name="instruction"
-                      placeholder='Direction for the bot, e.g. "mention the 75th anniversary" — regenerates the text'
-                      className="flex-1 rounded border border-zinc-300 px-2 py-1.5 text-sm"
-                    />
-                    <SubmitButton
-                      pendingLabel="Regenerating…"
-                      className="rounded bg-zinc-900 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
-                    >
-                      Regenerate
-                    </SubmitButton>
-                  </form>
-                </details>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        name="instruction"
+                        placeholder='Direction for the bot, e.g. "mention the 75th anniversary" — regenerates the text; kept as feedback if you Reject'
+                        className="flex-1 rounded border border-zinc-300 px-2 py-1.5 text-sm"
+                      />
+                      <SubmitButton
+                        formAction={refineReply}
+                        pendingLabel="Regenerating…"
+                        className="rounded bg-zinc-900 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
+                      >
+                        Regenerate
+                      </SubmitButton>
+                    </div>
+                  </details>
+                </form>
               </div>
             );
           })}

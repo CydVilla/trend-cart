@@ -3,6 +3,21 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-22 — Rejections carry the operator's "why"
+
+### Added
+- **Rejecting a pending reply now captures feedback.** The approval card's
+  four actions share one form (per-button `formAction`), so whatever the
+  operator typed in the direction/refine input rides along with a Reject and
+  is stored in `operatorFeedback` — the same field 👎 notes use. The nightly
+  reflection shows it under REJECTED evidence ("weigh it like a 👎 note"), so
+  the bot finally learns WHY a draft was refused, not just that it was.
+  `skipReason` stays the byte-exact "rejected via dashboard" that calibration
+  and the training-data export match on. A hidden disabled default button
+  swallows Enter-key submits, so typing in the direction box can never
+  accidentally Approve. Verified end-to-end locally (type → Enter inert →
+  Reject → feedback row in DB).
+
 ## 2026-07-21 (later) — Profile cadence doubled, deal pool deepened
 
 ### Changed

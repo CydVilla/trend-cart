@@ -139,12 +139,24 @@ export async function rateReply(formData: FormData): Promise<void> {
   revalidatePath("/replies");
 }
 
+/**
+ * Reject a pending reply. Whatever the operator typed in the card's
+ * direction/refine input rides along as rejection feedback — stored in
+ * `operatorFeedback` (the same field 👎 notes use) so reflection can learn
+ * WHY it was refused. `skipReason` stays byte-exact: calibration and the
+ * training-data export match on the literal string.
+ */
 export async function rejectReply(formData: FormData): Promise<void> {
   const id = str(formData, "id");
   if (!id) return;
+  const feedback = str(formData, "instruction").trim().slice(0, 500);
   await prisma.botReply.updateMany({
     where: { id, status: { in: [ReplyStatus.PENDING_APPROVAL, ReplyStatus.APPROVED] } },
-    data: { status: ReplyStatus.SKIPPED, skipReason: "rejected via dashboard" },
+    data: {
+      status: ReplyStatus.SKIPPED,
+      skipReason: "rejected via dashboard",
+      ...(feedback ? { operatorFeedback: feedback } : {}),
+    },
   });
   revalidatePath("/replies");
 }
