@@ -94,6 +94,11 @@ async function main(): Promise<void> {
 
   const scored = labels.length - errors;
   const pct = scored > 0 ? Math.round((agree / scored) * 100) : 0;
+  // A run where most replays errored can't measure agreement — and must never
+  // masquerade as "0%, still aligned" (nothing was scored). The usual cause is
+  // an invalid/expired CI ANTHROPIC_API_KEY: the replay calls the LIVE
+  // classifier, so a bad key fails EVERY eval with a 401.
+  const reliable = scored > 0 && errors <= Math.floor(labels.length / 2);
 
   const prev = await prisma.botMemory.findUnique({ where: { id: "calibration" } });
   const prevBasis = (prev?.basis ?? null) as { agreementPct?: number } | null;
@@ -102,29 +107,41 @@ async function main(): Promise<void> {
 
   const falsePositives = flips.filter((f) => f.got);
   const falseNegatives = flips.filter((f) => !f.got);
-  const lines = [
-    `## Weekly calibration — brain vs. your judgment`,
-    ``,
-    `Replayed **${scored}** operator-labeled posts (${positives} expected-reply, ${negatives} expected-skip) through the current classifier + gates + lessons + guidance.`,
-    ``,
-    `**Agreement: ${pct}%**${delta}${errors ? ` · ${errors} eval errors` : ""}`,
-    ``,
-  ];
-  if (falsePositives.length > 0) {
-    lines.push(`### Would now reply, but you said no (${falsePositives.length})`, ``);
-    for (const f of falsePositives) lines.push(`- (${f.source}) "${f.text}" — bot: ${f.reason}`);
-    lines.push(``);
+  const lines = [`## Weekly calibration — brain vs. your judgment`, ``];
+  if (!reliable) {
+    lines.push(
+      `⚠️ **Calibration could not run** — ${errors} of ${labels.length} replays errored, so agreement was not measured this week.`,
+      ``,
+      "This is almost always the CI `ANTHROPIC_API_KEY` secret being invalid or " +
+        "expired: calibration replays posts through the LIVE classifier, so a bad " +
+        "key fails every eval with a 401. Check the workflow run logs for the exact " +
+        "error and rotate the repo secret.",
+      ``,
+      `**This is NOT an "aligned" result — nothing was scored.** The stored agreement baseline is left untouched so the trend survives a broken run.`,
+    );
+  } else {
+    lines.push(
+      `Replayed **${scored}** operator-labeled posts (${positives} expected-reply, ${negatives} expected-skip) through the current classifier + gates + lessons + guidance.`,
+      ``,
+      `**Agreement: ${pct}%**${delta}${errors ? ` · ${errors} eval errors` : ""}`,
+      ``,
+    );
+    if (falsePositives.length > 0) {
+      lines.push(`### Would now reply, but you said no (${falsePositives.length})`, ``);
+      for (const f of falsePositives) lines.push(`- (${f.source}) "${f.text}" — bot: ${f.reason}`);
+      lines.push(``);
+    }
+    if (falseNegatives.length > 0) {
+      lines.push(`### Would now skip, but you approved (${falseNegatives.length})`, ``);
+      for (const f of falseNegatives) lines.push(`- (${f.source}) "${f.text}" — bot: ${f.reason}`);
+      lines.push(``);
+    }
+    lines.push(
+      flips.length === 0
+        ? `No disagreements — the learning loop is still aligned with your decisions.`
+        : `Operator approvals and ratings are ground truth — a flip is always the bot's miss, never a "label error". Fix via Operator guidance (authoritative) or the lessons editor on the Overview page.`,
+    );
   }
-  if (falseNegatives.length > 0) {
-    lines.push(`### Would now skip, but you approved (${falseNegatives.length})`, ``);
-    for (const f of falseNegatives) lines.push(`- (${f.source}) "${f.text}" — bot: ${f.reason}`);
-    lines.push(``);
-  }
-  lines.push(
-    flips.length === 0
-      ? `No disagreements — the learning loop is still aligned with your decisions.`
-      : `Operator approvals and ratings are ground truth — a flip is always the bot's miss, never a "label error". Fix via Operator guidance (authoritative) or the lessons editor on the Overview page.`,
-  );
 
   // Weekly health snapshot: the last 7 days' funnel + clicks, so this issue
   // is a one-stop check, not just an agreement number. Best-effort — a
@@ -152,22 +169,26 @@ async function main(): Promise<void> {
   const report = lines.join("\n");
   console.log(report);
 
-  await prisma.botMemory.upsert({
-    where: { id: "calibration" },
-    create: {
-      id: "calibration",
-      content: report,
-      basis: { agreementPct: pct, scored, generatedAt: new Date().toISOString() },
-    },
-    update: {
-      content: report,
-      basis: {
-        agreementPct: pct,
-        scored,
-        generatedAt: new Date().toISOString(),
-      } as Prisma.InputJsonValue,
-    },
-  });
+  // Persist the agreement number only when the run actually measured it — an
+  // all-errors run must not overwrite the trend baseline with a bogus 0%.
+  if (reliable) {
+    await prisma.botMemory.upsert({
+      where: { id: "calibration" },
+      create: {
+        id: "calibration",
+        content: report,
+        basis: { agreementPct: pct, scored, generatedAt: new Date().toISOString() },
+      },
+      update: {
+        content: report,
+        basis: {
+          agreementPct: pct,
+          scored,
+          generatedAt: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
 }
 
 main()
