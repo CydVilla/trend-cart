@@ -25,6 +25,20 @@ import { AnthropicLlmClient } from "../src/llm/anthropic.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "../src/reflect.js";
 import { gatherLabels } from "./calibration-labels.js";
 
+/**
+ * Replace unpaired UTF-16 surrogates with U+FFFD. Replayed post text is sliced
+ * to a fixed length for the report, which can cut an emoji/astral character in
+ * half and leave a lone surrogate. That serializes fine to stdout but breaks
+ * the Prisma BotMemory write ("unexpected end of hex escape") — the query
+ * protocol is JSON and a lone surrogate is not valid JSON.
+ */
+function stripLoneSurrogates(s: string): string {
+  return s.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "�",
+  );
+}
+
 async function main(): Promise<void> {
   if (!config.llm.anthropicApiKey) throw new Error("ANTHROPIC_API_KEY is required");
 
@@ -166,7 +180,9 @@ async function main(): Promise<void> {
     lines.push(``, `_(7-day snapshot unavailable: ${error instanceof Error ? error.message : error})_`);
   }
 
-  const report = lines.join("\n");
+  // Sanitize once: the report embeds fixed-length slices of replayed post text,
+  // which can leave a lone surrogate that breaks the BotMemory write below.
+  const report = stripLoneSurrogates(lines.join("\n"));
   console.log(report);
 
   // Persist the agreement number only when the run actually measured it — an
