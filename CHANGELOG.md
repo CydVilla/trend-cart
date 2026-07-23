@@ -3,6 +3,40 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-23 (later) — Deal channel was starved, not broken
+
+### Fixed
+- **Two days with no deal post — diagnosed as feed supply, not a fault.** The
+  worker was healthy and discovery was running (183 items in 3 days), but the
+  last QUEUED candidate was 07-20 23:22. Dismissal breakdown by source:
+  - **The Popular Deals sources seeded 07-21 were the main leak** and are now
+    **retired** (`isActive=false`). That feed is popularity-ranked, not
+    recency-ranked, so its items are structurally too old for the 6h
+    sale-freshness gate — measured median age 21h, only 1 of 11 Amazon matches
+    inside the window. They produced 106 stale dismissals, 20 wasted LLM
+    calls, and 0 posts. Seeding them without measuring freshness first was the
+    error; the replacement below was measured before adoption.
+  - **The tech lane had an empty keyword prefilter**, so every general-
+    merchandise item (bedding, flatware, coffee capsules, pool fountain) paid
+    for an LLM lane judgment — 57 wasted calls. It now carries a
+    product-category prefilter that kills those pre-LLM at $0. `seed.ts` also
+    backfills any lane whose prefilter is empty, guarded so operator keyword
+    edits are never clobbered.
+- **New supply: `q=amazon` Slickdeals search, newest-first**, seeded for the
+  three high-conviction lanes (gaming, tech, LEGO). Measured before adoption:
+  22 of 25 items carry an Amazon match (88% density vs the frontpage feed's
+  32%) and **all** were inside the 6h window (median age 0.4h). More qualifying
+  candidates *and* less waste, since non-Amazon items never reach the extractor.
+
+### Changed
+- Ceilings raised: `DEAL_RSS_MAX_POSTS_PER_DAY` 4 → 6, `DEAL_MAX_POSTS_PER_DAY`
+  6 → 8. Note the ceiling was never the binding constraint — supply was — so
+  this only matters on days the queue actually fills. The 6h freshness gate and
+  the strict web-search sale verification are deliberately unchanged: they are
+  what make a price-free "on sale now" claim defensible. Verification spend is
+  self-limiting (it only runs while a posting slot is open), so the raised
+  ceiling raises cost only when it is actually producing posts.
+
 ## 2026-07-23 — The fact check can auto-reject and teach itself
 
 ### Added

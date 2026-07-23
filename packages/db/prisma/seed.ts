@@ -256,17 +256,34 @@ type SourceSeed = {
 const SLICKDEALS_FRONTPAGE_RSS =
   "https://slickdeals.net/newsearch.php?mode=frontpage&searcharea=deals&searchin=first&rss=1";
 
+/** Cheap pre-LLM filter for the tech lane. Slickdeals' general feeds are mostly
+ *  household goods (bedding, flatware, groceries); without this EVERY item paid
+ *  for an LLM lane judgment — 57 wasted calls in three days. Product-category
+ *  words only: no bare short substrings that collide with ordinary words
+ *  ("ram" → "ceramic"/"frame", "mesh" → "mesh laundry bag"). */
+const TECH_KEYWORDS = [
+  "ssd", "nvme", "microsd", "sd card", "hard drive", "monitor", "laptop", "chromebook",
+  "tablet", "ipad", "kindle", "headphone", "earbud", "airpods", "speaker", "soundbar",
+  "router", "wifi", "modem", "keyboard", "mouse", "webcam", "charger", "power bank",
+  "usb", "hdmi", "cable", "dock", "projector", "printer", "gpu", "graphics card", "cpu",
+  "processor", "motherboard", "ddr4", "ddr5", "smart home", "echo", "alexa", "thermostat",
+  "doorbell", "security camera", "tv", "oled", "qled", "bluetooth", "headset",
+  "smartwatch", "fitness tracker", "console", "controller",
+];
+
+const TECH_TOPIC =
+  "Consumer tech and electronics: computers and PC parts, monitors, TVs, audio " +
+  "(headphones, earbuds, speakers), smart home, phones and tablets, gaming hardware " +
+  "and accessories (consoles, controllers, headsets), storage, networking, chargers " +
+  "and cables. Software subscriptions, gift cards, and non-tech household goods do " +
+  "NOT match.";
+
 const suggestionSources: SourceSeed[] = [
   {
     name: "Tech & electronics (Slickdeals)",
     url: SLICKDEALS_FRONTPAGE_RSS,
-    topic:
-      "Consumer tech and electronics: computers and PC parts, monitors, TVs, audio " +
-      "(headphones, earbuds, speakers), smart home, phones and tablets, gaming hardware " +
-      "and accessories (consoles, controllers, headsets), storage, networking, chargers " +
-      "and cables. Software subscriptions, gift cards, and non-tech household goods do " +
-      "NOT match.",
-    includeKeywords: [],
+    topic: TECH_TOPIC,
+    includeKeywords: TECH_KEYWORDS,
     excludeKeywords: ["gift card", "subscription", "refurbished", "renewed", "pre-owned"],
     minPriceCents: 1500,
   },
@@ -392,28 +409,36 @@ const suggestionSources: SourceSeed[] = [
 ];
 
 /**
- * Popular-deals variants of the highest-conviction lanes (operator conviction
- * per the July insights: gaming/tech/LEGO). Same lane definitions, deeper
- * feed — Popular Deals carries ~25 items with far more churn than the
- * frontpage feed, and the extractor resolves its ASIN attributes identically
- * (verified 2026-07-21: 13/25 items matched at confidence 90). The ranked
- * cross-source queue dedupes any item that also hits the frontpage.
+ * Amazon-scoped Slickdeals search, ordered newest-first — the supply feed.
+ *
+ * Replaces the Popular Deals variants seeded 2026-07-21, which were retired
+ * the next day: that feed is popularity-ranked, not recency-ranked, so its
+ * items are structurally too old for the 6h sale-freshness gate (measured
+ * median age 21h; only 1 of 11 Amazon matches inside the window). It produced
+ * 106 stale dismissals and 0 posts.
+ *
+ * This feed was measured before adoption (2026-07-23): 22 of 25 items carry an
+ * Amazon match (88% density vs the frontpage feed's 32%) and ALL of them were
+ * inside the 6h window (median age 0.4h). Higher supply AND less waste, since
+ * non-Amazon items never reach the extractor. Keyword prefilters keep the
+ * general-merchandise majority away from the paid LLM lane gate.
  */
-const SLICKDEALS_POPULAR_RSS =
-  "https://slickdeals.net/newsearch.php?mode=popdeals&searcharea=deals&searchin=first&rss=1";
+const SLICKDEALS_AMAZON_RSS =
+  "https://slickdeals.net/newsearch.php?q=amazon&searcharea=deals&searchin=first&rss=1";
 
-const POPULAR_LANES = [
+/** Highest-conviction lanes only (per the July insights): gaming, tech, LEGO. */
+const AMAZON_FEED_LANES = [
   "Tech & electronics (Slickdeals)",
   "Video games & gaming (Slickdeals)",
   "LEGO & building sets (Slickdeals)",
 ];
 
-const popularSources: SourceSeed[] = suggestionSources
-  .filter((s) => POPULAR_LANES.includes(s.name))
+const amazonFeedSources: SourceSeed[] = suggestionSources
+  .filter((s) => AMAZON_FEED_LANES.includes(s.name))
   .map((s) => ({
     ...s,
-    name: s.name.replace(" (Slickdeals)", " (Slickdeals popular)"),
-    url: SLICKDEALS_POPULAR_RSS,
+    name: s.name.replace(" (Slickdeals)", " (Slickdeals Amazon)"),
+    url: SLICKDEALS_AMAZON_RSS,
   }));
 
 async function main(): Promise<void> {
@@ -443,7 +468,7 @@ async function main(): Promise<void> {
   }
   console.log(`Seeded ${dealFeeds.length} deal feeds (idle until DEALS_ENABLED + PA-API keys).`);
 
-  const allSources = [...suggestionSources, ...popularSources];
+  const allSources = [...suggestionSources, ...amazonFeedSources];
   for (const s of allSources) {
     await prisma.dealSuggestionSource.upsert({
       where: { name: s.name },
@@ -451,6 +476,19 @@ async function main(): Promise<void> {
       update: {}, // operator tuning wins over re-seeds
     });
     console.log(`  upserted suggestion source: ${s.name}`);
+  }
+
+  // Backfill only where the prefilter was never set. An empty includeKeywords
+  // sends EVERY feed item to the paid LLM lane gate; these lanes shipped with
+  // [] by oversight. Guarded on empty so operator keyword edits are preserved
+  // (the upsert above deliberately never updates existing rows).
+  for (const s of allSources) {
+    if (s.includeKeywords.length === 0) continue;
+    const { count } = await prisma.dealSuggestionSource.updateMany({
+      where: { name: s.name, includeKeywords: { isEmpty: true } },
+      data: { includeKeywords: s.includeKeywords },
+    });
+    if (count > 0) console.log(`  backfilled keyword prefilter: ${s.name}`);
   }
   console.log(
     `Seeded ${allSources.length} RSS suggestion sources (run under DEALS_ENABLED, no PA-API needed).`,
