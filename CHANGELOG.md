@@ -3,6 +3,26 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-23 — Autonomous self-approval bars aligned to the posting floors
+
+### Changed
+- **`AUTO_MIN_INTENT_SCORE` 90 → 85, `AUTO_MIN_LINK_CONFIDENCE` 85 → 75**
+  (prod config + code defaults + `.env.example`). Diagnosis: the Haiku
+  classifier clusters at 85 — the posting floor `MIN_PRODUCT_INTENT_SCORE` —
+  for "worth replying", and almost never emits 90+. So the 90/85 self-approval
+  bars sat *above* where good replies actually score, leaving autonomous mode
+  effectively off: 12 of 12 queued replies scored intent exactly 85 with
+  passing fact checks, yet all escalated for manual approval. The bars now
+  match the posting floors, so anything good enough to post self-approves. The
+  pre-publication web-search fact check is the real safety net — it already
+  demotes any self-approved reply whose product it can't verify as existing or
+  orderable (and, since yesterday, annotates queue-bound ones too). PLAYFUL
+  replies still queue until `PLAYFUL_AUTO_APPROVE`. Note: the dashboard's
+  "Fact check ✓ passed (confidence N)" is the *fact-check's* confidence, a
+  separate axis from the intent/link scores that gate self-approval — the two
+  were easy to conflate. Docs synced: README, dashboard tooltip, ADR-0009
+  amendment.
+
 ## 2026-07-22 — Rejections carry the operator's "why"
 
 ### Added

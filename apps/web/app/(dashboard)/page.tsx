@@ -45,7 +45,7 @@ async function WorkerStatusCard() {
       <div className="ml-auto flex items-center gap-2">
         <form action={toggleAutonomous}>
           <SubmitButton
-            title="Self-approve replies with intent ≥ 80 and link confidence ≥ 75; weaker ones still queue for you. DRY_RUN overrides."
+            title="Self-approve replies with intent ≥ 85 and link confidence ≥ 75 (matching the posting floors); weaker ones still queue for you, and the web-search fact check demotes any it can't verify. DRY_RUN overrides."
             className={`rounded px-3 py-1 text-xs font-medium ${
               heartbeat.autonomous
                 ? "bg-amber-500 text-white hover:bg-amber-600"

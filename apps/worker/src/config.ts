@@ -190,9 +190,14 @@ export const config = {
        never linked (the category fallback or a skip happens instead). */
     minLinkConfidence: envInt("MIN_LINK_CONFIDENCE", 75),
     /* Autonomous mode (dashboard toggle) self-approves only replies clearing
-       BOTH bars; anything weaker still queues for manual approval. */
-    autoMinIntentScore: envInt("AUTO_MIN_INTENT_SCORE", 90),
-    autoMinLinkConfidence: envInt("AUTO_MIN_LINK_CONFIDENCE", 85),
+       BOTH bars; anything weaker still queues for manual approval. Defaults
+       match the posting floors (MIN_PRODUCT_INTENT_SCORE / MIN_LINK_CONFIDENCE)
+       on purpose: the classifier clusters at 85 for "worth replying", so a
+       higher bar left autonomous mode effectively off. The pre-publication
+       web-search fact check is the real backstop — it demotes any self-approved
+       reply whose product it can't verify as existing/orderable. */
+    autoMinIntentScore: envInt("AUTO_MIN_INTENT_SCORE", 85),
+    autoMinLinkConfidence: envInt("AUTO_MIN_LINK_CONFIDENCE", 75),
     /* PLAYFUL (joke-first) replies are high-variance — the operator 👎'd two
        earnest attempts at this genre — so they queue for manual approval even
        in autonomous mode until this is flipped on. */

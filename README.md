@@ -56,8 +56,10 @@ means no reply. Links render as clickable anchor text via rich-text
 facets — never raw URLs.
 
 **Autonomous mode** (Overview-page toggle, off by default): the bot
-self-approves replies with intent ≥ 90 and link confidence ≥ 85 (or an
-operator directive); weaker replies still queue for manual approval.
+self-approves replies with intent ≥ 85 and link confidence ≥ 75 (matching the
+posting floors — or an operator directive); weaker replies still queue for
+manual approval, and a pre-publication web-search fact check demotes any
+self-approved reply whose product it can't verify as existing/orderable.
 **Learning loop**: hourly it measures engagement (likes, replies, reposts,
 quotes) on everything it posted — replies, banter, deal alerts — plus
 affiliate-link clicks and the text of what people reply back (audience
@@ -219,9 +221,9 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `MAX_REPLIES_PER_HOUR` / `_DAY` | Hard rate limits for unsolicited replies (defaults 1/hour, 3/day — replies are the secondary channel) |
 | `MIN_PRODUCT_INTENT_SCORE` | LLM intent threshold (0–100) below which the bot never replies |
 | `MIN_ENGAGEMENT_SCORE` | Trending floor — discovered posts below it are never evaluated |
-| `MIN_LINK_CONFIDENCE` | Search queries below this confidence (0–100) are never linked (default 60) |
-| `AUTO_MIN_INTENT_SCORE` | Autonomous mode self-approves only above this intent (default 80) |
-| `AUTO_MIN_LINK_CONFIDENCE` | ...and above this link confidence for search links (default 75) |
+| `MIN_LINK_CONFIDENCE` | Search queries below this confidence (0–100) are never linked (default 75) |
+| `AUTO_MIN_INTENT_SCORE` | Autonomous mode self-approves only above this intent (default 85, matches the posting floor) |
+| `AUTO_MIN_LINK_CONFIDENCE` | ...and above this link confidence for search links (default 75); the web-search fact check is the real backstop |
 | `EVAL_MIN_POST_AGE_MINUTES` | Maturation wait so the engagement snapshot means something |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` default (cheap); swap to an Opus model for max judgment |
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |

@@ -1,6 +1,13 @@
 # ADR-0009: Autonomous mode with escalation; learning from operator decisions
 
-**Status:** Accepted
+**Status:** Accepted. **Amended 2026-07-23:** the "higher bars than manual
+mode" premise below was dropped. In practice the Haiku classifier clusters at
+85 (the posting floor) for "worth replying", so bars of 90/85 left autonomous
+mode effectively off — nearly every good reply escalated. `AUTO_MIN_INTENT_SCORE`
+/ `AUTO_MIN_LINK_CONFIDENCE` now default to 85/75, matching the posting floors,
+and the pre-publication web-search fact check (added later — see the changelog)
+is the real backstop: it demotes any self-approved reply whose product it
+can't verify as existing or orderable.
 
 ## Context
 Every reply requires manual dashboard approval. That is the right launch
