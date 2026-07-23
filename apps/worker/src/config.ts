@@ -115,6 +115,13 @@ export const config = {
     maxSearches: envInt("FACTCHECK_MAX_SEARCHES", 3),
     /* Verdict confidence floor: below this, auto-posting demotes to manual. */
     minConfidence: envInt("FACTCHECK_MIN_CONFIDENCE", 60),
+    /* Auto-REJECT floor: a verdict that is inaccurate AND at least this
+       confident is adequate evidence the reply is wrong (product missing /
+       unorderable / claim contradicted) — the reply is auto-rejected rather
+       than queued, and the evidence feeds the learning loop. Higher than the
+       demote floor: a merely-unverified check (low confidence, or errored)
+       still routes to a human, never auto-rejects. */
+    disproofConfidence: envInt("FACTCHECK_DISPROOF_CONFIDENCE", 80),
   },
 
   site: {

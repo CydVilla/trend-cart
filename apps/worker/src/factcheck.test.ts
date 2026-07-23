@@ -1,6 +1,47 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateDealSearchEvidence } from "./factcheck.js";
+import {
+  validateDealSearchEvidence,
+  verdictDisproves,
+  verdictPasses,
+  type FactCheckVerdict,
+} from "./factcheck.js";
+
+function verdict(over: Partial<FactCheckVerdict>): FactCheckVerdict {
+  return {
+    accurate: true,
+    confidence: 90,
+    issues: [],
+    summary: "",
+    model: "test",
+    checkedAt: "2026-07-23T00:00:00Z",
+    ...over,
+  };
+}
+
+// Defaults: minConfidence 60, disproofConfidence 80. The three tiers must be
+// cleanly separable — disproof is stricter than "does not pass".
+test("verdictDisproves: confidently-inaccurate is disproof (auto-reject)", () => {
+  assert.equal(verdictDisproves(verdict({ accurate: false, confidence: 90 })), true);
+  assert.equal(verdictPasses(verdict({ accurate: false, confidence: 90 })), false);
+});
+
+test("verdictDisproves: inaccurate but low-confidence is NOT disproof (demote, don't reject)", () => {
+  // Below the disproof floor → unverified, route to a human rather than kill.
+  assert.equal(verdictDisproves(verdict({ accurate: false, confidence: 55 })), false);
+  assert.equal(verdictDisproves(verdict({ accurate: false, confidence: 70 })), false);
+  assert.equal(verdictPasses(verdict({ accurate: false, confidence: 70 })), false);
+});
+
+test("verdictDisproves: an accurate verdict never disproves, even at high confidence", () => {
+  assert.equal(verdictDisproves(verdict({ accurate: true, confidence: 99 })), false);
+  assert.equal(verdictPasses(verdict({ accurate: true, confidence: 99 })), true);
+});
+
+test("verdictDisproves: a null (errored/refused) check is unverified, not disproof", () => {
+  assert.equal(verdictDisproves(null), false);
+  assert.equal(verdictPasses(null), false);
+});
 
 const amazonUrl = "https://www.amazon.com/Nintendo-Switch-Controller/dp/B01NAWKYZ0";
 const saleUrl = "https://slickdeals.net/f/123-switch-controller";

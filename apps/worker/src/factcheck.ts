@@ -210,10 +210,27 @@ export async function factCheckReply(input: FactCheckInput): Promise<FactCheckVe
   }
 }
 
+/** Skip reason stamped on a reply the fact check auto-rejected. Shared by the
+ *  reply loop (writer) and reflection (reader) so the string can't drift. */
+export const FACTCHECK_REJECT_SKIP_REASON = "auto-rejected by fact check";
+
 /** Does this verdict clear the bar for autonomous posting? */
 export function verdictPasses(verdict: FactCheckVerdict | null): boolean {
   return (
     verdict !== null && verdict.accurate && verdict.confidence >= config.factCheck.minConfidence
+  );
+}
+
+/**
+ * Does this verdict provide adequate evidence that the reply is WRONG?
+ * A confidently-inaccurate verdict — the verifier positively found the product
+ * missing/unorderable or a material claim contradicted. This is stricter than
+ * `!verdictPasses`: a low-confidence or errored check is merely "unverified"
+ * (route to a human), not disproof. Only this returns true → auto-reject.
+ */
+export function verdictDisproves(verdict: FactCheckVerdict | null): boolean {
+  return (
+    verdict !== null && !verdict.accurate && verdict.confidence >= config.factCheck.disproofConfidence
   );
 }
 

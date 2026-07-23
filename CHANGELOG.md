@@ -3,6 +3,38 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-23 — The fact check can auto-reject and teach itself
+
+### Added
+- **The web-search fact check now GATES approval, and disproof auto-rejects.**
+  The verdict used to only demote a self-approving reply to the manual queue;
+  queue-bound replies got an informational verdict but it changed nothing. Now
+  the verdict routes three ways off the classifier's own confidence (line-71
+  semantics — confidence is symmetric, low when a claim can't be verified):
+  - **Disproved** (`accurate=false` AND confidence ≥ `FACTCHECK_DISPROOF_CONFIDENCE`,
+    default 80): the verifier positively found the product missing/unorderable
+    or a claim contradicted → **auto-rejected** (`SKIPPED`, reason
+    "auto-rejected by fact check"), on both the self-approve and the
+    would-queue path. A provably-wrong reply never reaches the operator.
+  - **Unverifiable** (inaccurate but low-confidence, or an errored/refused
+    check): unchanged fail-safe — a self-approving reply demotes to the manual
+    queue; we lack positive disproof, so a human still decides.
+  - **Passes**: posts / stays queued as before.
+- **Auto-rejections feed the learning loop.** Reflection now reads the bot's
+  own disproof evidence (post, drafted reply, the verifier's summary + issues)
+  as a new evidence section, framed to learn the GENERAL pattern (which product
+  types / editions / availability claims proved un-buyable) rather than
+  memorize the title. These are the bot's objective findings, distinct from
+  operator taste — and NOT added to the operator-labeled calibration/training
+  sets (different `skipReason`, so those matchers skip them). Auto-rejections
+  also count toward the reflection signal tally and the daily insights basis.
+- **Auditability**: the recent-activity table renders the full fact-check
+  verdict (confidence + issues) on auto-rejected rows, so the operator can see
+  exactly why the bot killed a reply. Worker stats line gains `factRejected`.
+  New `FACTCHECK_DISPROOF_CONFIDENCE` (default 80) tunes the auto-reject bar —
+  higher than the demote floor (`FACTCHECK_MIN_CONFIDENCE`, 60) on purpose.
+  Unit tests lock the disproved / unverifiable / passing / errored tiers.
+
 ## 2026-07-23 — Autonomous self-approval bars aligned to the posting floors
 
 ### Changed

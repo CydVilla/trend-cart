@@ -247,6 +247,11 @@ export default async function RepliesPage({
                       {reply.skipReason ? (
                         <div className="text-zinc-400">{truncate(reply.skipReason, 100)}</div>
                       ) : null}
+                      {/* Auto-rejected by the fact check: show the verdict so
+                          the operator can audit WHY the bot killed it. */}
+                      {reply.skipReason === "auto-rejected by fact check" && (
+                        <FactCheckNote raw={reply.factCheck} />
+                      )}
                       {reply.status === ReplyStatus.POSTED && (
                         <div className="mt-1 text-zinc-400">
                           ♥ {reply.replyLikeCount} · ↩ {reply.replyReplyCount}

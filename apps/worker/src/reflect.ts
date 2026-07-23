@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { prisma, ReplyStatus, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
+import { FACTCHECK_REJECT_SKIP_REASON } from "./factcheck.js";
 
 /**
  * The bot's learning loop. Once a day it looks at every judgment signal the
@@ -59,6 +60,19 @@ function clip(text: string, max = 220): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+/** Pull the human-readable verdict out of a BotReply.factCheck JSON column
+ *  (defensive about shape — it's untyped JSON). */
+function factEvidence(raw: unknown): { summary: string; issues: string[] } {
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    return {
+      summary: typeof o.summary === "string" ? o.summary : "",
+      issues: Array.isArray(o.issues) ? o.issues.filter((i): i is string => typeof i === "string") : [],
+    };
+  }
+  return { summary: "", issues: [] };
+}
+
 /** Format audience replies (BotReply.receivedReplies JSON) as indented
  *  "they said:" lines — defensive about shape since it's a JSON column. */
 function fmtAudience(raw: unknown, max = 3): string {
@@ -109,7 +123,7 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
 
   const since = new Date(Date.now() - EVIDENCE_WINDOW_MS);
 
-  const [rejected, edited, manualSkips, posted, optOuts, rated] = await Promise.all([
+  const [rejected, edited, manualSkips, posted, optOuts, rated, factRejected] = await Promise.all([
     prisma.botReply.findMany({
       where: {
         status: ReplyStatus.SKIPPED,
@@ -148,10 +162,28 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
       orderBy: { ratedAt: "desc" },
       take: 12,
     }),
+    // Replies the web-search fact check auto-rejected — the bot's OWN
+    // disproof evidence (product missing/unorderable, claim contradicted).
+    // factCheck (a scalar column) rides along; include returns it by default.
+    prisma.botReply.findMany({
+      where: {
+        status: ReplyStatus.SKIPPED,
+        skipReason: FACTCHECK_REJECT_SKIP_REASON,
+        createdAt: { gte: since },
+      },
+      include: { post: { select: { text: true, source: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+    }),
   ]);
 
   const signals =
-    rejected.length + edited.length + manualSkips.length + posted.length + rated.length;
+    rejected.length +
+    edited.length +
+    manualSkips.length +
+    posted.length +
+    rated.length +
+    factRejected.length;
   if (signals < MIN_SIGNALS) return;
 
   // Affiliate-link clicks per sampled reply — the revenue-proximate signal
@@ -188,6 +220,16 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
           (r) =>
             `- post: "${clip(r.post.text)}"\n  drafted reply: "${clip(r.replyText)}"${r.operatorFeedback ? `\n  operator's rejection note: "${clip(r.operatorFeedback, 160)}"` : ""}`,
         )
+        .join("\n")}`,
+    );
+  }
+  if (factRejected.length > 0) {
+    sections.push(
+      `FACT-CHECK AUTO-REJECTED (the bot's web-search verifier found the linked product does not exist, is not orderable, or a factual claim was wrong, and killed the reply before it posted — objective evidence, not operator taste. Learn the GENERAL pattern so the classifier stops proposing this kind of reply: which product types, editions, platforms, or availability/release claims proved un-buyable. Do NOT memorize the specific title):\n${factRejected
+        .map((r) => {
+          const { summary, issues } = factEvidence(r.factCheck);
+          return `- post: "${clip(r.post.text, 120)}"\n  drafted reply: "${clip(r.replyText, 160)}"\n  verifier found: "${clip(summary, 200)}"${issues.length ? ` [issues: ${issues.map((i) => clip(i, 80)).join("; ")}]` : ""}`;
+        })
         .join("\n")}`,
     );
   }
@@ -252,6 +294,7 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
     generatedAt: new Date().toISOString(),
     model: config.llm.model,
     rejected: rejected.length,
+    factRejected: factRejected.length,
     edited: edited.length,
     manualSkips: manualSkips.length,
     postedSampled: posted.length,

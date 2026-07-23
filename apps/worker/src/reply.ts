@@ -4,7 +4,13 @@ import { checkSearchAvailability } from "./availability.js";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
-import { factCheckReply, verdictPasses, type FactCheckVerdict } from "./factcheck.js";
+import {
+  factCheckReply,
+  verdictPasses,
+  verdictDisproves,
+  FACTCHECK_REJECT_SKIP_REASON,
+  type FactCheckVerdict,
+} from "./factcheck.js";
 import { getOperatorFlags } from "./heartbeat.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
 import { createTrackedLink } from "./tracking.js";
@@ -30,6 +36,8 @@ export type ReplyStats = {
   factChecked: number;
   /** Of `factChecked`: failed/unverifiable — demoted to manual approval. */
   factFlagged: number;
+  /** Of `factChecked`: DISPROVED — auto-rejected (never surfaced to the human). */
+  factRejected: number;
   skipped: number;
   deferred: number;
   failed: number;
@@ -505,16 +513,20 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     let { status, approvedAt } = statusFor(evaluation, link, flags.autonomous);
 
     // Web-search fact check (does the product exist / is it orderable or
-    // pre-orderable / are the claims right) runs on BOTH outcomes:
-    // - self-approved replies: the LAST GATE before an unreviewed post —
-    //   fail-safe, an inaccurate/unverifiable/errored check demotes to the
-    //   manual queue with the verdict attached;
-    // - queue-bound replies: informational — the verdict rides along so the
-    //   operator approves/rejects against real-world evidence instead of
-    //   having to research orderability themselves.
+    // pre-orderable / are the claims right) runs on BOTH outcomes, and its
+    // verdict GATES the result three ways:
+    // - DISPROVED (confidently inaccurate — product missing/unorderable or a
+    //   claim contradicted): auto-rejected. Never surface a provably-wrong
+    //   reply to the human; the evidence feeds the learning loop instead.
+    // - unverifiable/low-confidence on a self-approved reply: fail-safe demote
+    //   to the manual queue with the verdict attached (a missed post beats a
+    //   wrong one — but we lack positive disproof, so a human decides).
+    // - otherwise: the verdict rides along informationally (queue-bound replies
+    //   the operator judges against real evidence; passing self-approvals post).
     // Operator-linked replies skip it (the human already chose that link).
     let factCheck: FactCheckVerdict | null = null;
     let factChecked = false;
+    let skipReason: string | null = null;
     if (
       (status === ReplyStatus.APPROVED || status === ReplyStatus.PENDING_APPROVAL) &&
       config.factCheck.enabled &&
@@ -533,7 +545,15 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         suggestedReplyAngle: evaluation.suggestedReplyAngle,
       });
       stats.factChecked += 1;
-      if (status === ReplyStatus.APPROVED && !verdictPasses(factCheck)) {
+      if (verdictDisproves(factCheck)) {
+        status = ReplyStatus.SKIPPED;
+        approvedAt = null;
+        skipReason = FACTCHECK_REJECT_SKIP_REASON;
+        stats.factRejected += 1;
+        console.log(
+          `[factcheck] AUTO-REJECTED (disproved, confidence ${factCheck!.confidence}): ${factCheck!.summary}`,
+        );
+      } else if (status === ReplyStatus.APPROVED && !verdictPasses(factCheck)) {
         status = ReplyStatus.PENDING_APPROVAL;
         approvedAt = null;
         stats.factFlagged += 1;
@@ -557,6 +577,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         linkAnchor: link.anchor,
         status,
         approvedAt,
+        ...(skipReason ? { skipReason } : {}),
         ...(factChecked
           ? {
               factCheck: (factCheck ?? {
