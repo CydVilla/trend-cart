@@ -3,6 +3,30 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-24 — Deal channel unblocked: over-strict sale gate loosened
+
+### Fixed
+- **Zero deal posts since 07-20 — the 07-21 "sale-verified" gate blocked
+  everything.** Diagnosis: the pipeline was healthy end-to-end (fresh q=amazon
+  supply, candidates scoring 85–95 — Ratchet & Clank PS5 $29, Samsung 4K
+  monitors), but 100% died at the final web-search sale verification with
+  `strict check could not be completed`. The 07-21 gate demanded the verifier
+  cite a search-returned exact-ASIN Amazon page **plus** a separate current-sale
+  page dated within 6h and naming Amazon as seller — a bar general web search
+  essentially never clears, even for a deal a human can see on Slickdeals.
+- **New `DEAL_RSS_STRICT_SALE_VERIFICATION` (default false)** restores the
+  pre-07-21 corroboration (operator decision): a lighter web-search check that
+  fail-closes on **existence + orderability** only — the bot never links a dead,
+  nonexistent, discontinued, or counterfeit listing. The posts remain price-free
+  and Slickdeals-attributed ("spotted via Slickdeals — see the deal on Amazon
+  #ad"), so the sale is the feed's claim, not the bot's, and ADR-0013's
+  price-free inversion holds. A dedicated corroboration prompt decouples
+  `accurate`/`orderableOnAmazon` from sale-confirmation (the strict prompt
+  coupled them, so reusing it would have failed the loose gate). `strict:true`
+  keeps the exact 07-21 behavior for the day PA-API attested prices exist. Also
+  cheaper: the loose check does less search work per candidate. Tests cover both
+  gates.
+
 ## 2026-07-23 (later) — Deal channel was starved, not broken
 
 ### Fixed

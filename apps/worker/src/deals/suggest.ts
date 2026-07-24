@@ -830,10 +830,14 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
             sourceUrl: candidate.sourceUrl,
             publishedAt: meta.publishedAt,
             maxEvidenceAgeHours: config.deals.suggestions.maxSaleEvidenceAgeHours,
+            strict: config.deals.suggestions.strictSaleVerification,
           });
-      if (!dealVerdictPasses(verdict) && !config.llm.useFake) {
+      if (
+        !dealVerdictPasses(verdict, config.deals.suggestions.strictSaleVerification) &&
+        !config.llm.useFake
+      ) {
         await dismissCandidate(candidate.id, candidate.gateVerdict, "amazon_sale_unverified", {
-          factCheck: verdict ?? { error: "strict check could not be completed" },
+          factCheck: verdict ?? { error: "sale corroboration could not be completed" },
         });
         continue;
       }

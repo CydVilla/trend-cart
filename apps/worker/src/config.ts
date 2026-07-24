@@ -304,6 +304,19 @@ export const config = {
       minAmazonMatchConfidence: envInt("DEAL_RSS_MIN_AMAZON_MATCH_CONFIDENCE", 80),
       /* Expensive strict sale-verification calls attempted per worker tick. */
       maxFactChecksPerTick: envInt("DEAL_RSS_MAX_FACTCHECKS_PER_TICK", 3),
+      /* Sale-verification strictness.
+         - true (the 2026-07-21 gate): the web-search verifier must cite a
+           search-returned Amazon page with the exact ASIN AND a separate
+           current-sale page dated within maxSaleEvidenceAgeHours. In practice
+           web search almost never satisfies this, so it blocked ~100% of
+           posts — a genuine deal a human can see on Slickdeals still fails.
+         - false (default; the pre-07-21 corroboration): web-search fail-closed
+           on EXISTENCE + ORDERABILITY only. The posts are price-free and
+           Slickdeals-attributed ("spotted via Slickdeals — see the deal on
+           Amazon"), so the bot never itself asserts a price; the sale is
+           Slickdeals' attributed claim and ADR-0013's price-free inversion
+           holds. The verifier still kills dead/unorderable/nonexistent links. */
+      strictSaleVerification: envBool("DEAL_RSS_STRICT_SALE_VERIFICATION", false),
       /* External evidence must explicitly confirm a current Amazon sale
          inside this window. The poster then enforces a shorter verification
          TTL so a staged deal cannot publish much later. */

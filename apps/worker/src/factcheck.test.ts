@@ -1,11 +1,48 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  dealVerdictPasses,
   validateDealSearchEvidence,
   verdictDisproves,
   verdictPasses,
+  type DealFactCheckVerdict,
   type FactCheckVerdict,
 } from "./factcheck.js";
+
+function dealVerdict(over: Partial<DealFactCheckVerdict>): DealFactCheckVerdict {
+  return {
+    accurate: true,
+    exactProductMatch: true,
+    orderableOnAmazon: true,
+    amazonSaleConfirmed: true,
+    confidence: 90,
+    amazonProductEvidenceUrl: "https://www.amazon.com/dp/B01NAWKYZ0",
+    saleEvidenceUrl: "https://slickdeals.net/f/1",
+    saleEvidenceSummary: "",
+    issues: [],
+    summary: "",
+    model: "test",
+    checkedAt: "2026-07-24T00:00:00Z",
+    evidenceUrls: [],
+    saleEvidencePublishedAt: "2026-07-24T00:00:00Z",
+    ...over,
+  };
+}
+
+// Loose (corroboration) mode gates on existence + orderability only; strict
+// additionally requires exact match + a confirmed Amazon sale.
+test("dealVerdictPasses: loose passes an orderable item with no confirmed sale", () => {
+  const noSale = dealVerdict({ amazonSaleConfirmed: false, exactProductMatch: false });
+  assert.equal(dealVerdictPasses(noSale, false), true); // corroboration: orderable is enough
+  assert.equal(dealVerdictPasses(noSale, true), false); // strict: needs the confirmed sale
+});
+
+test("dealVerdictPasses: loose still fails a dead/unorderable or inaccurate link", () => {
+  assert.equal(dealVerdictPasses(dealVerdict({ orderableOnAmazon: false }), false), false);
+  assert.equal(dealVerdictPasses(dealVerdict({ accurate: false }), false), false);
+  assert.equal(dealVerdictPasses(dealVerdict({ confidence: 40 }), false), false);
+  assert.equal(dealVerdictPasses(null, false), false);
+});
 
 function verdict(over: Partial<FactCheckVerdict>): FactCheckVerdict {
   return {
