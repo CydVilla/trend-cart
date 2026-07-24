@@ -51,12 +51,6 @@ export function dealPostTone(status: string): Tone {
   return "zinc";
 }
 
-export function armStateTone(state: string): Tone {
-  if (state === "ARMED") return "green";
-  if (state === "FIRED") return "blue";
-  return "zinc";
-}
-
 /** Integer cents → localized currency string; re-exported for pages. */
 export { formatMoney } from "@trendcart/shared";
 

@@ -29,8 +29,6 @@ const InsightsSchema = z.object({
     .max(6),
 });
 
-export type InsightsReport = z.infer<typeof InsightsSchema>;
-
 const INSIGHTS_SYSTEM = `You are the operations analyst for TrendCart, a disclosed, autonomous Bluesky bot that replies to trending posts with tagged Amazon product recommendations. You are given its pipeline funnel as hard numbers: posts discovered → candidates that cleared the engagement floor → evaluated → judged worth replying to → replies posted, plus per-category output, skip reasons, and the current config.
 
 Write a short operations report for the operator:

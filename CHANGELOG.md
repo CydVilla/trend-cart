@@ -3,6 +3,23 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-24 (later) — Dead-code sweep (issue #15 triage)
+
+### Removed
+- **`ws` + `@types/ws`** from `@trendcart/worker` — the Jetstream firehose that
+  used websockets was removed in ADR-0008; no source imports `ws`. Real dead
+  weight, gone.
+- **`armStateTone`** (dashboard `ui.tsx`) and **`InsightsReport`** (worker
+  `insights.ts`) — an exported function and an exported type, both referenced
+  nowhere.
+- Deliberately KEPT (not dead / future placeholders per the operator): the
+  PA-API signing + transient code (dark until credentials unlock the deal
+  automation), `threshold-sweep.ts` (a manual analysis CLI), and `apps/web`'s
+  `@prisma/client`/`prisma` (Knip false positives — used by `next.config.mjs`
+  `serverExternalPackages` and the runtime client). The remaining ~30 Knip
+  "unused exports/types" are live code that's merely over-exported (used within
+  their own module) — not dead; left as-is rather than churn keywords.
+
 ## 2026-07-24 — Deal channel unblocked: over-strict sale gate loosened
 
 ### Fixed
