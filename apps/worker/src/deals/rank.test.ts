@@ -13,6 +13,11 @@ test("classifies the requested high-conversion lanes", () => {
   assert.equal(heuristicLane("2TB NVMe SSD", "tech", 7_499), "storage-ssd");
   assert.equal(heuristicLane("DualSense wireless controller", "gaming", 6_999), "playstation-xbox");
   assert.equal(heuristicLane("Funko Star Wars figure", "collectibles", 1_999), "collectibles-fandom");
+  // Movies land in movies-tv — and a disc keyword wins over a fandom keyword
+  // (a Marvel Blu-ray is a movie, not a collectible), since movies-tv precedes
+  // collectibles-fandom in the rules.
+  assert.equal(heuristicLane("Dune: Part Two 4K UHD Steelbook", "movies", 2_499), "movies-tv");
+  assert.equal(heuristicLane("Marvel Cinematic Universe Blu-ray box set", "movies", 5_999), "movies-tv");
 });
 
 test("scores exact, fresh, purchase-oriented candidates above weak ones", () => {

@@ -116,6 +116,7 @@ export type HighConversionLane =
   | "controllers-parts"
   | "collectibles-fandom"
   | "recent-games"
+  | "movies-tv"
   | "giftable-under-75"
   | "other";
 

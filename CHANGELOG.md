@@ -3,6 +3,26 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-24 (later) — Movies & TV as a weighted deal lane
+
+### Added
+- **`movies-tv` high-conversion lane** (operator request: weight movies + video
+  games well without diminishing other deals). Physical movies/TV — Blu-ray, 4K
+  UHD, steelbooks, DVD, box sets, Criterion — now classify into a first-class
+  lane at editorial priority **84** (high tier, under the top game lanes so
+  games stay first). New keyword rules (`heuristicLane`) put a disc keyword
+  ahead of a fandom keyword, so a Marvel Blu-ray is a movie, not a collectible.
+  A new **"Movies & TV (Slickdeals)"** source (frontpage + the fresh Amazon
+  feed) discovers them — previously movie deals matched no source keyword and
+  were dropped as off-lane.
+- **Nothing else is diminished.** Video games were already the top-weighted
+  lanes (recent-games 90, nintendo 88, controllers 86…); movies slot in at 84.
+  And lane priority is only 15% of the candidate score — the other 75% is
+  genuine quality (purchase intent 30%, Amazon-match 25%, topic fit 20%) — so
+  the lane weight is a gentle nudge, and the existing same-lane diversity
+  penalty still guarantees other lanes get slots. Requires a prod re-seed to
+  create the new sources.
+
 ## 2026-07-24 (later) — Dead-code sweep (issue #15 triage)
 
 ### Removed

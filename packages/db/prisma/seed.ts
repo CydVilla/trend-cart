@@ -406,6 +406,28 @@ const suggestionSources: SourceSeed[] = [
     ],
     minPriceCents: 1500,
   },
+  {
+    name: "Movies & TV (Slickdeals)",
+    url: SLICKDEALS_FRONTPAGE_RSS,
+    topic:
+      "Physical movies and TV on disc: Blu-ray, 4K UHD, steelbook and collector editions, DVD, " +
+      "complete-series box sets, and Criterion releases. Digital/streaming codes and non-disc " +
+      "merchandise do NOT match.",
+    includeKeywords: [
+      "blu-ray",
+      "blu ray",
+      "bluray",
+      "4k uhd",
+      "uhd",
+      "steelbook",
+      "dvd",
+      "box set",
+      "complete series",
+      "criterion",
+    ],
+    excludeKeywords: ["digital code", "digital copy", "subscription", "gift card"],
+    minPriceCents: 500,
+  },
 ];
 
 /**
@@ -426,11 +448,14 @@ const suggestionSources: SourceSeed[] = [
 const SLICKDEALS_AMAZON_RSS =
   "https://slickdeals.net/newsearch.php?q=amazon&searcharea=deals&searchin=first&rss=1";
 
-/** Highest-conviction lanes only (per the July insights): gaming, tech, LEGO. */
+/** Highest-conviction lanes (per the July insights): gaming, tech, LEGO —
+ *  plus Movies & TV, weighted well per operator request. Each also polls the
+ *  fresh Amazon-scoped feed. */
 const AMAZON_FEED_LANES = [
   "Tech & electronics (Slickdeals)",
   "Video games & gaming (Slickdeals)",
   "LEGO & building sets (Slickdeals)",
+  "Movies & TV (Slickdeals)",
 ];
 
 const amazonFeedSources: SourceSeed[] = suggestionSources

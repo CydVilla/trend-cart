@@ -17,6 +17,10 @@ export const HIGH_CONVERSION_LANES: Record<HighConversionLane, LaneMeta> = {
   "controllers-parts": { label: "Controllers / replacement parts", priority: 86 },
   "collectibles-fandom": { label: "Collectibles / fandom", priority: 76 },
   "recent-games": { label: "Recently released games", priority: 90 },
+  // Weighted into the high tier alongside gaming, but under the top game lanes
+  // so games stay first. lanePrior is only 15% of the score, so this nudges
+  // movies up without starving the other lanes.
+  "movies-tv": { label: "Movies / TV (Blu-ray, 4K)", priority: 84 },
   "giftable-under-75": { label: "Giftable under $75", priority: 78 },
   other: { label: "Outside high-conversion lanes", priority: 0 },
 };
@@ -92,6 +96,19 @@ const LANE_RULES: Rule[] = [
       /\bgpu\b/i,
       /\bmechanical keyboard\b/i,
       /\bsteam deck\b/i,
+    ],
+  },
+  {
+    lane: "movies-tv",
+    patterns: [
+      /\bblu-?ray\b/i,
+      /\b4k uhd\b/i,
+      /\buhd\b/i,
+      /\bsteelbook\b/i,
+      /\bdvd\b/i,
+      /\bbox\s*set\b/i,
+      /\bcomplete series\b/i,
+      /\bcriterion\b/i,
     ],
   },
   {

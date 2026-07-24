@@ -64,6 +64,7 @@ const SuggestionVerdictSchema = z.object({
     "controllers-parts",
     "collectibles-fandom",
     "recent-games",
+    "movies-tv",
     "giftable-under-75",
     "other",
   ]),
@@ -86,6 +87,7 @@ Rules:
   - controllers-parts: controllers, replacement sticks, charging docks, cases, cables, and repair/replacement parts
   - collectibles-fandom: licensed figures, LEGO, apparel, and fandom merchandise
   - recent-games: newly released or currently pre-orderable physical games
+  - movies-tv: physical movies and TV — Blu-ray, 4K UHD, steelbooks, DVD, box sets, complete-series and Criterion editions
   - giftable-under-75: clearly giftable products likely to cost no more than about $75 when no more specific lane fits
   - other: anything outside those lanes or too ambiguous to classify
 - The other lane can never be an autonomous candidate. Do not force an item into a commercial lane.
