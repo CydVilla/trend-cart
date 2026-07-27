@@ -16,8 +16,11 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   `lastClickAt` describe human behavior only. A UA denylist can't catch
   crawlers that fake browser UAs, so `clickCount` is an upper bound — but the
   honest majority of the noise is gone. Migration `separate_bot_clicks`.
-  **Historical counts keep their bot pollution** (no UA was stored to backfill
-  from); treat pre-deploy numbers as a different, inflated unit.
+- **Historical counts reset to zero** (operator call): a second migration
+  (`reset_click_counts`) folds every pre-filter total into `botClickCount` —
+  the raw volume stays observable, labeled for what it almost entirely was —
+  and nulls `firstClickAt`/`lastClickAt`. Human counting starts clean at the
+  moment it became honest; every `clickCount` from here on is a real person.
 
 ### Added
 - **Fact checks log their web-search usage** (`used N/cap searches`) and store
