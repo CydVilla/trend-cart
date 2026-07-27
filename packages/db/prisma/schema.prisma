@@ -123,7 +123,13 @@ model TrackedLink {
   kind         String
   /// Id of the source row (BotReply / DealPost) for drill-down.
   sourceId     String?
+  /// Human-looking clicks only — the revenue signal. Firehose crawlers fetch
+  /// every posted URL within seconds (measured 2026-07-27: median 0.4s from
+  /// post to "first click"), so bot/preview traffic is counted separately.
   clickCount   Int       @default(0)
+  /// Redirects served to bots/preview fetchers (HEAD, bot UAs, empty UA).
+  /// Kept so the raw volume stays observable; never shown as clicks.
+  botClickCount Int      @default(0)
   firstClickAt DateTime?
   lastClickAt  DateTime?
   createdAt    DateTime  @default(now())

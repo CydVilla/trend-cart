@@ -46,6 +46,10 @@ const DealVerdictSchema = z.object({
 export type FactCheckVerdict = z.infer<typeof VerdictSchema> & {
   model: string;
   checkedAt: string;
+  /** Web searches the verifier actually ran (cap: FACTCHECK_MAX_SEARCHES).
+   *  Stored so the operator can tell whether the cap is ever hit before
+   *  considering lowering it — search fees are ~2/3 of a check's cost. */
+  searchesUsed?: number;
 };
 
 export type DealFactCheckVerdict = z.infer<typeof DealVerdictSchema> & {
@@ -197,10 +201,15 @@ export async function factCheckReply(input: FactCheckInput): Promise<FactCheckVe
       ],
     });
     if (response.stop_reason === "refusal" || !response.parsed_output) return null;
+    const searchesUsed = response.usage.server_tool_use?.web_search_requests ?? 0;
+    console.log(
+      `[factcheck] reply check used ${searchesUsed}/${config.factCheck.maxSearches} searches`,
+    );
     return {
       ...response.parsed_output,
       model: config.llm.model,
       checkedAt: new Date().toISOString(),
+      searchesUsed,
     };
   } catch (error) {
     console.warn(
@@ -361,6 +370,9 @@ export async function factCheckDealListing(input: {
       ],
     });
     if (response.stop_reason === "refusal" || !response.parsed_output) return null;
+    console.log(
+      `[factcheck] deal check used ${response.usage.server_tool_use?.web_search_requests ?? 0}/${config.factCheck.maxSearches} searches`,
+    );
     const evidenceResults = response.content.flatMap((block) =>
       block.type === "web_search_tool_result" && Array.isArray(block.content)
         ? block.content.map((result) => ({ url: result.url, pageAge: result.page_age }))

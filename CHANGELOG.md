@@ -3,6 +3,29 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-27 (later) — The click counter stops counting robots
+
+### Changed
+- **`clickCount` now means humans.** Measured on prod: median **0.4 seconds**
+  from reply post to "first click" across 283 links — firehose crawlers fetch
+  every posted URL the instant it appears, so the counter that reads as "the
+  revenue signal" (1,115 clicks last week) was overwhelmingly bots. The `/r/`
+  route still 302s every request (a redirect must never break), but HEAD
+  requests, empty user-agents, and known bot/preview UAs now land in a new
+  **`botClickCount`** column instead; `clickCount`, `firstClickAt`, and
+  `lastClickAt` describe human behavior only. A UA denylist can't catch
+  crawlers that fake browser UAs, so `clickCount` is an upper bound — but the
+  honest majority of the noise is gone. Migration `separate_bot_clicks`.
+  **Historical counts keep their bot pollution** (no UA was stored to backfill
+  from); treat pre-deploy numbers as a different, inflated unit.
+
+### Added
+- **Fact checks log their web-search usage** (`used N/cap searches`) and store
+  `searchesUsed` in the verdict JSON. Searches are ~2/3 of a check's marginal
+  cost and capped by `FACTCHECK_MAX_SEARCHES` (3); until now nothing recorded
+  how many a check actually ran, so there was no basis for tuning the cap.
+  A week of logs answers whether 3 is ever hit.
+
 ## 2026-07-27 (later) — Platform floor for game recs; redirect fallbacks now visible
 
 ### Changed
