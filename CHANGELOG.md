@@ -25,9 +25,12 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   **4096-token** minimum — verified live (call 1 wrote 4237, call 2 read 4237).
   The cached prefix is the structured-output schema + system prompt + category
   list, not just system + categories.
-- **Margin is 141 tokens — about two categories.** Deactivating a couple of
-  categories drops it under the minimum and caching stops silently. That is
-  what the new counters and warning exist to catch.
+- **The active-category count decides it.** Fixed part (schema + system) is
+  ~3618 tokens and each category adds ~69, so caching engages at roughly
+  **seven** active categories. Prod runs **15 active → ~4650 tokens, ~8
+  categories of headroom** (healthy); the local dev seed's 9 leaves only ~2.
+  Deactivating categories past the line stops caching silently — which is what
+  the new counters and warning exist to catch.
 - Nothing else in the repo is cacheable on Haiku: reply 379, fact-check 415,
   deal 591 / 431, suggestion 572 tokens — all far under 4096. The fact-check
   and repair paths have **no** caching lever; their only cost dial is

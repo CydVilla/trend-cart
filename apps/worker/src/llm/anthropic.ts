@@ -270,8 +270,9 @@ ${sanitizeUntrusted(input.postText)}
  *
  * These counters exist because the failure mode is SILENT: a prefix that drops
  * below the model's minimum is not an error and not a warning — the API just
- * returns zeros and bills full price. Measured 2026-07-27 the margin is only
- * ~141 tokens (see classifyPost), so that is a live risk, not a hypothetical.
+ * returns zeros and bills full price. The margin is a function of how many
+ * categories are active (see classifyPost), which the operator can change from
+ * the dashboard at any time — so this is worth watching, not a fixed property.
  * Cumulative since process start, like every other counter in the stats line.
  */
 let cacheReadTokens = 0;
@@ -315,16 +316,19 @@ export class AnthropicLlmClient implements LlmClient {
       // system prompt, and category list together, so every candidate after
       // the first reads them at ~0.1× price instead of full input rate.
       //
-      // HEADROOM IS THIN — verified live 2026-07-27 on claude-haiku-4-5 with 9
-      // active categories: 4237 tokens cached against Haiku 4.5's 4096-token
-      // minimum. That is 141 tokens of margin, roughly TWO categories' worth.
-      // Deactivating a couple of categories in the dashboard drops the prefix
-      // under the minimum and caching silently stops: no error, no warning,
-      // just full input price on every classification. `cacheRead` in the
-      // stats line is the canary, and the warning below fires the first time a
-      // call neither reads nor writes. If it ever trips, add real content
-      // (categories, example problems) — never filler, which you would then
-      // pay for on every uncached request forever.
+      // THE CATEGORY COUNT DECIDES WHETHER THIS CACHES AT ALL. Verified live
+      // 2026-07-27 on claude-haiku-4-5: 9 active categories cached 4237 tokens
+      // against Haiku 4.5's 4096-token minimum. Fixed part (schema + system +
+      // wrapper) is ~3618 tokens and each category adds ~69, so the bar is
+      // cleared at roughly SEVEN active categories.
+      //   - prod: 15 active → ~4650 tokens, ~8 categories of headroom (healthy)
+      //   - local dev seed: 9 active → 4237 tokens, ~2 categories of headroom
+      // Fall under the minimum and caching silently stops — no error, no
+      // warning, just full input price on every classification. `cacheRead` in
+      // the stats line is the canary, and the warning below fires the first
+      // time a call neither reads nor writes. If it ever trips, reactivate a
+      // category or add real content (example problems) — never filler, which
+      // you would then pay for on every uncached request forever.
       { type: "text", text: stable, cache_control: { type: "ephemeral" } },
       ...(typeof rest === "string" ? [{ type: "text" as const, text: rest }] : rest),
     ];
