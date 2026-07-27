@@ -226,15 +226,6 @@ export function signPaapiRequest(
   return { authorization, amzDate };
 }
 
-/** Kept for the signing test's published-vector check. */
-export function signGetItems(
-  body: string,
-  now: Date,
-  creds: { accessKey: string; secretKey: string; host: string; region: string },
-): { authorization: string; amzDate: string } {
-  return signPaapiRequest("GetItems", body, now, creds);
-}
-
 /** POST one PA-API operation with retry/backoff; returns the parsed JSON. */
 async function callPaapi(op: PaapiOp, requestBody: Record<string, unknown>): Promise<unknown> {
   const body = JSON.stringify({

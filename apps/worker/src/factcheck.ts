@@ -63,11 +63,12 @@ Verify, using web search where it helps:
 1. The product the reply points at actually EXISTS and is currently orderable (or has a genuine pre-order) as a physical item a buyer could get. "Announced but unavailable", digital-only, or long out of print = not orderable.
 2. The reply's factual claims are accurate: release status, platform, edition, franchise facts. A reply implying something ships today when it is unreleased is inaccurate.
 3. An Amazon search for the given query would plausibly land on that product (or closely-related orderable items) on page one. You cannot browse Amazon's live results — judge from general web evidence (retailer pages, product news, release coverage).
+4. OPERATOR POLICY — video game platform floor. TrendCart recommends video games ONLY for the PS4 / Xbox One / Nintendo Switch generation and newer. A reply recommending or linking an ORIGINAL copy of a game, console, or accessory for anything older — PS3, Xbox 360, Wii U, Wii, GameCube, N64, SNES/NES, PS2/PS1, original Xbox, and every pre-Switch handheld (Game Boy line, DS, 3DS, PSP, Vita) — VIOLATES this policy even when the item is technically orderable as a used/collector listing. Treat a violation as inaccurate: accurate=false, high confidence, with an issue naming the legacy platform. A modern remaster, remake, or re-release of an old title on current platforms is fine and expected.
 
 Search economically: for a generic category-level link with no specific product claims, your own knowledge usually suffices — search only when a specific product, release date, or availability claim needs checking.
 
 Verdict rules:
-- accurate=false when any MATERIAL claim is wrong, the product appears not to exist, or it appears not orderable. Minor tone/style issues are not inaccuracy.
+- accurate=false when any MATERIAL claim is wrong, the product appears not to exist, it appears not orderable, or the operator platform-floor policy (check 4) is violated. Minor tone/style issues are not inaccuracy.
 - confidence 0-100: how sure you are of the verdict either way. If you could not verify a material claim, keep confidence low.
 - issues: short, specific problems found (empty when none). summary: one line for the audit log.
 

@@ -18,8 +18,16 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   let target = fallbackUrl();
+  // Why the fallback was served, when it is. A degraded click still reaches
+  // Amazon but lands on the homepage instead of the product search — it LOOKS
+  // fine to us and broken to the clicker, so it must never happen silently.
+  // (Observed live 2026-07-27: a click during a dyno restart served the
+  // fallback; the row was intact and later clicks redirected correctly.)
+  let fallbackCause: string | null = "unknown";
+  let linkId = "(unparsed)";
   try {
     const { id } = await ctx.params;
+    linkId = id;
     const link = await prisma.trackedLink.findUnique({
       where: { id },
       select: { targetUrl: true, firstClickAt: true },
@@ -27,9 +35,14 @@ export async function GET(
     if (link) {
       // Only ever bounce to Amazon — never let this become an open redirect.
       try {
-        if (isAmazonHost(new URL(link.targetUrl).hostname)) target = link.targetUrl;
+        if (isAmazonHost(new URL(link.targetUrl).hostname)) {
+          target = link.targetUrl;
+          fallbackCause = null;
+        } else {
+          fallbackCause = "target not an Amazon host";
+        }
       } catch {
-        /* malformed target — keep the fallback */
+        fallbackCause = "malformed target URL";
       }
       await prisma.trackedLink
         .update({
@@ -41,9 +54,14 @@ export async function GET(
           },
         })
         .catch(() => {}); // count is best-effort; the redirect below is not
+    } else {
+      fallbackCause = "no TrackedLink row";
     }
-  } catch {
-    /* DB unreachable / bad id — fall through to the fallback redirect */
+  } catch (error) {
+    fallbackCause = `DB error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  if (fallbackCause) {
+    console.warn(`[redirect] /r/${linkId} served the FALLBACK (${fallbackCause}) — a real click lost its product landing`);
   }
   return NextResponse.redirect(target, 302);
 }

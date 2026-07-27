@@ -3,6 +3,42 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-27 (later) — Platform floor for game recs; redirect fallbacks now visible
+
+### Changed
+- **Video-game platform floor (operator rule): PS4 / Xbox One / Switch and
+  newer, full stop.** The 07-19 retro rule named PS1/PS2/GameCube-era hardware
+  as legacy but left the cutoff fuzzy — and a "Super Mario Land on Game Boy is
+  worth grabbing" reply posted right through it (calibration #19: 5 of 9
+  false-would-replies were retro). The classifier rule now enumerates the floor
+  explicitly (legacy = PS3, 360, Wii U, and every pre-Switch handheld, on
+  down), caps legacy-copy queries at linkConfidence 20, extends the floor to
+  hardware/accessories, and says plainly: no modern edition → no reply.
+  Modern remasters/re-releases of old titles remain the expected retarget.
+- **The fact check enforces the floor as policy** (new check 4): a reply
+  recommending an original legacy-platform copy is `accurate=false` at high
+  confidence even though used listings are technically orderable — so on the
+  autonomous path it AUTO-REJECTS (never posts, feeds the learning loop)
+  instead of passing because "the cartridge is buyable". Deliberate: the
+  repair pass can't fix a policy violation (the link itself is the violation),
+  and high-confidence disproof routes to reject before repair is considered.
+
+### Added
+- **`/r/` redirect fallbacks are logged** with the link id and cause (missing
+  row / non-Amazon target / DB error). A degraded click still reaches Amazon
+  but lands on the homepage instead of the product search — invisible to us,
+  broken to the clicker. Observed live 2026-07-27: a click during a dyno
+  restart served the fallback while the row was intact (later clicks resolved
+  correctly); now it would leave a log line.
+
+### Removed
+- Dead-code sweep (issue #18 triage): `extractAmazonRef` (legacy wrapper,
+  superseded by the `matchAmazonProduct` flow) and `signGetItems` (wrapper
+  "kept for the signing test" — no such test exists). The PA-API dark-code
+  cluster, manual CLI scripts, test seams, and web's prisma deps all stay per
+  the issue #15 standing triage; Knip's `postcss` flag is a false positive
+  (`@tailwindcss/postcss` is listed; Next vendors postcss).
+
 ## 2026-07-27 (later) — Harden the classifier's prompt cache (it works, barely)
 
 ### Fixed

@@ -244,25 +244,6 @@ export function matchAmazonProduct(item: RssItem): AmazonMatch | null {
   };
 }
 
-/**
- * Find the first Amazon product reference in the given texts (item link
- * first, then description HTML). Handles both direct product URLs and deal-
- * site redirects that carry the target URL-encoded in a query parameter
- * (e.g. slickdeals.net/?...&u2=https%3A%2F%2Fwww.amazon.com%2Fdp%2FASIN).
- * Shortener links (amzn.to / a.co) stay unresolvable offline → null.
- */
-export function extractAmazonRef(...texts: Array<string | null>): AmazonRef | null {
-  const match = matchAmazonProduct({
-    title: "",
-    link: texts[0] ?? null,
-    guid: "legacy-extractor",
-    description: texts[1] ?? "",
-    content: texts.slice(2).filter(Boolean).join(" "),
-    publishedAt: null,
-  });
-  return match ? { asin: match.asin, marketplace: match.marketplace } : null;
-}
-
 const PRICE_RE = /\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/;
 
 /**
