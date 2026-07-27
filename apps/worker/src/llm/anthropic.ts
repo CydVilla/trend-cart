@@ -264,6 +264,25 @@ ${sanitizeUntrusted(input.postText)}
 }
 
 /**
+ * Prompt-cache accounting for the classifier — the ONLY cached call path here
+ * (every other system prompt in this repo is 380-590 tokens, far under any
+ * model's cacheable minimum, so there is nothing to cache on those).
+ *
+ * These counters exist because the failure mode is SILENT: a prefix that drops
+ * below the model's minimum is not an error and not a warning — the API just
+ * returns zeros and bills full price. Measured 2026-07-27 the margin is only
+ * ~141 tokens (see classifyPost), so that is a live risk, not a hypothetical.
+ * Cumulative since process start, like every other counter in the stats line.
+ */
+let cacheReadTokens = 0;
+let cacheWrittenTokens = 0;
+let cacheInactiveWarned = false;
+
+export function classifyCacheStats(): { read: number; written: number } {
+  return { read: cacheReadTokens, written: cacheWrittenTokens };
+}
+
+/**
  * Anthropic implementation of LlmClient.
  * Classification uses structured outputs (messages.parse + zod), so the result
  * always matches the schema; business-rule gates are enforced in evaluate.ts,
@@ -292,9 +311,20 @@ export class AnthropicLlmClient implements LlmClient {
     const { stable, variable } = buildClassifyPrompt(input);
     const rest = buildContent(variable, input.images);
     const content: Anthropic.ContentBlockParam[] = [
-      // Breakpoint at the end of the stable prefix: caches system prompt +
-      // category list (~4.5k tokens, above Haiku's 4096 minimum). Within a
-      // tick every candidate after the first reads this at ~0.1× price.
+      // Breakpoint at the end of the stable prefix: caches the output schema,
+      // system prompt, and category list together, so every candidate after
+      // the first reads them at ~0.1× price instead of full input rate.
+      //
+      // HEADROOM IS THIN — verified live 2026-07-27 on claude-haiku-4-5 with 9
+      // active categories: 4237 tokens cached against Haiku 4.5's 4096-token
+      // minimum. That is 141 tokens of margin, roughly TWO categories' worth.
+      // Deactivating a couple of categories in the dashboard drops the prefix
+      // under the minimum and caching silently stops: no error, no warning,
+      // just full input price on every classification. `cacheRead` in the
+      // stats line is the canary, and the warning below fires the first time a
+      // call neither reads nor writes. If it ever trips, add real content
+      // (categories, example problems) — never filler, which you would then
+      // pay for on every uncached request forever.
       { type: "text", text: stable, cache_control: { type: "ephemeral" } },
       ...(typeof rest === "string" ? [{ type: "text" as const, text: rest }] : rest),
     ];
@@ -311,6 +341,23 @@ export class AnthropicLlmClient implements LlmClient {
       system: CLASSIFY_SYSTEM,
       messages: [{ role: "user", content }],
     });
+    // Account before the refusal check — a refused call still billed its input.
+    const read = response.usage.cache_read_input_tokens ?? 0;
+    const written = response.usage.cache_creation_input_tokens ?? 0;
+    cacheReadTokens += read;
+    cacheWrittenTokens += written;
+    // First call of the process either WRITES the cache or reads an entry a
+    // previous process left warm. Both zero means the prefix never cleared the
+    // model's minimum — say so once, loudly, instead of quietly paying full
+    // price for weeks.
+    if (!cacheInactiveWarned && read === 0 && written === 0) {
+      cacheInactiveWarned = true;
+      console.warn(
+        `[llm] classify prompt cache INACTIVE — 0 read / 0 written on a ` +
+          `${response.usage.input_tokens}-token prompt. The cached prefix is under ` +
+          `${this.model}'s minimum, so every classification pays full input price.`,
+      );
+    }
     if (response.stop_reason === "refusal" || !response.parsed_output) {
       throw new Error(`classification produced no parseable output (stop: ${response.stop_reason})`);
     }

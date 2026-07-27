@@ -3,6 +3,36 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-27 (later) — Harden the classifier's prompt cache (it works, barely)
+
+### Fixed
+- **Deterministic category order** (`evaluate.ts`). The active-category fetch had
+  no `orderBy`, and that list is the tail of the classifier's **prompt-cached
+  prefix**. Postgres returns unordered rows in heap order, which shifts whenever
+  a row is updated — so a single category edit in the dashboard could reshuffle
+  the list, change the prefix bytes, and silently drop the cache for every
+  later tick. Now `orderBy: { slug: "asc" }`.
+
+### Added
+- **Cache observability**, because the failure mode is silent. A prefix that
+  falls under the model's cacheable minimum is not an error and not a warning —
+  the API returns zeros and bills full input price. The stats line now carries
+  `cacheRead` / `cacheWrite`, and the first call that neither reads nor writes
+  logs a loud one-shot warning naming the cause.
+
+### Measured (2026-07-27, `claude-haiku-4-5`)
+- The cache **is** engaged: **4237 tokens** cached against Haiku 4.5's
+  **4096-token** minimum — verified live (call 1 wrote 4237, call 2 read 4237).
+  The cached prefix is the structured-output schema + system prompt + category
+  list, not just system + categories.
+- **Margin is 141 tokens — about two categories.** Deactivating a couple of
+  categories drops it under the minimum and caching stops silently. That is
+  what the new counters and warning exist to catch.
+- Nothing else in the repo is cacheable on Haiku: reply 379, fact-check 415,
+  deal 591 / 431, suggestion 572 tokens — all far under 4096. The fact-check
+  and repair paths have **no** caching lever; their only cost dial is
+  `FACTCHECK_MAX_SEARCHES`.
+
 ## 2026-07-27 — A flagged reply gets one self-repair before it costs you a review
 
 ### Added

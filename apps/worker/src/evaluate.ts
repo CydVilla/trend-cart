@@ -237,6 +237,12 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   // re-checked against ITS OWN categories' floor.
   const categoryRows = await prisma.productCategory.findMany({
     where: { isActive: true },
+    // Deterministic order is load-bearing, not cosmetic: this list is the tail
+    // of the classifier's PROMPT-CACHED prefix (llm/anthropic.ts). Postgres
+    // returns unordered rows in heap order, which shifts whenever a row is
+    // updated — so one operator edit in the dashboard would silently change
+    // the prefix bytes and drop the cache for every later tick.
+    orderBy: { slug: "asc" },
     select: {
       slug: true,
       name: true,

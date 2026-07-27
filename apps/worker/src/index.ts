@@ -10,7 +10,7 @@ import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
 import { insightsTick, type InsightsStats } from "./insights.js";
-import { AnthropicLlmClient } from "./llm/anthropic.js";
+import { AnthropicLlmClient, classifyCacheStats } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
 import { createNotifier, type NotifyStats } from "./notify.js";
@@ -212,6 +212,9 @@ async function main(): Promise<void> {
         `hydrated=${rehydrateStats.hydrated} dead=${rehydrateStats.missing} ` +
         `| evaluated=${evalStats.evaluated} wouldReply=${evalStats.wouldReply} ` +
         `rejected=${evalStats.rejected} evalErrors=${evalStats.errors} ` +
+        // cacheRead=0 with a non-zero `evaluated` means the classifier's
+        // prompt cache is a no-op (prefix under the model's minimum).
+        `cacheRead=${classifyCacheStats().read} cacheWrite=${classifyCacheStats().written} ` +
         `| replies=${replyStats.generated} autoApproved=${replyStats.autoApproved} ` +
         `factChecked=${replyStats.factChecked} factRepaired=${replyStats.factRepaired} ` +
         `factRescued=${replyStats.factRescued} factFlagged=${replyStats.factFlagged} ` +
