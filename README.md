@@ -245,6 +245,7 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `CLICK_TRACKING_ENABLED` / `PUBLIC_BASE_URL` | Per-post click counting via first-party `/r/<id>` redirects (default on when the base URL is set) |
 | `FACTCHECK_ENABLED` | Web-search fact check before any reply auto-posts unreviewed; failures demote to manual approval (default true) |
 | `FACTCHECK_MAX_SEARCHES` / `FACTCHECK_MIN_CONFIDENCE` | Cost bound per check (default 3) and verdict floor for auto-posting (default 60) |
+| `FACTCHECK_REPAIR_ATTEMPTS` | Rewrites a flagged self-approving reply gets — the verdict's findings go back to the generator and the rewrite is re-checked (default 1; 0 = queue it immediately) |
 | `APOLOGY_ENABLED` | One-time fixed-template apology when someone replies negatively to the bot (default true) |
 | `APOLOGY_MAX_PER_DAY` | Daily apology cap (default 3); plus one per author per `APOLOGY_AUTHOR_COOLDOWN_DAYS` (default 7) |
 

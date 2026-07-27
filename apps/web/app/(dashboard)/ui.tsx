@@ -74,6 +74,18 @@ export type FactCheckVerdict = {
   confidence: number;
   issues: string[];
   summary: string;
+  /** Present when the worker rewrote a flagged draft against this check's
+   *  findings before deciding. The verdict above is the deciding one. */
+  repair?: FactCheckRepair | null;
+};
+
+/** `factCheck.repair` — the worker's automatic second attempt. */
+export type FactCheckRepair = {
+  attempts: number;
+  /** False when the rewrite came back worse and the original was kept. */
+  adopted: boolean;
+  /** The verdict that flagged the draft the rewrite replaced. */
+  flagged: FactCheckVerdict | null;
 };
 
 export function parseFactCheck(raw: unknown): FactCheckVerdict | null {
@@ -85,6 +97,18 @@ export function parseFactCheck(raw: unknown): FactCheckVerdict | null {
     confidence: o.confidence,
     issues: Array.isArray(o.issues) ? o.issues.filter((i): i is string => typeof i === "string") : [],
     summary: typeof o.summary === "string" ? o.summary : "",
+    repair: parseRepair(o.repair),
+  };
+}
+
+function parseRepair(raw: unknown): FactCheckRepair | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.attempts !== "number" || typeof o.adopted !== "boolean") return null;
+  return {
+    attempts: o.attempts,
+    adopted: o.adopted,
+    flagged: parseFactCheck(o.flaggedVerdict),
   };
 }
 
@@ -95,6 +119,7 @@ export function FactCheckNote({ raw }: { raw: unknown }) {
   const verdict = parseFactCheck(raw);
   if (!verdict) return null;
   const failed = !verdict.accurate || verdict.confidence < 60;
+  const repair = verdict.repair;
   return (
     <div
       className={`mt-2 rounded border p-2 text-xs ${
@@ -111,6 +136,23 @@ export function FactCheckNote({ raw }: { raw: unknown }) {
             <li key={i}>{issue}</li>
           ))}
         </ul>
+      )}
+      {/* The bot's own second attempt: a flagged draft is rewritten against
+          the verdict's findings and re-checked before it reaches this queue. */}
+      {repair && (
+        <div className={`mt-1.5 border-t pt-1.5 ${failed ? "border-amber-200" : "border-emerald-200"}`}>
+          <span className="font-medium">
+            ↻ Auto-regenerated{repair.attempts > 1 ? ` ${repair.attempts}×` : ""}
+          </span>{" "}
+          {!repair.adopted
+            ? "— the rewrite checked out worse, so the original draft was kept."
+            : failed
+              ? "against the first check's findings — still not clear, so it's your call."
+              : "against the first check's findings, and the rewrite cleared the check."}
+          {repair.flagged?.summary ? (
+            <div className="mt-0.5 italic">First verdict: {repair.flagged.summary}</div>
+          ) : null}
+        </div>
       )}
     </div>
   );

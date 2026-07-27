@@ -234,6 +234,48 @@ export function verdictDisproves(verdict: FactCheckVerdict | null): boolean {
   );
 }
 
+/**
+ * What happens to a reply given its verdict.
+ *  post   — the verdict cleared the bar; the self-approval stands.
+ *  repair — flagged (not disproved), was self-approving, and a rewrite attempt
+ *           is left: hand the findings back to the generator and check again.
+ *  queue  — a human decides.
+ *  reject — DISPROVED; auto-rejected, never surfaced.
+ */
+export type FactCheckRoute = "post" | "repair" | "queue" | "reject";
+
+/**
+ * `selfApproved` = the reply cleared the autonomous bars and would post with
+ * no human look; `repairsLeft` = rewrite attempts still allowed.
+ *
+ * Only a self-approved reply is worth repairing: a queue-bound one is pending
+ * on intent/link confidence, which no rewrite of the text can change — the
+ * operator has the Regenerate button for those.
+ */
+export function routeVerdict(input: {
+  verdict: FactCheckVerdict | null;
+  selfApproved: boolean;
+  repairsLeft: number;
+}): FactCheckRoute {
+  if (verdictDisproves(input.verdict)) return "reject";
+  if (verdictPasses(input.verdict)) return input.selfApproved ? "post" : "queue";
+  if (input.selfApproved && input.repairsLeft > 0) return "repair";
+  return "queue";
+}
+
+/** Outcome ranking, best first. Compared with `repairsLeft: 0` so only the
+ *  three terminal routes ever meet; `repair` is ranked for totality. */
+const ROUTE_RANK: Record<FactCheckRoute, number> = { post: 3, repair: 2, queue: 1, reject: 0 };
+
+/**
+ * A rewrite is adopted only when it lands at least as well as the flagged
+ * draft did — the repair pass may rescue a reply into posting, but it must
+ * never turn one the operator would have seen into an auto-rejection.
+ */
+export function routeIsAtLeastAsGood(candidate: FactCheckRoute, baseline: FactCheckRoute): boolean {
+  return ROUTE_RANK[candidate] >= ROUTE_RANK[baseline];
+}
+
 const DEAL_SYSTEM = `You are the strict pre-publication verifier for TrendCart's automated Amazon deal channel. An RSS deal feed surfaced an Amazon ASIN and the bot is about to post AUTONOMOUSLY, with no human review, that this exact product is currently discounted on Amazon. The post will NOT quote a price or percentage. Your verdict is the last gate.
 
 You MUST use web search and fail closed. Verify all of these independently:

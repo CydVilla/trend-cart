@@ -194,7 +194,11 @@ model BotReply {
   preEditText       String?
   /// Pre-publication web-search fact check, run only when the reply was about
   /// to self-approve: { accurate, confidence, issues, summary, model,
-  /// checkedAt }. A failing/missing verdict demoted it to manual approval.
+  /// checkedAt } — always the verdict that DECIDED this reply's fate.
+  /// A flagged draft is rewritten once against the findings and re-checked;
+  /// when that happened, `repair` carries the audit trail
+  /// { attempts, adopted, flaggedText, flaggedVerdict, rewriteVerdict }.
+  /// Still-failing/missing verdicts demote the reply to manual approval.
   factCheck         Json?
   /// Post-hoc operator verdict on a POSTED reply ("up" | "down") — the main
   /// feedback channel for autonomously posted replies. A "down" also DELETES

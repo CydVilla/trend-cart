@@ -79,6 +79,21 @@ export type ClassifyPostInput = {
   learnedGuidelines?: string | null;
 };
 
+/**
+ * Corrections handed back to the reply generator after the pre-publication
+ * fact check flagged a draft: what was written, and exactly what the verifier
+ * found wrong with it. The rewrite keeps the same recommendation and angle and
+ * only fixes the claims the findings contradict.
+ */
+export type ReplyRepair = {
+  /** The flagged draft's body (link anchor already stripped). */
+  previousText: string;
+  /** The verifier's one-line verdict on that draft. */
+  summary: string;
+  /** Specific problems it found (may be empty — then `summary` is the brief). */
+  issues: string[];
+};
+
 export type GenerateReplyInput = {
   postText: string;
   suggestedReplyAngle: string | null;
@@ -103,6 +118,9 @@ export type GenerateReplyInput = {
   operatorGuidance?: string | null;
   /** TRUSTED guidelines the bot distilled from past operator decisions. */
   learnedGuidelines?: string | null;
+  /** Set only on a repair pass: the fact check flagged the previous draft and
+   *  these findings are the corrections the rewrite must apply. */
+  repair?: ReplyRepair | null;
 };
 
 /** Revenue-oriented lane assigned to an RSS deal candidate. `other` is never

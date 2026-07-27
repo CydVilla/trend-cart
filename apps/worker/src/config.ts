@@ -122,6 +122,12 @@ export const config = {
        demote floor: a merely-unverified check (low confidence, or errored)
        still routes to a human, never auto-rejects. */
     disproofConfidence: envInt("FACTCHECK_DISPROOF_CONFIDENCE", 80),
+    /* Rewrites a FLAGGED self-approving reply gets before it costs the
+       operator a review: the verdict's findings go back to the generator as
+       corrections and the rewrite is fact-checked again. Each attempt is one
+       generation + one web-search check, so 1 (rewrite once, then queue it)
+       is the intended setting; 0 disables the repair pass. */
+    repairAttempts: envInt("FACTCHECK_REPAIR_ATTEMPTS", 1),
   },
 
   site: {

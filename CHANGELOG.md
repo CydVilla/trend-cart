@@ -3,6 +3,43 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-07-27 — A flagged reply gets one self-repair before it costs you a review
+
+### Added
+- **The fact check's ⚠ findings now feed a rewrite instead of only a queue
+  entry.** A flagged verdict names *what* is wrong ("Silksong isn't out until
+  September; the reply implies it ships today") — that's a diagnosis, not a
+  death sentence. When the check flags a reply that was about to self-post, the
+  worker hands the verdict's `summary` + `issues` back to the reply generator as
+  authoritative corrections, rewrites the text (**same product, same reply
+  angle** — only the claims change), and runs a **fresh web-search check** on
+  the rewrite. A rewrite that clears the bar posts autonomously; one that
+  doesn't lands in the approval queue exactly like before. `routeVerdict` is now
+  the single place the four outcomes (post / repair / queue / reject) are
+  decided, unit-tested.
+- **The repair can only improve the outcome, never worsen it.** The rewrite is
+  adopted only when its verdict routes at least as well as the flagged draft's
+  (`routeIsAtLeastAsGood`), so a rewrite that comes back *disproved* is thrown
+  away and the operator still sees the original — the repair can rescue a reply
+  into posting, but can never bury one that would have reached the queue. A
+  generation error, a validation failure, a duplicate, or an unchanged rewrite
+  all keep the flagged draft untouched. Auto-rejection (disproof) is unchanged
+  and still skips the repair entirely.
+- **You can see what it tried.** The fact-check note carries an
+  "↻ Auto-regenerated" line with the *first* verdict, on the pending card
+  (rewrite didn't clear it — your call) and in recent activity (rewrite cleared
+  it and posted, or was discarded as worse). Stored under `factCheck.repair`
+  = `{ attempts, adopted, flaggedText, flaggedVerdict, rewriteVerdict }`; the
+  top-level verdict is always the one that decided the reply's fate.
+- **Cost is bounded and tunable**: one extra generation + one extra
+  web-search check per flagged self-approving reply.
+  `FACTCHECK_REPAIR_ATTEMPTS` (default 1) sets the attempts; `0` restores the
+  old straight-to-queue behavior. Worker stats line gains `factRepaired`
+  (rewrites checked) and `factRescued` (rewrites that then posted).
+- Queue-bound replies are deliberately **not** repaired: they're pending on
+  intent/link confidence, which no rewrite of the text can change — the
+  operator's own Regenerate button covers those.
+
 ## 2026-07-24 (later) — Movies & TV as a weighted deal lane
 
 ### Added

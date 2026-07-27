@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   dealVerdictPasses,
+  routeIsAtLeastAsGood,
+  routeVerdict,
   validateDealSearchEvidence,
   verdictDisproves,
   verdictPasses,
@@ -78,6 +80,45 @@ test("verdictDisproves: an accurate verdict never disproves, even at high confid
 test("verdictDisproves: a null (errored/refused) check is unverified, not disproof", () => {
   assert.equal(verdictDisproves(null), false);
   assert.equal(verdictPasses(null), false);
+});
+
+// routeVerdict: the repair pass only ever exists between "flagged" and
+// "queue" — it must never intercept a disproof or a pass.
+test("routeVerdict: a self-approving reply that passes posts; a queue-bound one still queues", () => {
+  const clean = verdict({ accurate: true, confidence: 90 });
+  assert.equal(routeVerdict({ verdict: clean, selfApproved: true, repairsLeft: 1 }), "post");
+  assert.equal(routeVerdict({ verdict: clean, selfApproved: false, repairsLeft: 1 }), "queue");
+});
+
+test("routeVerdict: disproof auto-rejects even with repair attempts left", () => {
+  const disproved = verdict({ accurate: false, confidence: 90 });
+  assert.equal(routeVerdict({ verdict: disproved, selfApproved: true, repairsLeft: 1 }), "reject");
+  assert.equal(routeVerdict({ verdict: disproved, selfApproved: false, repairsLeft: 1 }), "reject");
+});
+
+test("routeVerdict: a flagged self-approving reply repairs, then queues once attempts run out", () => {
+  const flagged = verdict({ accurate: false, confidence: 55 });
+  assert.equal(routeVerdict({ verdict: flagged, selfApproved: true, repairsLeft: 1 }), "repair");
+  assert.equal(routeVerdict({ verdict: flagged, selfApproved: true, repairsLeft: 0 }), "queue");
+  // An errored/unverifiable check is repairable too — the findings say so.
+  assert.equal(routeVerdict({ verdict: null, selfApproved: true, repairsLeft: 1 }), "repair");
+  assert.equal(routeVerdict({ verdict: null, selfApproved: true, repairsLeft: 0 }), "queue");
+});
+
+test("routeVerdict: a queue-bound reply is never repaired (no rewrite can auto-approve it)", () => {
+  const flagged = verdict({ accurate: false, confidence: 55 });
+  assert.equal(routeVerdict({ verdict: flagged, selfApproved: false, repairsLeft: 1 }), "queue");
+  assert.equal(routeVerdict({ verdict: null, selfApproved: false, repairsLeft: 9 }), "queue");
+});
+
+// The adoption rule: a rewrite may rescue a reply into posting, but must never
+// turn one the operator would have reviewed into a silent auto-rejection.
+test("routeIsAtLeastAsGood: a rewrite is adopted when it improves or holds, discarded when worse", () => {
+  assert.equal(routeIsAtLeastAsGood("post", "queue"), true); // rescued → posts
+  assert.equal(routeIsAtLeastAsGood("queue", "queue"), true); // still flagged → better text, same queue
+  assert.equal(routeIsAtLeastAsGood("reject", "queue"), false); // worse → keep the original
+  assert.equal(routeIsAtLeastAsGood("post", "reject"), true);
+  assert.equal(routeIsAtLeastAsGood("queue", "post"), false);
 });
 
 const amazonUrl = "https://www.amazon.com/Nintendo-Switch-Controller/dp/B01NAWKYZ0";

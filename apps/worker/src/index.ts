@@ -72,6 +72,8 @@ async function main(): Promise<void> {
     generated: 0,
     autoApproved: 0,
     factChecked: 0,
+    factRepaired: 0,
+    factRescued: 0,
     factFlagged: 0,
     factRejected: 0,
     skipped: 0,
@@ -211,7 +213,8 @@ async function main(): Promise<void> {
         `| evaluated=${evalStats.evaluated} wouldReply=${evalStats.wouldReply} ` +
         `rejected=${evalStats.rejected} evalErrors=${evalStats.errors} ` +
         `| replies=${replyStats.generated} autoApproved=${replyStats.autoApproved} ` +
-        `factChecked=${replyStats.factChecked} factFlagged=${replyStats.factFlagged} ` +
+        `factChecked=${replyStats.factChecked} factRepaired=${replyStats.factRepaired} ` +
+        `factRescued=${replyStats.factRescued} factFlagged=${replyStats.factFlagged} ` +
         `factRejected=${replyStats.factRejected} ` +
         `replySkips=${replyStats.skipped} ` +
         `replyDefer=${replyStats.deferred} replyFail=${replyStats.failed} ` +

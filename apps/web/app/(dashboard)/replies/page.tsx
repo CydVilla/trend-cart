@@ -10,6 +10,7 @@ import {
   bskyPostUrl,
   formatDate,
   parseAudienceReplies,
+  parseFactCheck,
   replyStatusTone,
   truncate,
 } from "../ui";
@@ -124,7 +125,9 @@ export default async function RepliesPage({
                   )}
                 </div>
                 {/* Why this landed in the queue: the pre-publication fact
-                    check flagged it instead of letting it auto-post. */}
+                    check flagged it instead of letting it auto-post — and,
+                    when the bot rewrote it against those findings and still
+                    couldn't clear the check, what it tried. */}
                 <FactCheckNote raw={reply.factCheck} />
                 {/* ONE form per card: every button submits the same inputs to
                     its own action via formAction, so the direction input's
@@ -247,9 +250,12 @@ export default async function RepliesPage({
                       {reply.skipReason ? (
                         <div className="text-zinc-400">{truncate(reply.skipReason, 100)}</div>
                       ) : null}
-                      {/* Auto-rejected by the fact check: show the verdict so
-                          the operator can audit WHY the bot killed it. */}
-                      {reply.skipReason === "auto-rejected by fact check" && (
+                      {/* Show the verdict where it explains something the
+                          operator didn't do: a fact-check kill, or a draft the
+                          bot rewrote itself before deciding. Plain passes stay
+                          quiet — they'd be a green banner on every row. */}
+                      {(reply.skipReason === "auto-rejected by fact check" ||
+                        parseFactCheck(reply.factCheck)?.repair) && (
                         <FactCheckNote raw={reply.factCheck} />
                       )}
                       {reply.status === ReplyStatus.POSTED && (

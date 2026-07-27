@@ -1,13 +1,13 @@
 import { prisma, ReplyStatus, type CandidateEvaluation, type Post, type Prisma } from "@trendcart/db";
-import { amazonSearchUrl, type LlmClient } from "@trendcart/shared";
+import { amazonSearchUrl, type GenerateReplyInput, type LlmClient } from "@trendcart/shared";
 import { checkSearchAvailability } from "./availability.js";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
 import {
   factCheckReply,
-  verdictPasses,
-  verdictDisproves,
+  routeIsAtLeastAsGood,
+  routeVerdict,
   FACTCHECK_REJECT_SKIP_REASON,
   type FactCheckVerdict,
 } from "./factcheck.js";
@@ -34,6 +34,10 @@ export type ReplyStats = {
   autoApproved: number;
   /** Pre-publication web-search fact checks run (auto-approve path only). */
   factChecked: number;
+  /** Rewrites of a flagged draft that got generated AND re-fact-checked. */
+  factRepaired: number;
+  /** Of `factRepaired`: rewrites that then passed — posted, no human needed. */
+  factRescued: number;
   /** Of `factChecked`: failed/unverifiable — demoted to manual approval. */
   factFlagged: number;
   /** Of `factChecked`: DISPROVED — auto-rejected (never surfaced to the human). */
@@ -41,6 +45,23 @@ export type ReplyStats = {
   skipped: number;
   deferred: number;
   failed: number;
+};
+
+/**
+ * Audit trail for one repair pass, stored under `factCheck.repair`. The
+ * top-level verdict is always the one that decided the reply's fate: the
+ * rewrite's when `adopted`, the flagged draft's when it was thrown away.
+ */
+type RepairRecord = {
+  /** Rewrites attempted (and fact-checked) after the first flag. */
+  attempts: number;
+  /** Whether the rewrite replaced the flagged draft. */
+  adopted: boolean;
+  /** The draft the rewrite was based on, and the verdict that flagged it. */
+  flaggedText: string;
+  flaggedVerdict: FactCheckVerdict | null;
+  /** The rewrite's own verdict. */
+  rewriteVerdict: FactCheckVerdict | null;
 };
 
 /**
@@ -230,6 +251,76 @@ export function truncateReplyToFit(body: string, anchor: string, maxLength: numb
   return `${cut}… ${anchor}`;
 }
 
+type DraftResult = { ok: true; text: string } | { ok: false; text: string; reason: string };
+
+/**
+ * Produce one validated reply draft: generate, retry once against a tighter
+ * budget when the validator objects, then fall back to word-boundary
+ * truncation for length-only failures. Returns the composed display text
+ * (body + anchor) and whether it survived validation.
+ *
+ * Generation errors PROPAGATE — the caller distinguishes a transient API
+ * outage (back off the whole loop) from a dead candidate (FAILED row).
+ */
+async function draftReply(
+  llm: LlmClient,
+  input: GenerateReplyInput,
+  anchor: string,
+): Promise<DraftResult> {
+  const compose = (body: string) => `${body} ${anchor}`;
+  let body = await llm.generateReply(input);
+  let text = compose(body);
+  let validation = validateReply(text, anchor, config.bot.replyMaxLength);
+  if (!validation.ok) {
+    // One retry with a tighter budget — over-length is the common failure.
+    try {
+      const retryBody = await llm.generateReply({ ...input, textBudget: input.textBudget - 30 });
+      const retryText = compose(retryBody);
+      const retryValidation = validateReply(retryText, anchor, config.bot.replyMaxLength);
+      if (retryValidation.ok) {
+        text = retryText;
+        validation = retryValidation;
+      } else {
+        body = retryBody; // shorter body is the better base for truncation
+      }
+    } catch {
+      // fall through to the truncation fallback / the caller's FAILED row
+    }
+  }
+  // Length-only safety net: the model overshot its word budget twice. Rather
+  // than discard a good candidate, truncate the body at a word boundary so a
+  // valid reply still goes out. Only rescues length failures — a banned
+  // phrase or stray URL still (correctly) fails below.
+  if (!validation.ok && validation.reason.startsWith("too long")) {
+    const truncated = truncateReplyToFit(body, anchor, config.bot.replyMaxLength);
+    const truncatedValidation = validateReply(truncated, anchor, config.bot.replyMaxLength);
+    if (truncatedValidation.ok) {
+      text = truncated;
+      validation = truncatedValidation;
+    }
+  }
+  return validation.ok ? { ok: true, text } : { ok: false, text, reason: validation.reason };
+}
+
+/** Never send the exact same reply text twice in a week. */
+async function isDuplicateText(text: string): Promise<boolean> {
+  const duplicate = await prisma.botReply.findFirst({
+    where: {
+      replyText: text,
+      status: { in: ACTIVE_STATUSES },
+      createdAt: { gte: new Date(Date.now() - 7 * 24 * 3_600_000) },
+    },
+    select: { id: true },
+  });
+  return duplicate !== null;
+}
+
+/** Display text → the model-written body, without the trailing link anchor. */
+function stripAnchor(text: string, anchor: string): string {
+  const at = text.lastIndexOf(anchor);
+  return at === -1 ? text.trim() : text.slice(0, at).trim();
+}
+
 /**
  * Pick the single link a reply will carry:
  *  1. an operator-provided link (the human already decided), or
@@ -402,7 +493,6 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     // The display text ends with the clickable anchor; the URL itself is
     // attached as a facet at posting time, never shown raw.
     const reserved = link.anchor.length + 1;
-    const compose = (text: string) => `${text} ${link.anchor}`;
     // Same visual + conversation context the classifier saw, so the reply can
     // reference what was actually shared. Comments are re-fetched fresh (cheap
     // public read) so the reply reflects the thread as it stands now.
@@ -427,9 +517,9 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       learnedGuidelines,
     };
 
-    let body: string;
+    let draft: DraftResult;
     try {
-      body = await llm.generateReply(replyInput);
+      draft = await draftReply(llm, replyInput, link.anchor);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (isTransientError(error)) {
@@ -450,62 +540,21 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       continue;
     }
 
-    let text = compose(body);
-    let validation = validateReply(text, link.anchor, config.bot.replyMaxLength);
-    if (!validation.ok) {
-      // One retry with a tighter budget — over-length is the common failure.
-      try {
-        const retryBody = await llm.generateReply({
-          ...replyInput,
-          textBudget: replyInput.textBudget - 30,
-        });
-        const retryText = compose(retryBody);
-        const retryValidation = validateReply(retryText, link.anchor, config.bot.replyMaxLength);
-        if (retryValidation.ok) {
-          text = retryText;
-          validation = retryValidation;
-        } else {
-          body = retryBody; // shorter body is the better base for truncation
-        }
-      } catch {
-        // fall through to the truncation fallback / FAILED row
-      }
-    }
-    // Length-only safety net: the model overshot its word budget twice. Rather
-    // than discard a good candidate, truncate the body at a word boundary so a
-    // valid reply still goes out. Only rescues length failures — a banned
-    // phrase or stray URL still (correctly) fails below.
-    if (!validation.ok && validation.reason.startsWith("too long")) {
-      const truncated = truncateReplyToFit(body, link.anchor, config.bot.replyMaxLength);
-      const truncatedValidation = validateReply(truncated, link.anchor, config.bot.replyMaxLength);
-      if (truncatedValidation.ok) {
-        text = truncated;
-        validation = truncatedValidation;
-      }
-    }
-    if (!validation.ok) {
+    if (!draft.ok) {
       await prisma.botReply.create({
         data: {
           postId: evaluation.postId,
-          replyText: text,
+          replyText: draft.text,
           status: ReplyStatus.FAILED,
-          skipReason: `validation failed: ${validation.reason}`,
+          skipReason: `validation failed: ${draft.reason}`,
         },
       });
       stats.failed += 1;
       continue;
     }
 
-    // Never send the exact same reply text twice in a week.
-    const duplicate = await prisma.botReply.findFirst({
-      where: {
-        replyText: text,
-        status: { in: ACTIVE_STATUSES },
-        createdAt: { gte: new Date(Date.now() - 7 * 24 * 3_600_000) },
-      },
-      select: { id: true },
-    });
-    if (duplicate) {
+    let text = draft.text;
+    if (await isDuplicateText(text)) {
       await writeSkip(evaluation.postId, "duplicate reply text (used recently)", stats, text);
       continue;
     }
@@ -514,18 +563,22 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
 
     // Web-search fact check (does the product exist / is it orderable or
     // pre-orderable / are the claims right) runs on BOTH outcomes, and its
-    // verdict GATES the result three ways:
+    // verdict GATES the result four ways:
     // - DISPROVED (confidently inaccurate — product missing/unorderable or a
     //   claim contradicted): auto-rejected. Never surface a provably-wrong
     //   reply to the human; the evidence feeds the learning loop instead.
-    // - unverifiable/low-confidence on a self-approved reply: fail-safe demote
-    //   to the manual queue with the verdict attached (a missed post beats a
-    //   wrong one — but we lack positive disproof, so a human decides).
+    // - FLAGGED (unverifiable/low-confidence) on a self-approved reply: the
+    //   verdict says WHAT is wrong, so hand those findings back to the
+    //   generator, rewrite once, and check again — see the repair loop below.
+    // - still flagged after the rewrite: fail-safe demote to the manual queue
+    //   with both verdicts attached (a missed post beats a wrong one — but we
+    //   lack positive disproof, so a human decides).
     // - otherwise: the verdict rides along informationally (queue-bound replies
     //   the operator judges against real evidence; passing self-approvals post).
     // Operator-linked replies skip it (the human already chose that link).
     let factCheck: FactCheckVerdict | null = null;
     let factChecked = false;
+    let repair: RepairRecord | null = null;
     let skipReason: string | null = null;
     if (
       (status === ReplyStatus.APPROVED || status === ReplyStatus.PENDING_APPROVAL) &&
@@ -533,37 +586,121 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       !config.llm.useFake &&
       link.kind !== "operator"
     ) {
-      factChecked = true;
-      factCheck = await factCheckReply({
+      const selfApproved = status === ReplyStatus.APPROVED;
+      const checkInput = {
         postText: evaluation.post.text,
-        replyText: text,
         linkKind: link.kind,
         linkQuery:
           link.kind === "search"
             ? (evaluation.recommendedSearchQuery ?? link.anchor)
             : link.anchor,
         suggestedReplyAngle: evaluation.suggestedReplyAngle,
-      });
+      };
+      factChecked = true;
+      factCheck = await factCheckReply({ ...checkInput, replyText: text });
       stats.factChecked += 1;
-      if (verdictDisproves(factCheck)) {
-        status = ReplyStatus.SKIPPED;
-        approvedAt = null;
-        skipReason = FACTCHECK_REJECT_SKIP_REASON;
-        stats.factRejected += 1;
-        console.log(
-          `[factcheck] AUTO-REJECTED (disproved, confidence ${factCheck!.confidence}): ${factCheck!.summary}`,
-        );
-      } else if (status === ReplyStatus.APPROVED && !verdictPasses(factCheck)) {
-        status = ReplyStatus.PENDING_APPROVAL;
-        approvedAt = null;
-        stats.factFlagged += 1;
-        console.log(
-          `[factcheck] demoted to manual approval: ${
-            factCheck
-              ? `accurate=${factCheck.accurate} confidence=${factCheck.confidence} — ${factCheck.summary}`
-              : "check could not be completed"
-          }`,
-        );
+
+      // ── Repair pass ─────────────────────────────────────────────────
+      // A flagged verdict is a diagnosis, not a death sentence: it names the
+      // claims that don't hold up. Feed those findings back as authoritative
+      // corrections, rewrite the text (same product, same angle), and run a
+      // fresh check. A rewrite that now passes posts autonomously instead of
+      // costing the operator a review; one that doesn't lands in the queue as
+      // before — with both verdicts, so the operator sees what was tried.
+      //
+      // Strictly fail-safe: a rewrite is adopted only when its route is at
+      // least as good as the flagged draft's, and a generation error, failed
+      // validation, or duplicate keeps the flagged draft untouched. The repair
+      // can rescue a reply into posting; it can never bury one the operator
+      // would otherwise have seen.
+      let repairsLeft = config.factCheck.repairAttempts;
+      while (routeVerdict({ verdict: factCheck, selfApproved, repairsLeft }) === "repair") {
+        repairsLeft -= 1;
+        const flaggedText = text;
+        const flaggedVerdict = factCheck;
+        let rewrite: DraftResult;
+        try {
+          rewrite = await draftReply(
+            llm,
+            {
+              ...replyInput,
+              repair: {
+                previousText: stripAnchor(flaggedText, link.anchor),
+                summary: flaggedVerdict?.summary ?? "the check could not be completed",
+                issues: flaggedVerdict?.issues ?? [],
+              },
+            },
+            link.anchor,
+          );
+        } catch (error) {
+          console.warn(
+            `[factcheck] repair rewrite failed, keeping the flagged draft: ${
+              error instanceof Error ? error.message : error
+            }`,
+          );
+          break;
+        }
+        if (!rewrite.ok || rewrite.text === flaggedText || (await isDuplicateText(rewrite.text))) {
+          break;
+        }
+        const recheck = await factCheckReply({ ...checkInput, replyText: rewrite.text });
+        stats.factChecked += 1;
+        stats.factRepaired += 1;
+        // Compare terminal outcomes (no attempts left on either side) so a
+        // rewrite that checks out WORSE is thrown away rather than acted on.
+        const before = routeVerdict({ verdict: flaggedVerdict, selfApproved, repairsLeft: 0 });
+        const after = routeVerdict({ verdict: recheck, selfApproved, repairsLeft: 0 });
+        const adopted = routeIsAtLeastAsGood(after, before);
+        repair = {
+          attempts: config.factCheck.repairAttempts - repairsLeft,
+          adopted,
+          flaggedText,
+          flaggedVerdict,
+          rewriteVerdict: recheck,
+        };
+        if (!adopted) {
+          console.log(
+            `[factcheck] repair discarded (rewrite checked out worse: ${before} → ${after})`,
+          );
+          break;
+        }
+        text = rewrite.text;
+        factCheck = recheck;
+        if (after === "post") {
+          stats.factRescued += 1;
+          console.log(
+            `[factcheck] repaired and cleared (confidence ${recheck!.confidence}) — posting without a human: ${recheck!.summary}`,
+          );
+        }
+      }
+
+      switch (routeVerdict({ verdict: factCheck, selfApproved, repairsLeft: 0 })) {
+        case "reject":
+          status = ReplyStatus.SKIPPED;
+          approvedAt = null;
+          skipReason = FACTCHECK_REJECT_SKIP_REASON;
+          stats.factRejected += 1;
+          console.log(
+            `[factcheck] AUTO-REJECTED (disproved, confidence ${factCheck!.confidence}): ${factCheck!.summary}`,
+          );
+          break;
+        case "queue":
+          if (selfApproved) {
+            status = ReplyStatus.PENDING_APPROVAL;
+            approvedAt = null;
+            stats.factFlagged += 1;
+            console.log(
+              `[factcheck] demoted to manual approval${repair ? " (rewrite didn't clear it)" : ""}: ${
+                factCheck
+                  ? `accurate=${factCheck.accurate} confidence=${factCheck.confidence} — ${factCheck.summary}`
+                  : "check could not be completed"
+              }`,
+            );
+          }
+          break;
+        case "post":
+        case "repair":
+          break; // the self-approval stands
       }
     }
 
@@ -580,14 +717,17 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         ...(skipReason ? { skipReason } : {}),
         ...(factChecked
           ? {
-              factCheck: (factCheck ?? {
-                accurate: false,
-                confidence: 0,
-                issues: ["fact check could not be completed"],
-                summary: "check errored or was refused — unverified",
-                model: config.llm.model,
-                checkedAt: new Date().toISOString(),
-              }) as unknown as Prisma.InputJsonValue,
+              factCheck: {
+                ...(factCheck ?? {
+                  accurate: false,
+                  confidence: 0,
+                  issues: ["fact check could not be completed"],
+                  summary: "check errored or was refused — unverified",
+                  model: config.llm.model,
+                  checkedAt: new Date().toISOString(),
+                }),
+                ...(repair ? { repair } : {}),
+              } as unknown as Prisma.InputJsonValue,
             }
           : {}),
       },
