@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  // Codifies the dead-code triage from issues #15 and #18 so repo-janitor's
+  // weekly Knip sweep stops re-flagging deliberate keeps. Anything NOT
+  // covered here that Knip reports is a genuinely new finding worth a look.
+  //
+  // ignoreExportsUsedInFile: most flagged exports are live code that is
+  // merely over-exported (referenced within their own module).
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    // scripts/*.ts are operator CLIs: calibrate + export-training-data run
+    // via package.json scripts, threshold-sweep is a manual analysis CLI,
+    // post-intro is rerunnable to update the pinned profile intro.
+    "apps/worker": {
+      "entry": ["src/**/*.test.ts", "scripts/*.ts"]
+    },
+    // @prisma/client + prisma: used by next.config.mjs serverExternalPackages
+    // and the runtime client (issue #15 false positives). postcss: vendored
+    // by Next; @tailwindcss/postcss is the listed plugin.
+    "apps/web": {
+      "ignoreDependencies": ["@prisma/client", "prisma", "postcss"]
+    }
+  }
+}

@@ -38,6 +38,12 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   cluster, manual CLI scripts, test seams, and web's prisma deps all stay per
   the issue #15 standing triage; Knip's `postcss` flag is a false positive
   (`@tailwindcss/postcss` is listed; Next vendors postcss).
+- **`knip.jsonc` codifies that triage** so repo-janitor's weekly sweep stops
+  re-reporting deliberate keeps: operator CLI scripts are entries,
+  over-exported-but-live code is covered by `ignoreExportsUsedInFile`, web's
+  prisma/postcss flags are ignored, and the `setPaapiClientForTest` seam
+  carries a `@public` tag. Verified: `npx knip@5` now reports **zero**
+  findings — anything the next sweep flags is genuinely new.
 
 ## 2026-07-27 (later) — Harden the classifier's prompt cache (it works, barely)
 

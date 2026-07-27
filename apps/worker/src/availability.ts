@@ -19,7 +19,11 @@ import { createPaapiClient, PaapiAuthError, type PaapiClient } from "./paapi.js"
 let client: PaapiClient | null | undefined;
 let authDead = false;
 
-/** Test seam: replace/reset the lazily created client. */
+/**
+ * Test seam: replace/reset the lazily created client.
+ * @public — kept ahead of the availability tests that will use it; the tag
+ * keeps Knip (repo-janitor's weekly sweep) from flagging it as unused.
+ */
 export function setPaapiClientForTest(next: PaapiClient | null | undefined): void {
   client = next;
   authDead = false;
