@@ -23,9 +23,11 @@ export function middleware(request: NextRequest): NextResponse {
 }
 
 export const config = {
-  // Everything except the public about/disclosure page, the click-redirect
-  // (/r/<id> — hit by anyone clicking a bot link, must never 401), the health
-  // probe (leaks only liveness booleans), and framework assets requires auth.
-  // /recommendations stays listed so legacy links redirect instead of 401ing.
-  matcher: ["/((?!about|recommendations|r/|api/health|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except the public about/disclosure page, the privacy policy
+  // (required by developer-platform app registrations, e.g. Pinterest), the
+  // click-redirect (/r/<id> — hit by anyone clicking a bot link, must never
+  // 401), the health probe (leaks only liveness booleans), and framework
+  // assets requires auth. /recommendations stays listed so legacy links
+  // redirect instead of 401ing.
+  matcher: ["/((?!about|privacy|recommendations|r/|api/health|_next/static|_next/image|favicon.ico).*)"],
 };
