@@ -15,6 +15,7 @@ import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
 import { createNotifier, type NotifyStats } from "./notify.js";
 import { outcomesTick, type OutcomeStats } from "./outcomes.js";
+import { createPinterestPoster, type PinterestStats } from "./pinterest/poster.js";
 import { createPoster, type PosterStats } from "./poster.js";
 import { reflectTick, type ReflectStats } from "./reflect.js";
 import { rehydrateTick, type RehydrateStats } from "./rehydrate.js";
@@ -88,6 +89,7 @@ async function main(): Promise<void> {
   const reflectStats: ReflectStats = { reflections: 0, errors: 0 };
   const insightsStats: InsightsStats = { reports: 0, errors: 0 };
   const dealPostStats: DealPostStats = { posted: 0, postFailed: 0, disabled: false };
+  const pinterestStats: PinterestStats = { pinned: 0, pinFailed: 0, disabled: false };
   const dealDiscoverStats = newDealDiscoverStats();
   const dealSuggestStats = newDealSuggestStats();
   const notifyStats: NotifyStats = { pings: 0, errors: 0, disabled: false };
@@ -139,6 +141,8 @@ async function main(): Promise<void> {
 
   const dealDiscoverer = config.deals.enabled ? createDealDiscoverer(dealDiscoverStats) : null;
   const dealPoster = config.deals.enabled ? createDealPoster(dealPostStats) : null;
+  // Pinterest mirror rides the deal channel: no deals, nothing to pin.
+  const pinterestPoster = config.deals.enabled ? createPinterestPoster(pinterestStats) : null;
   // RSS suggestions need no Amazon keys — the point is bridging the
   // pre-PA-API gap — so only DEALS_ENABLED (and its own toggle) gates them.
   const dealSuggester = config.deals.enabled ? createDealSuggester(llm, dealSuggestStats) : null;
@@ -186,6 +190,9 @@ async function main(): Promise<void> {
       ? [startLoop("dealSuggest", 60_000, () => dealSuggester.tick())]
       : []),
     ...(dealPoster ? [startLoop("dealPost", 30_000, () => dealPoster.tick())] : []),
+    ...(pinterestPoster?.enabled
+      ? [startLoop("pinterest", 60_000, () => pinterestPoster.tick())]
+      : []),
     ...(notificationListener
       ? [
           // 90s cadence: mention requests deserve a prompt answer.
@@ -232,7 +239,10 @@ async function main(): Promise<void> {
             `feedRuns=${dealDiscoverStats.feeds} feedFound=${dealDiscoverStats.found} ` +
             `feedQueued=${dealDiscoverStats.queued} rssItems=${dealSuggestStats.items} ` +
             `rssCandidates=${dealSuggestStats.candidates} ` +
-            `rssPromoted=${dealSuggestStats.promoted} rssSuggested=${dealSuggestStats.suggested}`
+            `rssPromoted=${dealSuggestStats.promoted} rssSuggested=${dealSuggestStats.suggested}` +
+            (pinterestPoster?.enabled
+              ? ` pinned=${pinterestStats.pinned} pinFailed=${pinterestStats.pinFailed}`
+              : "")
           : ""),
     );
   }, STATS_LOG_MS);

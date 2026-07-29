@@ -227,6 +227,20 @@ export const config = {
     globalReplyCooldownMinutes: envInt("GLOBAL_REPLY_COOLDOWN_MINUTES", 90),
   },
 
+  /* Pinterest mirror: every POSTED deal is also pinned (once) to the bot's
+     board. Ships dark until the app's OAuth refresh token exists. Under
+     Pinterest trial-tier access pins are private to the account — that is the
+     intended staging mode; standard access makes the same pins public. */
+  pinterest: {
+    appId: envString("PINTEREST_APP_ID", ""),
+    appSecret: envString("PINTEREST_APP_SECRET", ""),
+    refreshToken: envString("PINTEREST_REFRESH_TOKEN", ""),
+    boardName: envString("PINTEREST_BOARD_NAME", "Amazon Deals & Finds"),
+    /* Pins/day cap. Pinterest tolerates far more, but the mirror should never
+       outpace the deal pipeline that feeds it. */
+    maxPinsPerDay: envInt("PINTEREST_MAX_PINS_PER_DAY", 10),
+  },
+
   /* Deal tracker: standalone deal-alert posts to the bot's own profile.
      Whole feature ships dark behind DEALS_ENABLED; DRY_RUN still gates all
      posting. Caps are deliberately tighter than replies — a standalone promo

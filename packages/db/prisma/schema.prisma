@@ -504,6 +504,8 @@ model DealPost {
   replyCount       Int       @default(0)
   quoteCount       Int       @default(0)
   outcomeCheckedAt DateTime?
+  /// Pinterest mirror of this post, once the pinner picks it up.
+  pinterestPin     PinterestPin?
 
   createdAt DateTime @default(now())
 
@@ -511,6 +513,45 @@ model DealPost {
   @@index([status, createdAt])
   @@index([laneKey, postedAt])
   @@index([createdAt])
+}
+
+/// Lifecycle of a Pinterest pin mirrored from a posted deal.
+enum PinterestPinStatus {
+  PENDING
+  POSTING
+  POSTED
+  SKIPPED
+  FAILED
+}
+
+/// Pinterest mirror of a POSTED DealPost: each deal that went out on Bluesky
+/// is also pinned (once) to the bot's Pinterest board. Separate table rather
+/// than columns on DealPost so the Bluesky pipeline stays untouched and the
+/// unique dealPostId is the exactly-once guard.
+model PinterestPin {
+  id         String             @id @default(cuid())
+  dealPostId String             @unique
+  dealPost   DealPost           @relation(fields: [dealPostId], references: [id], onDelete: Cascade)
+  status     PinterestPinStatus @default(PENDING)
+  /// Pinterest board the pin was (or will be) created on.
+  boardId    String?
+  /// Pinterest's pin id once POSTED.
+  pinId      String?
+  /// Frozen pin copy at queue time (title <= 100 chars, description <= 800).
+  title       String
+  description String
+  /// Tracked /r/<id> destination URL (kind "pin"), minted at queue time.
+  link        String
+  /// Amazon-hosted product image the pin renders (Pinterest requires one).
+  imageUrl    String
+  skipReason    String?
+  attemptCount  Int       @default(0)
+  nextAttemptAt DateTime?
+  postedAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([status, createdAt])
 }
 
 /// Lifecycle of an RSS-sourced deal candidate. NEW = staged in the ranked

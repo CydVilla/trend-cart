@@ -14,7 +14,7 @@ import { config } from "./config.js";
  */
 export async function createTrackedLink(
   targetUrl: string,
-  kind: "reply" | "deal",
+  kind: "reply" | "deal" | "pin",
   sourceId?: string,
 ): Promise<{ url: string; id: string | null }> {
   if (!config.clickTracking.enabled || !config.clickTracking.baseUrl) {
