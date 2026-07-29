@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { prisma, ReplyStatus } from "@trendcart/db";
 import {
@@ -214,6 +215,31 @@ async function ApologiesCard() {
   );
 }
 
+/**
+ * Pool exhaustion is transient and self-clearing, not a database that is down —
+ * sending the operator to `pnpm db:up` for it points at the wrong problem, and
+ * points at a local remedy for something only ever seen in production.
+ */
+function describeDbError(error: string): { headline: string; hint: ReactNode } {
+  if (/too many connections|Timed out fetching a new connection/i.test(error)) {
+    return {
+      headline: "Database connection limit reached.",
+      hint: "Transient — the pool is saturated. If it persists, lower DATABASE_CONNECTION_LIMIT or move off essential-0.",
+    };
+  }
+  return {
+    headline: "Database not reachable.",
+    hint:
+      process.env.NODE_ENV === "production" ? (
+        "Check the Postgres add-on status."
+      ) : (
+        <>
+          Start it with <code>pnpm db:up</code> and run <code>pnpm db:migrate</code>.
+        </>
+      ),
+  };
+}
+
 async function getStats(): Promise<{ ok: true; stats: Stats } | { ok: false; error: string }> {
   try {
     const [posts, evaluations, pendingApproval, posted, likeAgg, categories, clickAgg] =
@@ -248,10 +274,10 @@ export default async function HomePage() {
   const result = await getStats();
 
   if (!result.ok) {
+    const { headline, hint } = describeDbError(result.error);
     return (
       <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-        <strong>Database not reachable.</strong> Start it with <code>pnpm db:up</code> and run{" "}
-        <code>pnpm db:migrate</code>.
+        <strong>{headline}</strong> {hint}
         <div className="mt-2 font-mono text-xs text-amber-700">{result.error}</div>
       </div>
     );
