@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { prisma, ReplyStatus } from "@trendcart/db";
+import { prisma, ReplyStatus, withDbRetry } from "@trendcart/db";
 import {
   toggleAutonomous,
   toggleWorkerPaused,
@@ -15,7 +15,9 @@ export const dynamic = "force-dynamic";
 const HEARTBEAT_STALE_MS = 2 * 60_000;
 
 async function WorkerStatusCard() {
-  const heartbeat = await prisma.workerHeartbeat.findUnique({ where: { id: "worker" } });
+  const heartbeat = await withDbRetry(() =>
+    prisma.workerHeartbeat.findUnique({ where: { id: "worker" } }),
+  );
   if (!heartbeat) {
     return (
       <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
@@ -242,16 +244,20 @@ function describeDbError(error: string): { headline: string; hint: ReactNode } {
 
 async function getStats(): Promise<{ ok: true; stats: Stats } | { ok: false; error: string }> {
   try {
+    // withDbRetry: essential-0 drops connections for a second or two several
+    // times a day; a single retry absorbs the blip instead of banner-ing it.
     const [posts, evaluations, pendingApproval, posted, likeAgg, categories, clickAgg] =
-      await Promise.all([
-        prisma.post.count(),
-        prisma.candidateEvaluation.count(),
-        prisma.botReply.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
-        prisma.botReply.count({ where: { status: ReplyStatus.POSTED } }),
-        prisma.botReply.aggregate({ _sum: { replyLikeCount: true } }),
-        prisma.productCategory.count({ where: { isActive: true } }),
-        prisma.trackedLink.aggregate({ _sum: { clickCount: true }, _count: true }),
-      ]);
+      await withDbRetry(() =>
+        Promise.all([
+          prisma.post.count(),
+          prisma.candidateEvaluation.count(),
+          prisma.botReply.count({ where: { status: ReplyStatus.PENDING_APPROVAL } }),
+          prisma.botReply.count({ where: { status: ReplyStatus.POSTED } }),
+          prisma.botReply.aggregate({ _sum: { replyLikeCount: true } }),
+          prisma.productCategory.count({ where: { isActive: true } }),
+          prisma.trackedLink.aggregate({ _sum: { clickCount: true }, _count: true }),
+        ]),
+      );
     return {
       ok: true,
       stats: {

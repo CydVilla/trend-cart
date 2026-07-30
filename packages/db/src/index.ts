@@ -44,6 +44,25 @@ if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
 
+/**
+ * Essential-0 rides shared infrastructure that drops connections for a second
+ * or two, several times a day (measured 2026-07-30: ~24 P1001s across 5h,
+ * each self-healing instantly). One retry after a short pause absorbs a blip;
+ * a genuine outage still surfaces on the second attempt.
+ */
+export async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/Can't reach database server|Connection reset|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    return await fn();
+  }
+}
+
 // Re-export generated model types and enums (Post, ProductCategory, SafetyStatus, ...)
 export * from "@prisma/client";
 
