@@ -8,10 +8,13 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
  * dyno regardless of dyno size. web and worker each hold their own pool, so the
  * two can demand 34 connections against essential-0's hard cap of 20 — pools
  * grow lazily, so this surfaces as an intermittent "FATAL: too many
- * connections" under burst rather than a steady failure. Budget instead:
- * 8 + 8 leaves 4 for release-phase migrations, `heroku run`, and psql.
+ * connections" under burst rather than a steady failure. Budget: 4 + 4
+ * steady leaves room for the real killer — the deploy window, where old AND
+ * new dynos hold pools simultaneously (4x4=16) alongside the release-phase
+ * migration and any operator psql. Largest query batch is 7, so a pool of 4
+ * briefly queues instead of erroring; queries are milliseconds each.
  */
-const DEFAULT_CONNECTION_LIMIT = 8;
+const DEFAULT_CONNECTION_LIMIT = 4;
 
 function connectionLimit(): number {
   const parsed = Number(process.env.DATABASE_CONNECTION_LIMIT);
@@ -55,7 +58,14 @@ export async function withDbRetry<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (!/Can't reach database server|Connection reset|ECONNREFUSED|ETIMEDOUT/i.test(message)) {
+    // "too many connections" is transient too: it appears in the ~1-minute
+    // dyno-overlap window during deploys (old + new web/worker pools coexist)
+    // and clears as the old dynos drain.
+    if (
+      !/Can't reach database server|Connection reset|ECONNREFUSED|ETIMEDOUT|too many connections/i.test(
+        message,
+      )
+    ) {
       throw error;
     }
     await new Promise((resolve) => setTimeout(resolve, 1_500));
