@@ -132,6 +132,7 @@ export type HighConversionLane =
   | "pc-gaming"
   | "storage-ssd"
   | "controllers-parts"
+  | "anime-figures"
   | "collectibles-fandom"
   | "recent-games"
   | "movies-tv"

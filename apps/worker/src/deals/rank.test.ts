@@ -13,6 +13,12 @@ test("classifies the requested high-conversion lanes", () => {
   assert.equal(heuristicLane("2TB NVMe SSD", "tech", 7_499), "storage-ssd");
   assert.equal(heuristicLane("DualSense wireless controller", "gaming", 6_999), "playstation-xbox");
   assert.equal(heuristicLane("Funko Star Wars figure", "collectibles", 1_999), "collectibles-fandom");
+  // Anime-figure terms outrank franchise terms other lanes claim: a Pokémon
+  // scale figure is a figure, not a Switch accessory; Nendoroid always wins.
+  assert.equal(heuristicLane("Taito Coreful Marin Kitagawa figure", "collectibles", 3_999), "anime-figures");
+  assert.equal(heuristicLane("Pokemon Charizard 1/7 scale figure", "collectibles", 12_999), "anime-figures");
+  assert.equal(heuristicLane("Nendoroid Hatsune Miku", "collectibles", 5_499), "anime-figures");
+  assert.equal(heuristicLane("Demon Slayer anime figure Tanjiro", "collectibles", 2_999), "anime-figures");
   // Movies land in movies-tv — and a disc keyword wins over a fandom keyword
   // (a Marvel Blu-ray is a movie, not a collectible), since movies-tv precedes
   // collectibles-fandom in the rules.

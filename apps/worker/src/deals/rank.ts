@@ -15,6 +15,9 @@ export const HIGH_CONVERSION_LANES: Record<HighConversionLane, LaneMeta> = {
   "pc-gaming": { label: "PC gaming peripherals", priority: 80 },
   "storage-ssd": { label: "Storage cards / SSDs", priority: 84 },
   "controllers-parts": { label: "Controllers / replacement parts", priority: 86 },
+  // Above collectibles-fandom on click evidence: the 2026-07-30 Marin Coreful
+  // figure reply drove the account's biggest ordered-revenue day.
+  "anime-figures": { label: "Anime figures / statues", priority: 85 },
   "collectibles-fandom": { label: "Collectibles / fandom", priority: 76 },
   "recent-games": { label: "Recently released games", priority: 90 },
   // Weighted into the high tier alongside gaming, but under the top game lanes
@@ -31,6 +34,26 @@ type Rule = { lane: Exclude<HighConversionLane, "other">; patterns: RegExp[] };
  * semantic classifier; these rules keep no-key/fake runs deterministic and
  * catch obvious lane assignments without trusting a model alone. */
 const LANE_RULES: Rule[] = [
+  // First on purpose: anime-figure terms must win over franchise terms that
+  // other lanes also claim (a Pokémon scale figure is a figure, not a Switch
+  // accessory). Generic "action figure" stays with collectibles-fandom.
+  {
+    lane: "anime-figures",
+    patterns: [
+      /\bnendoroid\b/i,
+      /\bfigma\b/i,
+      /\bfiguarts\b/i,
+      /\bpop up parade\b/i,
+      /\bbanpresto\b/i,
+      /\bkotobukiya\b/i,
+      /\bgood smile\b/i,
+      /\bcoreful\b/i,
+      /\bichiban kuji\b/i,
+      /\b(?:scale|prize|pvc)\s+(?:figure|statue)\b/i,
+      /\banime\b[^.]*\b(?:figure|statue)s?\b/i,
+      /\b(?:figure|statue)s?\b[^.]*\banime\b/i,
+    ],
+  },
   {
     lane: "recent-games",
     patterns: [

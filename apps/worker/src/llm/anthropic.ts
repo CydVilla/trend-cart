@@ -86,7 +86,8 @@ Rules:
   - pc-gaming: PC gaming peripherals such as mice, keyboards, headsets, monitors, and PC hardware
   - storage-ssd: SD/microSD cards, SSDs, and gaming storage
   - controllers-parts: controllers, replacement sticks, charging docks, cases, cables, and repair/replacement parts
-  - collectibles-fandom: licensed figures, LEGO, apparel, and fandom merchandise
+  - anime-figures: anime/manga/game character figures and statues for collectors — scale figures, prize figures, Nendoroid, figma, Figuarts, Pop Up Parade, Banpresto, Kotobukiya, Good Smile, Ichiban Kuji (NOT children's toys, NOT LEGO)
+  - collectibles-fandom: licensed figures outside anime, LEGO, apparel, and fandom merchandise
   - recent-games: newly released or currently pre-orderable physical games
   - movies-tv: physical movies and TV — Blu-ray, 4K UHD, steelbooks, DVD, box sets, complete-series and Criterion editions
   - giftable-under-75: clearly giftable products likely to cost no more than about $75 when no more specific lane fits
