@@ -314,7 +314,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       return false;
     }
     // Single-marketplace: only the configured marketplace passes.
-    if (ref.marketplace !== config.paapi.marketplace) {
+    if (ref.marketplace !== config.creatorsApi.marketplace) {
       skip("marketplace_mismatch");
       return false;
     }

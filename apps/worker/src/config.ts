@@ -22,8 +22,8 @@ function parseReplyMode(raw: string): ReplyMode {
 }
 
 const useFakeLlm = envBool("USE_FAKE_LLM", false);
-const paApiAccessKey = envString("PA_API_ACCESS_KEY", "");
-const paApiSecretKey = envString("PA_API_SECRET_KEY", "");
+const creatorsApiClientId = envString("CREATORS_API_CLIENT_ID", "");
+const creatorsApiClientSecret = envString("CREATORS_API_CLIENT_SECRET", "");
 let dryRun = envBool("DRY_RUN", true);
 // Fail-safe: heuristic fake verdicts must never post to real people. A
 // leftover USE_FAKE_LLM=true forces dry-run rather than trusting env-var
@@ -251,7 +251,7 @@ export const config = {
     /* Minimum gap before the same listing is re-polled. */
     listingRecheckMs: envInt("DEAL_LISTING_RECHECK_MS", 900_000),
     /* Soft daily PA-API cap, well under Amazon's 8640/day hard limit. */
-    maxPaApiCallsPerDay: envInt("DEAL_MAX_PA_API_CALLS_PER_DAY", 4_000),
+    maxApiCallsPerDay: envInt("DEAL_MAX_API_CALLS_PER_DAY", 4_000),
     /* A listing auto-deactivates after this many consecutive poll failures. */
     maxConsecutiveErrors: envInt("DEAL_MAX_CONSECUTIVE_ERRORS", 5),
     listingErrorBackoffHours: envInt("DEAL_LISTING_ERROR_BACKOFF_HOURS", 6),
@@ -265,8 +265,8 @@ export const config = {
     /* Amazon price-freshness: never post a price snapshot older than this. */
     maxPriceAgeHours: envInt("DEAL_MAX_PRICE_AGE_HOURS", 1),
     postMaxLength: envInt("DEAL_POST_MAX_LENGTH", 300),
-    paapiBaseBackoffMs: envInt("DEAL_PAAPI_BASE_BACKOFF_MS", 60_000),
-    paapiMaxBackoffMs: envInt("DEAL_PAAPI_MAX_BACKOFF_MS", 3_600_000),
+    apiBaseBackoffMs: envInt("DEAL_API_BASE_BACKOFF_MS", 60_000),
+    apiMaxBackoffMs: envInt("DEAL_API_MAX_BACKOFF_MS", 3_600_000),
     /* "wario" = terse deal-account copy, the price phrase is the link;
        "classic" = the original lead-in format on the fixed anchor. */
     postStyle: parseDealPostStyle(envString("DEAL_POST_STYLE", "wario")),
@@ -347,13 +347,16 @@ export const config = {
 
   /* Amazon Product Advertising API 5.0 credentials. When either key is
      absent the deal-check loop stands down and only the manual path runs. */
-  paapi: {
-    accessKey: paApiAccessKey,
-    secretKey: paApiSecretKey,
-    partnerTag: envString("PA_API_PARTNER_TAG", "") || envString("AMAZON_ASSOCIATE_TAG", ""),
-    marketplace: envString("PA_API_MARKETPLACE", "www.amazon.com"),
-    host: envString("PA_API_HOST", "webservices.amazon.com"),
-    region: envString("PA_API_REGION", "us-east-1"),
-    enabled: Boolean(paApiAccessKey && paApiSecretKey),
+  /* Amazon Creators API — successor to PA-API 5.0, whose endpoint was switched
+     off 2026-05-15. Credentials are a Credential ID/Secret pair from
+     affiliate-program.amazon.com/creatorsapi (NOT AWS keys); `version` picks
+     the regional OAuth token endpoint (3.1 = NA, 3.2 = EU, 3.3 = FE). */
+  creatorsApi: {
+    clientId: creatorsApiClientId,
+    clientSecret: creatorsApiClientSecret,
+    version: envString("CREATORS_API_VERSION", "3.1"),
+    partnerTag: envString("CREATORS_API_PARTNER_TAG", "") || envString("AMAZON_ASSOCIATE_TAG", ""),
+    marketplace: envString("CREATORS_API_MARKETPLACE", "www.amazon.com"),
+    enabled: Boolean(creatorsApiClientId && creatorsApiClientSecret),
   },
 } as const;

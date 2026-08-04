@@ -1,4 +1,4 @@
-import { createPaapiClient, PaapiAuthError, type PaapiClient } from "./paapi.js";
+import { createCatalogClient, CatalogAuthError, type CatalogClient } from "./creators-api.js";
 
 /**
  * Real-time orderability check for reply search links, behind PA-API keys.
@@ -16,7 +16,7 @@ import { createPaapiClient, PaapiAuthError, type PaapiClient } from "./paapi.js"
  * negligible against the shared daily PA-API budget).
  */
 
-let client: PaapiClient | null | undefined;
+let client: CatalogClient | null | undefined;
 let authDead = false;
 
 /**
@@ -24,7 +24,7 @@ let authDead = false;
  * @public — kept ahead of the availability tests that will use it; the tag
  * keeps Knip (repo-janitor's weekly sweep) from flagging it as unused.
  */
-export function setPaapiClientForTest(next: PaapiClient | null | undefined): void {
+export function setCatalogClientForTest(next: CatalogClient | null | undefined): void {
   client = next;
   authDead = false;
 }
@@ -33,7 +33,7 @@ export type Availability = "orderable" | "unavailable" | "unknown";
 
 export async function checkSearchAvailability(query: string): Promise<Availability> {
   if (authDead) return "unknown";
-  if (client === undefined) client = createPaapiClient();
+  if (client === undefined) client = createCatalogClient();
   if (client === null) return "unknown"; // no credentials — feature stands down
 
   try {
@@ -49,11 +49,11 @@ export async function checkSearchAvailability(query: string): Promise<Availabili
     // is Amazon saying "nothing orderable for this query" — a definitive no.
     return items.some((item) => item.available) ? "orderable" : "unavailable";
   } catch (error) {
-    if (error instanceof PaapiAuthError) {
+    if (error instanceof CatalogAuthError) {
       // Dead keys: stop asking for the life of the process (same policy as
       // the deal checker) — the check quietly degrades to "unknown".
       authDead = true;
-      console.error(`[availability] PA-API auth failed — checks disabled: ${error.message}`);
+      console.error(`[availability] Creators API auth failed — checks disabled: ${error.message}`);
       return "unknown";
     }
     // Transient/network: never block a reply on Amazon's API being flaky.

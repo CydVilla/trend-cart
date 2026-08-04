@@ -9,7 +9,12 @@ import {
 import { canonicalAmazonUrl, composeDealPost, withAffiliateTag } from "@trendcart/shared";
 import { config } from "../config.js";
 import { getOperatorFlags } from "../heartbeat.js";
-import { createPaapiClient, PaapiAuthError, type PaapiItem } from "../paapi.js";
+import {
+  createCatalogClient,
+  CatalogAuthError,
+  CatalogNotEligibleError,
+  type CatalogItem,
+} from "../creators-api.js";
 
 export type DealDiscoverStats = {
   feeds: number;
@@ -31,8 +36,8 @@ export type DealDiscoverer = { tick: () => Promise<void>; enabled: boolean };
 const MARKETPLACE_CURRENCY = "USD";
 
 /**
- * Wario64-style deal discovery: polls each active DealFeed via PA-API
- * SearchItems (server-side MinSavingPercent filter — only products currently
+ * Wario64-style deal discovery: polls each active DealFeed via Creators API
+ * searchItems (server-side minSavingPercent filter — only products currently
  * on sale come back), re-verifies every gate server-side, and queues passing
  * items as DealPosts. Discovered ASINs get a DISCOVERED TrackedListing row as
  * per-ASIN dedup/cooldown state — never polled by the price checker.
@@ -43,9 +48,9 @@ const MARKETPLACE_CURRENCY = "USD";
  * snapshot is too stale to advertise.
  */
 export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
-  const client = createPaapiClient();
+  const client = createCatalogClient();
   if (!client) {
-    console.warn("  deal discovery:   disabled (no PA-API credentials)");
+    console.warn("  deal discovery:   disabled (no Creators API credentials)");
     return { tick: async () => {}, enabled: false };
   }
   if (!config.site.amazonAssociateTag) {
@@ -79,9 +84,9 @@ export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
   }
 
   /** All server-side gates for one search result. Returns true when queued. */
-  async function handleItem(feed: DealFeed, item: PaapiItem): Promise<boolean> {
+  async function handleItem(feed: DealFeed, item: CatalogItem): Promise<boolean> {
     const now = new Date();
-    const marketplace = config.paapi.marketplace;
+    const marketplace = config.creatorsApi.marketplace;
 
     if (item.priceCents == null || !item.title) return skip("no_price_or_title");
     if (!item.available) return skip("unavailable");
@@ -313,7 +318,7 @@ export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
         await prisma.dealFeed
           .update({ where: { id: feed.id }, data: { lastRunAt: new Date(), lastRunError: message } })
           .catch(() => {});
-        if (error instanceof PaapiAuthError) {
+        if (error instanceof CatalogAuthError) {
           console.error(`[dealDiscover] ${message} — disabling discovery until restart`);
           backoffUntil = Number.MAX_SAFE_INTEGER;
           return;
@@ -322,8 +327,15 @@ export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
         const jitter = 1 + Math.random();
         backoffUntil =
           Date.now() +
-          Math.min(config.deals.paapiMaxBackoffMs, config.deals.paapiBaseBackoffMs * jitter);
-        console.warn(`[dealDiscover] PA-API error — backing off: ${message}`);
+          Math.min(config.deals.apiMaxBackoffMs, config.deals.apiBaseBackoffMs * jitter);
+        // Eligibility is expected to be absent for up to 48h after an app is
+        // created, so it backs off like any transient error rather than
+        // disabling — but say so plainly instead of crying "error" hourly.
+        if (error instanceof CatalogNotEligibleError) {
+          console.warn(`[dealDiscover] waiting on Creators API eligibility — backing off: ${message}`);
+        } else {
+          console.warn(`[dealDiscover] Creators API error — backing off: ${message}`);
+        }
         return;
       }
     }
