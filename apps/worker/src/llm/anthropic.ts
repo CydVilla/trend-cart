@@ -330,7 +330,17 @@ export class AnthropicLlmClient implements LlmClient {
       // time a call neither reads nor writes. If it ever trips, reactivate a
       // category or add real content (example problems) — never filler, which
       // you would then pay for on every uncached request forever.
-      { type: "text", text: stable, cache_control: { type: "ephemeral" } },
+      //
+      // 1-HOUR TTL, not the 5-minute default. Evals arrive roughly every 9
+      // minutes at this volume — LONGER than the default TTL — so the entry
+      // expired between nearly every pair of calls and was re-written at
+      // 1.25x input price instead of read at 0.1x. Measured 2026-08-04 over
+      // 81 classifications: 257,148 write tokens vs 128,574 read — a ~68%
+      // miss rate. The 1h TTL doubles the write price (2x) but converts most
+      // of those writes into reads; break-even is 3 reads per entry and this
+      // clears ~7. Revisit if eval volume ever drops enough that gaps exceed
+      // an hour, where 5m would again be the cheaper write.
+      { type: "text", text: stable, cache_control: { type: "ephemeral", ttl: "1h" } },
       ...(typeof rest === "string" ? [{ type: "text" as const, text: rest }] : rest),
     ];
     const response = await this.client.messages.parse({
