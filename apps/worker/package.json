@@ -12,8 +12,8 @@
     "export:dataset": "tsx scripts/export-training-data.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.111.0",
-    "@atproto/api": "^0.20.28",
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@atproto/api": "^0.20.34",
     "@trendcart/db": "workspace:*",
     "@trendcart/shared": "workspace:*",
     "dotenv": "^16.4.0",
