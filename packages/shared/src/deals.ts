@@ -87,6 +87,32 @@ function formatAsOf(date: Date): string {
   );
 }
 
+/**
+ * Price suffix for a REPLY (not a deal post). Replies carry no "#ad" — the
+ * validator bans "#" outright and the account bio does the disclosing — but
+ * quoting a price still obliges Amazon's freshness language, so the "as of"
+ * stamp and the subject-to-change note are non-optional here.
+ *
+ * Rides AFTER the link anchor so the anchor still appears exactly once and the
+ * facet byte offsets are unaffected. Kept terse because a reply's whole budget
+ * is 240 characters: "$42.99 (30% off) as of Aug 5, 9:12 PM UTC; may change".
+ */
+export function composeReplyPriceSuffix(input: {
+  priceCents: number;
+  wasPriceCents: number | null;
+  currency?: string;
+  priceAsOf: Date;
+}): string {
+  const currency = input.currency || "USD";
+  const price = formatMoney(input.priceCents, currency);
+  const pct =
+    input.wasPriceCents != null && input.wasPriceCents > input.priceCents
+      ? Math.round(((input.wasPriceCents - input.priceCents) / input.wasPriceCents) * 100)
+      : 0;
+  const offClause = pct >= 1 ? ` (${pct}% off)` : "";
+  return ` — ${price}${offClause} as of ${formatAsOf(input.priceAsOf)}; may change`;
+}
+
 /** Stable per-title opener so the same listing always reads consistently. */
 function pickLeadIn(seed: string): string {
   let hash = 0;

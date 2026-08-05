@@ -244,6 +244,14 @@ model CandidateEvaluation {
   /// product or same-franchise items. Low-confidence queries never get linked.
   /// Pre-existing rows default to 100 (they predate the gate).
   linkConfidence         Int     @default(100)
+  /// Did the AUTHOR name the product themselves, or did the bot identify it?
+  /// Drives the sale gate: when the author already named it (a Zelda post),
+  /// a reply only earns its place if the item is actually discounted. When the
+  /// bot did the identifying (figure photography, an unnamed gadget), the
+  /// reply carries its own value and may go out at full price.
+  /// Null on rows that predate the field — treated as "unknown", which the
+  /// reply gate reads conservatively as author-named.
+  posterNamedProduct     Boolean?
   /// LLM's suggestion when real intent exists but no category fits
   suggestedNewCategory   String?
   /// Which model produced this verdict ("fake", "policy", or a real model id) —

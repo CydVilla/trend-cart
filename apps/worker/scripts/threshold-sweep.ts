@@ -29,6 +29,7 @@ function selfTest(activeSlugs: Set<string>): void {
     recommendedCategorySlug: null,
     recommendedSearchQuery: "hollow knight silksong switch",
     linkConfidence: 70,
+    posterNamedProduct: true,
     suggestedNewCategory: null,
     shouldReply: true,
     reason: "self-test",

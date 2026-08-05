@@ -19,6 +19,7 @@ export class FakeLlmClient implements LlmClient {
     const base = {
       recommendedSearchQuery: null,
       linkConfidence: 0,
+      posterNamedProduct: true,
       suggestedNewCategory: null,
     };
     if (findSensitiveMatch(input.postText)) {
@@ -51,6 +52,7 @@ export class FakeLlmClient implements LlmClient {
         recommendedCategorySlug: null,
         recommendedSearchQuery: input.operatorNote.split(/\s+/).slice(0, 4).join(" "),
         linkConfidence: 90,
+        posterNamedProduct: true,
         shouldReply: true,
         reason: "fake: operator note provided — recommending per note",
         suggestedReplyAngle: input.operatorNote,
@@ -69,6 +71,7 @@ export class FakeLlmClient implements LlmClient {
           .slice(0, 4)
           .join(" "),
         linkConfidence: 75,
+        posterNamedProduct: true,
         shouldReply: true,
         reason: "fake: direct request — answering with a search recommendation",
         suggestedReplyAngle: "answer the requester directly",

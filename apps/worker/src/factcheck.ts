@@ -156,7 +156,8 @@ export type FactCheckInput = {
   postText: string;
   replyText: string;
   /** "search" = query targets a specific product; "category" = generic. */
-  linkKind: "search" | "category";
+  /** "product" = a resolved ASIN with a live price; "search" = a query page. */
+  linkKind: "search" | "category" | "product";
   /** The Amazon search query the link runs (product query or category name). */
   linkQuery: string;
   suggestedReplyAngle: string | null;
@@ -191,7 +192,11 @@ export async function factCheckReply(input: FactCheckInput): Promise<FactCheckVe
         {
           role: "user",
           content:
-            `Link: Amazon search for "${sanitize(input.linkQuery)}" (${input.linkKind === "search" ? "specific product query" : "generic category query"})\n` +
+            `Link: ${
+              input.linkKind === "product"
+                ? `Amazon product page for "${sanitize(input.linkQuery)}" (a specific listing, resolved via Amazon's catalog API)`
+                : `Amazon search for "${sanitize(input.linkQuery)}" (${input.linkKind === "search" ? "specific product query" : "generic category query"})`
+            }\n` +
             (input.suggestedReplyAngle
               ? `Reply angle the classifier chose: ${sanitize(input.suggestedReplyAngle)}\n`
               : "") +

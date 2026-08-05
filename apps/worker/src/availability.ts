@@ -63,3 +63,76 @@ export async function checkSearchAvailability(query: string): Promise<Availabili
     return "unknown";
   }
 }
+
+/** The best orderable offer for a reply query, when Amazon will tell us. */
+export type ReplyOffer = {
+  asin: string;
+  title: string | null;
+  priceCents: number;
+  wasPriceCents: number | null;
+  /** Whole-percent discount vs the strikethrough, 0 when not discounted. */
+  savingPercent: number;
+  priceAsOf: Date;
+};
+
+/**
+ * Resolve a reply's search query to a concrete, orderable offer — the ASIN,
+ * its live price, and whether it is actually discounted.
+ *
+ * `null` means "no answer", NOT "not on sale": no credentials, an API error,
+ * eligibility still pending, or nothing orderable. The caller must treat null
+ * as unknown and fall back to its pre-price behaviour — a hard sale gate on a
+ * null would silence the bot for as long as Amazon's API is dark.
+ *
+ * A discount is only counted against Amazon's own strikethrough
+ * (`wasPriceCents`), never a computed or third-party "list price" — same
+ * attestation rule the deal channel follows.
+ */
+export async function findBestOffer(query: string): Promise<ReplyOffer | null> {
+  if (authDead) return null;
+  if (client === undefined) client = createCatalogClient();
+  if (client === null) return null;
+
+  try {
+    const items = await client.searchItems({
+      keywords: query,
+      searchIndex: "All",
+      minSavingPercent: 0, // rank the whole catalog; the gate is applied here
+      amazonOnly: false,
+      itemPage: 1,
+    });
+    const orderable = items.filter((item) => item.available && item.priceCents != null);
+    if (orderable.length === 0) return null;
+
+    const scored = orderable.map((item) => {
+      const price = item.priceCents as number;
+      const was = item.wasPriceCents;
+      const savingPercent =
+        was != null && was > price ? Math.round(((was - price) / was) * 100) : 0;
+      return { item, price, was, savingPercent };
+    });
+    // Prefer a genuine discount; ties (and an all-full-price set) fall back to
+    // Amazon's own relevance order, which the search already sorted.
+    scored.sort((a, b) => b.savingPercent - a.savingPercent);
+    const best = scored[0];
+    if (!best) return null;
+    return {
+      asin: best.item.asin,
+      title: best.item.title,
+      priceCents: best.price,
+      wasPriceCents: best.was,
+      savingPercent: best.savingPercent,
+      priceAsOf: new Date(),
+    };
+  } catch (error) {
+    if (error instanceof CatalogAuthError) {
+      authDead = true;
+      console.error(`[availability] Creators API auth failed — offers disabled: ${error.message}`);
+      return null;
+    }
+    console.warn(
+      `[availability] offer lookup failed for "${query}": ${error instanceof Error ? error.message : error}`,
+    );
+    return null;
+  }
+}

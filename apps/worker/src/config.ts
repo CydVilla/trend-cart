@@ -222,6 +222,17 @@ export const config = {
     maxRepliesPerDay: envInt("MAX_REPLIES_PER_DAY", 3),
     replyMaxLength: envInt("REPLY_MAX_LENGTH", 240),
     minProductIntentScore: envInt("MIN_PRODUCT_INTENT_SCORE", 85),
+    /* Sale gate (operator rule 2026-08-05): when the AUTHOR already named the
+       product, a reply only earns its place if the item is actually
+       discounted — recommending Zelda to someone posting about Zelda adds
+       nothing at full price. When the BOT identified the product (figure
+       photography, an unnamed gadget), the reply carries its own value and
+       goes out at any price. FAIL-OPEN: if Amazon won't tell us the price
+       (no credentials, API down, eligibility pending), the gate stands down
+       rather than silencing the bot. */
+    requireSaleWhenAuthorNamed: envBool("REPLY_REQUIRE_SALE", true),
+    /* Ignore trivial markdowns — a 2% cut isn't a reason to interrupt. */
+    minSavingPercent: envInt("REPLY_MIN_SAVING_PERCENT", 10),
     authorCooldownHours: envInt("AUTHOR_COOLDOWN_HOURS", 168),
     categoryCooldownMinutes: envInt("CATEGORY_COOLDOWN_MINUTES", 120),
     globalReplyCooldownMinutes: envInt("GLOBAL_REPLY_COOLDOWN_MINUTES", 90),

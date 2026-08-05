@@ -20,6 +20,14 @@ export type CandidateEvaluationResult = {
    * Below the floor, the query is never linked.
    */
   linkConfidence: number;
+  /**
+   * True when the AUTHOR named the product, false when the BOT identified it
+   * (from an image, alt text, or franchise hashtags), null when there is no
+   * product. Drives the reply sale gate: an author who already named the item
+   * gets a reply only when it's discounted; an item the bot identified is
+   * worth surfacing at any price.
+   */
+  posterNamedProduct: boolean | null;
   /** When real intent exists but no category fits: what category is missing? */
   suggestedNewCategory: string | null;
   shouldReply: boolean;

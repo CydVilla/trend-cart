@@ -1,6 +1,13 @@
 import { prisma, ReplyStatus, type CandidateEvaluation, type Post, type Prisma } from "@trendcart/db";
-import { amazonSearchUrl, type GenerateReplyInput, type LlmClient } from "@trendcart/shared";
-import { checkSearchAvailability } from "./availability.js";
+import {
+  amazonSearchUrl,
+  canonicalAmazonUrl,
+  composeReplyPriceSuffix,
+  withAffiliateTag,
+  type GenerateReplyInput,
+  type LlmClient,
+} from "@trendcart/shared";
+import { checkSearchAvailability, findBestOffer, type ReplyOffer } from "./availability.js";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
@@ -218,10 +225,13 @@ function statusFor(
 }
 
 type ReplyLink = {
-  kind: "operator" | "search";
+  kind: "operator" | "search" | "product";
   url: string;
   /** Human-readable clickable text — the URL rides on it as a facet. */
   anchor: string;
+  /** Live Amazon offer, when the catalog API answered. Drives the price
+   *  suffix and the sale gate; absent means "Amazon didn't tell us". */
+  offer?: ReplyOffer;
 };
 
 /** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
@@ -266,8 +276,11 @@ async function draftReply(
   llm: LlmClient,
   input: GenerateReplyInput,
   anchor: string,
+  priceSuffix = "",
 ): Promise<DraftResult> {
-  const compose = (body: string) => `${body} ${anchor}`;
+  // The price rides AFTER the anchor so the anchor still appears exactly once
+  // (the validator requires that, and the facet's byte offsets depend on it).
+  const compose = (body: string) => `${body} ${anchor}${priceSuffix}`;
   let body = await llm.generateReply(input);
   let text = compose(body);
   let validation = validateReply(text, anchor, config.bot.replyMaxLength);
@@ -351,6 +364,37 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
     // a query with zero new/in-stock results (unreleased, sold out,
     // collector-only) kills the reply instead of shipping a link to junk.
     // "unknown" (no keys / API down) changes nothing.
+    // Ask Amazon for the concrete offer behind this query. A hit gives us the
+    // ASIN (a direct product link beats a search page), the live price, and
+    // whether it is genuinely discounted.
+    const offer = await findBestOffer(evaluation.recommendedSearchQuery);
+    if (offer) {
+      const onSale = offer.savingPercent >= config.bot.minSavingPercent;
+      // The author naming the product themselves is what makes a full-price
+      // reply worthless — the reader already knows what to buy. When the bot
+      // did the identifying, the reply is the value. `null` (legacy rows, or
+      // a model that skipped the field) reads as author-named, the strict side.
+      const botIdentifiedIt = evaluation.posterNamedProduct === false;
+      if (config.bot.requireSaleWhenAuthorNamed && !onSale && !botIdentifiedIt) {
+        console.log(
+          `[reply] "${evaluation.recommendedSearchQuery}" not on sale ` +
+            `(${offer.savingPercent}% < ${config.bot.minSavingPercent}%) and the author named it — skipping`,
+        );
+        return null;
+      }
+      return {
+        kind: "product",
+        url: withAffiliateTag(
+          canonicalAmazonUrl(offer.asin, config.creatorsApi.marketplace),
+          config.site.amazonAssociateTag,
+        ),
+        anchor: searchAnchor(evaluation.recommendedSearchQuery),
+        offer,
+      };
+    }
+
+    // No offer data (no credentials, API down, eligibility pending): fall back
+    // to the pre-price behaviour rather than going silent.
     const availability = await checkSearchAvailability(evaluation.recommendedSearchQuery);
     if (availability !== "unavailable") {
       return {
@@ -491,8 +535,18 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     }
 
     // The display text ends with the clickable anchor; the URL itself is
-    // attached as a facet at posting time, never shown raw.
-    const reserved = link.anchor.length + 1;
+    // attached as a facet at posting time, never shown raw. When a live offer
+    // exists the price clause rides after the anchor, so its length has to
+    // come out of the model's budget too — otherwise every priced reply
+    // overshoots and burns the retry.
+    const priceSuffix = link.offer
+      ? composeReplyPriceSuffix({
+          priceCents: link.offer.priceCents,
+          wasPriceCents: link.offer.wasPriceCents,
+          priceAsOf: link.offer.priceAsOf,
+        })
+      : "";
+    const reserved = link.anchor.length + 1 + priceSuffix.length;
     // Same visual + conversation context the classifier saw, so the reply can
     // reference what was actually shared. Comments are re-fetched fresh (cheap
     // public read) so the reply reflects the thread as it stands now.
@@ -519,7 +573,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
 
     let draft: DraftResult;
     try {
-      draft = await draftReply(llm, replyInput, link.anchor);
+      draft = await draftReply(llm, replyInput, link.anchor, priceSuffix);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (isTransientError(error)) {
@@ -631,6 +685,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
               },
             },
             link.anchor,
+            priceSuffix,
           );
         } catch (error) {
           console.warn(
