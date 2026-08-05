@@ -3,6 +3,7 @@ import {
   amazonSearchUrl,
   canonicalAmazonUrl,
   composeReplyPriceSuffix,
+  productMatchConfidence,
   withAffiliateTag,
   type GenerateReplyInput,
   type LlmClient,
@@ -213,9 +214,18 @@ function statusFor(
     // his 👎 ratings flagged most.
     const playful =
       evaluation.suggestedReplyAngle?.startsWith("PLAYFUL") && !config.bot.playfulAutoApprove;
+    // A direct product link is a stronger claim than a search page, so it needs
+    // a stronger bar — the ASIN must verifiably be the product we meant. Only
+    // OPERATOR links skip the link-quality check (a human already chose them).
+    const linkTrusted =
+      link.kind === "operator"
+        ? true
+        : link.kind === "product"
+          ? (link.matchConfidence ?? 0) >= config.bot.minProductMatch &&
+            evaluation.linkConfidence >= config.bot.autoMinLinkConfidence
+          : evaluation.linkConfidence >= config.bot.autoMinLinkConfidence;
     const confident =
-      evaluation.productIntentScore >= config.bot.autoMinIntentScore &&
-      (link.kind !== "search" || evaluation.linkConfidence >= config.bot.autoMinLinkConfidence);
+      evaluation.productIntentScore >= config.bot.autoMinIntentScore && linkTrusted;
     if (humanDecided || (confident && !playful)) {
       return { status: ReplyStatus.APPROVED, approvedAt: new Date() };
     }
@@ -232,6 +242,9 @@ type ReplyLink = {
   /** Live Amazon offer, when the catalog API answered. Drives the price
    *  suffix and the sale gate; absent means "Amazon didn't tell us". */
   offer?: ReplyOffer;
+  /** 0-100 that the resolved ASIN is really the product meant. Product links
+   *  below the floor never self-approve. */
+  matchConfidence?: number;
 };
 
 /** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
@@ -366,8 +379,12 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
     // "unknown" (no keys / API down) changes nothing.
     // Ask Amazon for the concrete offer behind this query. A hit gives us the
     // ASIN (a direct product link beats a search page), the live price, and
-    // whether it is genuinely discounted.
-    const offer = await findBestOffer(evaluation.recommendedSearchQuery);
+    // whether it is genuinely discounted. Gated by the master switch so
+    // eligibility landing can't silently change every reply's shape — and so
+    // no catalog calls are spent while the feature is off.
+    const offer = config.bot.productLinksEnabled
+      ? await findBestOffer(evaluation.recommendedSearchQuery)
+      : null;
     if (offer) {
       const onSale = offer.savingPercent >= config.bot.minSavingPercent;
       // The author naming the product themselves is what makes a full-price
@@ -382,6 +399,20 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
         );
         return null;
       }
+      // Is this listing actually the product we meant? A search page tolerates
+      // a near miss; a direct link asserts it. Low scores still reply — they
+      // just never post unreviewed (see statusFor).
+      const matchConfidence = productMatchConfidence(
+        evaluation.recommendedSearchQuery,
+        offer.title,
+      );
+      if (matchConfidence < config.bot.minProductMatch) {
+        console.log(
+          `[reply] resolved "${evaluation.recommendedSearchQuery}" to ${offer.asin} ` +
+            `("${offer.title ?? "no title"}") at match ${matchConfidence} < ` +
+            `${config.bot.minProductMatch} — escalating to manual approval`,
+        );
+      }
       return {
         kind: "product",
         url: withAffiliateTag(
@@ -390,6 +421,7 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
         ),
         anchor: searchAnchor(evaluation.recommendedSearchQuery),
         offer,
+        matchConfidence,
       };
     }
 

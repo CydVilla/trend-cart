@@ -230,6 +230,19 @@ export const config = {
        goes out at any price. FAIL-OPEN: if Amazon won't tell us the price
        (no credentials, API down, eligibility pending), the gate stands down
        rather than silencing the bot. */
+    /* MASTER SWITCH for direct /dp/<ASIN> product links, price clauses, and the
+       sale gate. OFF by default on purpose: the moment Amazon grants Creators
+       API access the catalog starts answering, and without this the bot would
+       silently change what every reply looks like with nobody having checked
+       the first one. Flip it on deliberately after verifying a resolved offer
+       by hand. While off, replies behave exactly as they do today (specific
+       product SEARCH links) and no catalog calls are made. */
+    productLinksEnabled: envBool("REPLY_PRODUCT_LINKS_ENABLED", false),
+    /* A resolved ASIN must score at least this on productMatchConfidence to
+       post unreviewed. A search page is forgiving; a direct product link is a
+       confident assertion, and a wrong one is worse than no link. Below this,
+       the reply still goes out — to the manual queue. */
+    minProductMatch: envInt("REPLY_MIN_PRODUCT_MATCH", 80),
     requireSaleWhenAuthorNamed: envBool("REPLY_REQUIRE_SALE", true),
     /* Ignore trivial markdowns — a 2% cut isn't a reason to interrupt. */
     minSavingPercent: envInt("REPLY_MIN_SAVING_PERCENT", 10),
