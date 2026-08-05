@@ -9,6 +9,7 @@
     "test": "tsx --test src/*.test.ts src/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "calibrate": "tsx scripts/calibrate.ts",
+    "probe:catalog": "tsx scripts/creators-probe.ts",
     "export:dataset": "tsx scripts/export-training-data.ts"
   },
   "dependencies": {
