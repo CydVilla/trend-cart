@@ -1,7 +1,13 @@
 "use server";
 
 import Anthropic from "@anthropic-ai/sdk";
-import { prisma, DealPostStatus, ReplyStatus, SafetyStatus } from "@trendcart/db";
+import {
+  prisma,
+  DealPostStatus,
+  ReplyStatus,
+  SafetyStatus,
+  recordResponseUsage,
+} from "@trendcart/db";
 import { PAAPI_SEARCH_INDEXES, isAmazonHost, parseCents, withAffiliateTag } from "@trendcart/shared";
 import { revalidatePath } from "next/cache";
 
@@ -94,6 +100,7 @@ export async function refineReply(formData: FormData): Promise<void> {
       },
     ],
   });
+  recordResponseUsage("regenerate", model, response);
   if (response.stop_reason === "refusal") return;
   let newText = response.content
     .filter((block) => block.type === "text")

@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { prisma, ReplyStatus, type Prisma } from "@trendcart/db";
+import { prisma, ReplyStatus, recordResponseUsage, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
 import { FACTCHECK_REJECT_SKIP_REASON } from "./factcheck.js";
 
@@ -283,6 +283,7 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
       },
     ],
   });
+  recordResponseUsage("reflect", config.llm.model, response);
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     stats.errors += 1;
     throw new Error("reflection produced no parseable output");

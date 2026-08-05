@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { extractAsin, isAmazonHost } from "@trendcart/shared";
+import { recordResponseUsage } from "@trendcart/db";
 import { z } from "zod";
 import { config } from "./config.js";
 
@@ -205,8 +206,9 @@ export async function factCheckReply(input: FactCheckInput): Promise<FactCheckVe
         },
       ],
     });
-    if (response.stop_reason === "refusal" || !response.parsed_output) return null;
     const searchesUsed = response.usage.server_tool_use?.web_search_requests ?? 0;
+    recordResponseUsage("factcheck", config.llm.model, response, { webSearches: searchesUsed });
+    if (response.stop_reason === "refusal" || !response.parsed_output) return null;
     console.log(
       `[factcheck] reply check used ${searchesUsed}/${config.factCheck.maxSearches} searches`,
     );
@@ -374,9 +376,11 @@ export async function factCheckDealListing(input: {
         },
       ],
     });
+    const dealSearchesUsed = response.usage.server_tool_use?.web_search_requests ?? 0;
+    recordResponseUsage("deal-factcheck", config.llm.model, response, { webSearches: dealSearchesUsed });
     if (response.stop_reason === "refusal" || !response.parsed_output) return null;
     console.log(
-      `[factcheck] deal check used ${response.usage.server_tool_use?.web_search_requests ?? 0}/${config.factCheck.maxSearches} searches`,
+      `[factcheck] deal check used ${dealSearchesUsed}/${config.factCheck.maxSearches} searches`,
     );
     const evidenceResults = response.content.flatMap((block) =>
       block.type === "web_search_tool_result" && Array.isArray(block.content)

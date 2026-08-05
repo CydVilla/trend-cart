@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
+    "@trendcart/shared": "workspace:*",
     "prisma": "^6.5.0"
   },
   "devDependencies": {

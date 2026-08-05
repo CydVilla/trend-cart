@@ -11,6 +11,7 @@ import type {
   ReplyRepair,
   SuggestionVerdict,
 } from "@trendcart/shared";
+import { recordResponseUsage } from "@trendcart/db";
 import { config } from "../config.js";
 
 /** Schema the model's structured output must satisfy. */
@@ -359,6 +360,7 @@ export class AnthropicLlmClient implements LlmClient {
       messages: [{ role: "user", content }],
     });
     // Account before the refusal check — a refused call still billed its input.
+    recordResponseUsage("classify", this.model, response, { cacheWriteTtl: "1h" });
     const read = response.usage.cache_read_input_tokens ?? 0;
     const written = response.usage.cache_creation_input_tokens ?? 0;
     cacheReadTokens += read;
@@ -399,6 +401,7 @@ export class AnthropicLlmClient implements LlmClient {
         },
       ],
     });
+    recordResponseUsage("deal-lane", this.model, response);
     if (response.stop_reason === "refusal" || !response.parsed_output) {
       throw new Error(`suggestion gate produced no parseable output (stop: ${response.stop_reason})`);
     }
@@ -421,6 +424,7 @@ export class AnthropicLlmClient implements LlmClient {
         { role: "user", content: buildContent(buildReplyPrompt(input, wordBudget), input.images) },
       ],
     });
+    recordResponseUsage("reply", this.model, response);
     if (response.stop_reason === "refusal") {
       throw new Error("reply generation was refused");
     }

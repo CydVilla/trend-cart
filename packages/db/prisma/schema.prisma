@@ -322,6 +322,34 @@ model WorkerHeartbeat {
   postingState String
   loops        Json
   counters     Json
+  /// Flattened snapshot of the thresholds the worker is ACTUALLY running with,
+  /// written every heartbeat. The dashboard renders this rather than re-reading
+  /// env vars in the web process: same Heroku config today, but a snapshot from
+  /// the running worker can't drift, and it stays honest if the two ever differ.
+  settings     Json?
+}
+
+/// One billed Anthropic call. Written by every LLM call site (worker loops and
+/// the dashboard's Regenerate), priced at the rates in force when it ran —
+/// see packages/db/src/usage.ts. Pruned after 90 days.
+model LlmUsage {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  /// Which loop spent it: classify | reply | factcheck | banter | ...
+  operation String
+  model     String
+  inputTokens      Int @default(0)
+  outputTokens     Int @default(0)
+  cacheReadTokens  Int @default(0)
+  cacheWriteTokens Int @default(0)
+  /// Anthropic server-side web_search calls (billed per search, not per token).
+  webSearches      Int @default(0)
+  /// Cost in MICRO-dollars, computed at write time so a rate-card change never
+  /// silently rewrites history.
+  costMicros       Int @default(0)
+
+  @@index([createdAt])
+  @@index([operation, createdAt])
 }
 
 /// Point-in-time engagement reading for one of the bot's own posted items.

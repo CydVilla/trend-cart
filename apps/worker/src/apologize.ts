@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import type { AtpAgent } from "@atproto/api";
-import { prisma, ReplyStatus, type Prisma } from "@trendcart/db";
+import { prisma, ReplyStatus, recordResponseUsage, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
 import { isPaused } from "./heartbeat.js";
 
@@ -90,6 +90,7 @@ async function judgeReply(text: string): Promise<Verdict & { model: string }> {
       },
     ],
   });
+  recordResponseUsage("apology", config.llm.model, response);
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     throw new Error(`apology verdict produced no parseable output (stop: ${response.stop_reason})`);
   }

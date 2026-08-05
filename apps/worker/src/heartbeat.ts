@@ -1,5 +1,6 @@
 import { prisma, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
+import { buildSettingsSnapshot } from "./settings.js";
 
 /**
  * Worker liveness + ground-truth mode, persisted so the dashboard shows what
@@ -41,6 +42,10 @@ export async function flushHeartbeat(): Promise<void> {
     postingState,
     loops: loops as unknown as Prisma.InputJsonValue,
     counters: countersRef as unknown as Prisma.InputJsonValue,
+    // Rebuilt each flush rather than cached at boot: config is frozen for the
+    // process, but a redeploy with changed vars then shows up within one tick
+    // instead of looking stale until someone notices.
+    settings: buildSettingsSnapshot() as unknown as Prisma.InputJsonValue,
   };
   await prisma.workerHeartbeat.upsert({
     where: { id: HEARTBEAT_ID },

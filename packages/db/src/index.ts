@@ -78,3 +78,9 @@ export * from "@prisma/client";
 
 // Funnel analytics (dashboard + insights report)
 export * from "./analytics";
+
+// LLM spend ledger (pricing, recording, aggregation)
+export * from "./usage";
+
+// Live counts behind the dashboard's cap bars
+export * from "./limits";

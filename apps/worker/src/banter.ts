@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { AtpAgent } from "@atproto/api";
-import { prisma, PostSource, ReplyStatus } from "@trendcart/db";
+import { prisma, PostSource, ReplyStatus, recordResponseUsage } from "@trendcart/db";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 import { findSensitiveMatch } from "./filters.js";
@@ -210,6 +210,7 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
           },
         ],
       });
+      recordResponseUsage("banter", config.llm.model, response);
       if (response.stop_reason === "refusal" || !response.parsed_output) return null;
       return response.parsed_output;
     } catch (error) {

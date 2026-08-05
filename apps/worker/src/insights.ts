@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { prisma, computeFunnel, type FunnelReport, type Prisma } from "@trendcart/db";
+import { prisma, computeFunnel, recordResponseUsage, type FunnelReport, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
 
 /**
@@ -124,6 +124,7 @@ export async function insightsTick(stats: InsightsStats): Promise<void> {
       },
     ],
   });
+  recordResponseUsage("insights", config.llm.model, response);
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     stats.errors += 1;
     throw new Error("insights produced no parseable output");

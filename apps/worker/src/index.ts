@@ -1,4 +1,4 @@
-import { prisma } from "@trendcart/db";
+import { prisma, pruneLlmUsage } from "@trendcart/db";
 import type { LlmClient } from "@trendcart/shared";
 import { config } from "./config.js";
 import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
@@ -179,6 +179,12 @@ async function main(): Promise<void> {
     startLoop("reflect", 6 * 3_600_000, () => reflectTick(reflectStats)),
     // Daily funnel/insights report (one small LLM call — no-ops until stale).
     startLoop("insights", 6 * 3_600_000, () => insightsTick(insightsStats)),
+    // Spend-ledger housekeeping: one row per LLM call adds up (~1k/day at the
+    // eval cap), and the dashboard only looks back 30 days.
+    startLoop("usagePrune", 12 * 3_600_000, async () => {
+      const removed = await pruneLlmUsage();
+      if (removed > 0) console.log(`[usage] pruned ${removed} ledger rows older than 90d`);
+    }),
     // Deal tracker loops (only when enabled + preconditions met).
     // Ticks every minute; each feed is only due once per its interval, and
     // feedsPerTick caps the per-minute API burst.
