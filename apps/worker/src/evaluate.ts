@@ -8,6 +8,11 @@ import type {
 } from "@trendcart/shared";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
+import {
+  llmBillingBlocked,
+  noteLlmBillingBlocked,
+  noteLlmCallSucceeded,
+} from "./llm-health.js";
 import { findPromotionalMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
@@ -189,6 +194,9 @@ async function recordFailedEvaluation(postId: string, message: string): Promise<
  */
 export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats): Promise<void> {
   if (Date.now() < backoffUntil) return;
+  // Out of credit: skip cheaply rather than burning candidates against an API
+  // that will reject every call. The next tick after the window is the probe.
+  if (llmBillingBlocked()) return;
   if (await isPaused()) return;
 
   const now = Date.now();
@@ -513,9 +521,14 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     let raw: CandidateEvaluationResult;
     try {
       raw = await llm.classifyPost(input);
+      noteLlmCallSucceeded();
     } catch (error) {
       stats.errors += 1;
       const message = error instanceof Error ? error.message : String(error);
+      // Billing FIRST: it arrives as a 400, which isTransientError() does not
+      // match, so without this it falls through to the blame-the-post path and
+      // permanently writes off every candidate in the backlog.
+      if (noteLlmBillingBlocked(error)) return;
       if (isTransientError(error)) {
         backoffUntil = Date.now() + TRANSIENT_BACKOFF_MS;
         console.error(

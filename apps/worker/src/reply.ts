@@ -12,6 +12,7 @@ import { checkSearchAvailability, findBestOffer, type ReplyOffer } from "./avail
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
 import { isTransientError } from "./evaluate.js";
+import { llmBillingBlocked, noteLlmBillingBlocked, noteLlmCallSucceeded } from "./llm-health.js";
 import {
   factCheckReply,
   routeIsAtLeastAsGood,
@@ -451,6 +452,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
   const flags = await getOperatorFlags();
   if (flags.paused) return;
   if (Date.now() < generationBackoffUntil) return;
+  if (llmBillingBlocked()) return;
 
   const dueWhere = {
     shouldReply: true,
@@ -606,8 +608,12 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
     let draft: DraftResult;
     try {
       draft = await draftReply(llm, replyInput, link.anchor, priceSuffix);
+      noteLlmCallSucceeded();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Billing before transient, and before the FAILED row below: an
+      // out-of-credit window must not mark drafts permanently failed.
+      if (noteLlmBillingBlocked(error)) return;
       if (isTransientError(error)) {
         // API outage: back off the whole loop, don't blame the candidate.
         generationBackoffUntil = Date.now() + GENERATION_BACKOFF_MS;

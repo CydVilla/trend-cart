@@ -6,6 +6,7 @@ import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDealSuggester, newDealSuggestStats } from "./deals/suggest.js";
 import { createBanter, type BanterStats } from "./banter.js";
 import { blueskyBackoffSeconds } from "./bluesky-health.js";
+import { llmBillingBlockedSeconds } from "./llm-health.js";
 import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
@@ -240,6 +241,9 @@ async function main(): Promise<void> {
         `banter=${banterStats.posted} ` +
         `lessons=${reflectStats.reflections}` +
         (blueskyBackoffSeconds() > 0 ? ` | BLUESKY DOWN (retry ${blueskyBackoffSeconds()}s)` : "") +
+        (llmBillingBlockedSeconds() > 0
+          ? ` | LLM OUT OF CREDIT (retry ${llmBillingBlockedSeconds()}s)`
+          : "") +
         (config.deals.enabled
           ? ` | dealPosted=${dealPostStats.posted} ` +
             `feedRuns=${dealDiscoverStats.feeds} feedFound=${dealDiscoverStats.found} ` +
