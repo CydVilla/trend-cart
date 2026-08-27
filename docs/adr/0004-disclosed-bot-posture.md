@@ -30,7 +30,16 @@ disclosure statement.
 ## Addendum (2026-07-17): apologize, never argue
 
 > **Superseded 2026-08-27.** The apology mechanism was removed at the
-> operator's request; the bot now simply does not respond to hostility.
+> operator's request — it did not earn its place. The bot now simply does not
+> respond to hostility; a reply that is negative toward it is ignored past the
+> opt-out check, which was always the fallback the addendum described.
+>
+> For the record: it ran from 2026-07-17 to 2026-08-27 and posted **four**
+> apologies (2026-07-24, 07-27, and two on 08-21), at a total LLM cost of
+> about $0.01. The `ApologyReply` table was dropped; its rows were archived
+> outside this repository, since they contain third-party handles and message
+> text and this repository is public.
+>
 > The reasoning below is retained as the record of why it once existed.
 
 A disclosed bot also owns its misses. When a reply to the bot is negative

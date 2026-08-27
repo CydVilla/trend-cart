@@ -269,34 +269,6 @@ model CandidateEvaluation {
   @@index([createdAt])
 }
 
-/// One-shot apology: when someone replies to the bot with negativity, it
-/// apologizes once with a FIXED template (audience text never shapes the
-/// posted words — the LLM only gates whether an apology is due). Politeness
-/// only; whether the feedback gets internalized is reflection's job, and only
-/// when it's constructive. Unique targetUri = exactly-once per negative reply.
-model ApologyReply {
-  id           String  @id @default(cuid())
-  /// AT URI of the negative reply we responded to (the dedupe/claim key).
-  targetUri    String  @unique
-  authorDid    String
-  authorHandle String?
-  /// What they said, clipped (audit + reflection context).
-  targetText   String
-  /// Verdict that gated this: { negativeTowardBot, constructive, confidence,
-  /// reason, model }.
-  verdict      Json?
-  /// The template text posted (or that would post, for DRY_RUN/SKIPPED rows).
-  replyText    String
-  replyUri     String?
-  status       ReplyStatus
-  skipReason   String?
-  postedAt     DateTime?
-  createdAt    DateTime @default(now())
-
-  @@index([authorDid, createdAt])
-  @@index([status, createdAt])
-}
-
 /// Authors the bot must never reply to again. Populated automatically when
 /// anyone interacts with the bot (conservative consent-revocation) or manually.
 model AuthorOptOut {
