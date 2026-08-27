@@ -134,18 +134,28 @@ export type GenerateReplyInput = {
 /** Revenue-oriented lane assigned to an RSS deal candidate. `other` is never
  * eligible for autonomous promotion; it exists so uncertain classifications
  * fail closed without inventing a fit. */
-export type HighConversionLane =
-  | "nintendo-switch"
-  | "playstation-xbox"
-  | "pc-gaming"
-  | "storage-ssd"
-  | "controllers-parts"
-  | "anime-figures"
-  | "collectibles-fandom"
-  | "recent-games"
-  | "movies-tv"
-  | "giftable-under-75"
-  | "other";
+/**
+ * The single source of truth for lane slugs. A runtime array rather than a
+ * bare type union, so the classifier's output schema can be DERIVED from it
+ * instead of hand-copied — the hand-copy is how `anime-figures` came to exist
+ * everywhere except the validator, which then silently rejected every figure
+ * deal the model had been told to classify that way.
+ */
+export const HIGH_CONVERSION_LANE_SLUGS = [
+  "nintendo-switch",
+  "playstation-xbox",
+  "pc-gaming",
+  "storage-ssd",
+  "controllers-parts",
+  "anime-figures",
+  "collectibles-fandom",
+  "recent-games",
+  "movies-tv",
+  "giftable-under-75",
+  "other",
+] as const;
+
+export type HighConversionLane = (typeof HIGH_CONVERSION_LANE_SLUGS)[number];
 
 /** One RSS deal headline judged against a suggestion source's topical lane. */
 export type JudgeSuggestionInput = {
