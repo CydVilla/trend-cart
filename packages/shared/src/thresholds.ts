@@ -34,7 +34,6 @@ export type MeterKey =
   | "evalsLastHour"
   | "dealPostsLastDay"
   | "banterLastDay"
-  | "apologiesLastDay"
   | "pinsLastDay";
 
 export type ThresholdEntry = {

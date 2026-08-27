@@ -28,6 +28,11 @@ disclosure statement.
   if people know the bot exists and what it does.
 
 ## Addendum (2026-07-17): apologize, never argue
+
+> **Superseded 2026-08-27.** The apology mechanism was removed at the
+> operator's request; the bot now simply does not respond to hostility.
+> The reasoning below is retained as the record of why it once existed.
+
 A disclosed bot also owns its misses. When a reply to the bot is negative
 toward it, the bot apologizes ONCE with a fixed template chosen in code —
 the LLM only gates whether an apology is due, so a stranger's words can

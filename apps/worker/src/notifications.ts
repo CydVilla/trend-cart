@@ -1,6 +1,5 @@
 import { AtpAgent } from "@atproto/api";
 import { prisma } from "@trendcart/db";
-import { considerApology } from "./apologize.js";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 
@@ -14,15 +13,11 @@ import { config } from "./config.js";
  *    solicited, so it skips maturation and social cooldowns but still passes
  *    safety evaluation, rate caps, and (in manual mode) human approval.
  *    A fresh request is explicit re-consent: it clears a prior opt-out.
- * 3. APOLOGIES: a reply that's negative toward the bot (but not an opt-out —
- *    those get silence, as requested) earns one fixed-template apology.
- *    See apologize.ts for the rails.
  */
 
 export type NotificationStats = {
   optOuts: number;
   requests: number;
-  apologies: number;
   errors: number;
 };
 
@@ -144,26 +139,8 @@ export function createNotificationListener(
         continue;
       }
 
-      // A non-opt-out reply to one of our posts: apologize once if it's
-      // negative toward the bot. Best-effort — considerApology never throws,
-      // so a failure here can't stall opt-out/mention processing behind it.
-      if (notification.reason === "reply") {
-        await considerApology(
-          {
-            uri: notification.uri,
-            cid: notification.cid,
-            authorDid: notification.author.did,
-            authorHandle: notification.author.handle ?? null,
-            text,
-            rootRef: record?.reply?.root ?? null,
-          },
-          agent,
-          stats,
-        );
-        continue;
-      }
-
-      // Mentions are recommendation requests.
+      // Mentions are recommendation requests; every other interaction type
+      // (replies, quotes, likes, follows) is ignored past the opt-out check.
       if (notification.reason !== "mention") continue;
       if (!text.trim()) continue;
 

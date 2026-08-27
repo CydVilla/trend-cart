@@ -266,15 +266,6 @@ export function buildSettingsSnapshot(): SettingsSnapshot {
       note: "silence beats cringe",
     },
     {
-      key: "APOLOGY_MAX_PER_DAY",
-      label: "Apologies per day",
-      value: config.apology.maxPerDay,
-      kind: "cap",
-      group: "Other lanes",
-      meter: "apologiesLastDay",
-      inactive: !config.apology.enabled,
-    },
-    {
       key: "PINTEREST_MAX_PINS_PER_DAY",
       label: "Pins per day",
       value: config.pinterest.maxPinsPerDay,

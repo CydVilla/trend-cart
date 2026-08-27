@@ -22,7 +22,6 @@ export type LlmOperation =
   | "deal-factcheck"
   | "deal-lane"
   | "banter"
-  | "apology"
   | "reflect"
   | "insights";
 
@@ -35,7 +34,6 @@ export const LLM_OPERATIONS: { key: LlmOperation; label: string; note: string }[
   { key: "deal-factcheck", label: "Deal check", note: "web-search corroboration before a deal posts" },
   { key: "deal-lane", label: "Deal lane gate", note: "is this RSS item on-topic for a lane" },
   { key: "banter", label: "Banter judge", note: "the daily humor lane" },
-  { key: "apology", label: "Apology gate", note: "is a reply negative toward the bot" },
   { key: "reflect", label: "Reflection", note: "daily learning pass over your decisions" },
   { key: "insights", label: "Insights", note: "daily funnel report" },
 ];

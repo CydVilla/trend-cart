@@ -13,7 +13,6 @@
  *   evalsLastHour        apps/worker/src/evaluate.ts (excludes policy/operator)
  *   dealPostsLastDay     apps/worker/src/deals/poster.ts (non-MANUAL, POSTED)
  *   banterLastDay        apps/worker/src/banter.ts
- *   apologiesLastDay     apps/worker/src/apologize.ts
  *   pinsLastDay          apps/worker/src/pinterest/poster.ts
  */
 
@@ -78,12 +77,6 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
       post: { source: PostSource.BANTER },
     },
   });
-  const apologiesLastDay = await prisma.apologyReply.count({
-    where: {
-      status: { in: [ReplyStatus.POSTED, ReplyStatus.POSTING] },
-      createdAt: { gte: new Date(now - DAY_MS) },
-    },
-  });
   const pinsLastDay = await prisma.pinterestPin.count({
     where: { status: PinterestPinStatus.POSTED, postedAt: { gte: new Date(now - DAY_MS) } },
   });
@@ -94,7 +87,6 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
     evalsLastHour,
     dealPostsLastDay,
     banterLastDay,
-    apologiesLastDay,
     pinsLastDay,
   };
 }

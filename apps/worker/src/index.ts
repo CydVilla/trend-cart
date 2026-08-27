@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     failed: 0,
   };
   const posterStats: PosterStats = { posted: 0, postFailed: 0, disabled: false };
-  const notificationStats: NotificationStats = { optOuts: 0, requests: 0, apologies: 0, errors: 0 };
+  const notificationStats: NotificationStats = { optOuts: 0, requests: 0, errors: 0 };
   const outcomeStats: OutcomeStats = { checked: 0, errors: 0 };
   const takedownStats: TakedownStats = { removed: 0, errors: 0 };
   const banterStats: BanterStats = { posted: 0, skippedDays: 0, errors: 0 };
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
         `replySkips=${replyStats.skipped} ` +
         `replyDefer=${replyStats.deferred} replyFail=${replyStats.failed} ` +
         `posted=${posterStats.posted} requests=${notificationStats.requests} ` +
-        `optOuts=${notificationStats.optOuts} apologies=${notificationStats.apologies} ` +
+        `optOuts=${notificationStats.optOuts} ` +
         `outcomes=${outcomeStats.checked} takedowns=${takedownStats.removed} ` +
         `banter=${banterStats.posted} ` +
         `lessons=${reflectStats.reflections}` +
