@@ -53,9 +53,13 @@ export default async function RepliesPage({
   // has minted links).
   const clickRows = await prisma.trackedLink.findMany({
     where: { kind: "reply", sourceId: { in: recent.map((r) => r.id) } },
-    select: { sourceId: true, clickCount: true },
+    select: { sourceId: true, clickCount: true, targetUrl: true },
   });
   const clicksByReply = new Map(clickRows.map((l) => [l.sourceId as string, l.clickCount]));
+  // Where the /r/<id> redirect actually lands. Without this the operator sees
+  // an opaque tracker id and cannot tell a correct link from a wrong product —
+  // which is precisely how a mislinked reply gets approved.
+  const targetByReply = new Map(clickRows.map((l) => [l.sourceId as string, l.targetUrl]));
 
   return (
     <div>
@@ -120,7 +124,20 @@ export default async function RepliesPage({
                   <div className="mt-1 text-xs text-zinc-400">{reply.replyText.length} chars</div>
                   {reply.linkUrl && (
                     <div className="mt-1 break-all text-xs text-zinc-400">
-                      link destination: <span className="text-blue-600">{reply.linkUrl}</span>
+                      link destination:{" "}
+                      <a
+                        href={targetByReply.get(reply.id) ?? reply.linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 underline"
+                      >
+                        {targetByReply.get(reply.id) ?? reply.linkUrl}
+                      </a>
+                      {reply.linkQuery && (
+                        <span className="ml-1 text-zinc-400">
+                          · query &ldquo;{reply.linkQuery}&rdquo;
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

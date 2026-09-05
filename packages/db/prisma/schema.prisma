@@ -176,6 +176,12 @@ model BotReply {
   /// (null linkUrl) carry a raw URL inside replyText instead.
   linkUrl    String?
   linkAnchor String?
+  /// The Amazon product query this link resolves to. Stored rather than
+  /// re-derived: the anchor is truncated to four words, so the query cannot be
+  /// recovered from it, and regenerating a reply with operator direction has to
+  /// know what the link currently points at in order to correct it. Null on
+  /// rows that predate the column and on operator-supplied links.
+  linkQuery  String?
   /// When the reply actually went out — rate limits derive from this
   postedAt   DateTime?
   approvedAt DateTime?

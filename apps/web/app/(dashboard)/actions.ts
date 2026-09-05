@@ -8,8 +8,23 @@ import {
   SafetyStatus,
   recordResponseUsage,
 } from "@trendcart/db";
-import { PAAPI_SEARCH_INDEXES, isAmazonHost, parseCents, withAffiliateTag } from "@trendcart/shared";
+import {
+  PAAPI_SEARCH_INDEXES,
+  amazonSearchUrl,
+  isAmazonHost,
+  parseCents,
+  searchAnchor,
+  withAffiliateTag,
+} from "@trendcart/shared";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
 import { revalidatePath } from "next/cache";
+
+/** Refinement result: the rewritten body, plus the query its link should use. */
+const RefinementSchema = z.object({
+  text: z.string(),
+  productQuery: z.string(),
+});
 
 function str(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -66,6 +81,21 @@ export async function editReply(formData: FormData): Promise<void> {
 
 /** Operator gives a direction ("mention the 75th anniversary") — the LLM
  *  rewrites the pending reply's text; link/anchor stay untouched. */
+/**
+ * Rewrite a pending reply against the operator's direction — TEXT AND LINK.
+ *
+ * The link half is the point. Direction like "wrong game, this is Xenoblade 3"
+ * used to rewrite the sentence and leave the URL pointing at Xenoblade 2, so
+ * the reply read correctly and still sent the reader to the wrong product —
+ * the worst of both, because the text now vouched for the bad link.
+ *
+ * So the model returns the corrected product query alongside the text, and a
+ * changed query rebuilds the URL and the anchor. Two links are never rebuilt:
+ * one the operator pasted themselves (theirs outranks anything inferred), and
+ * — implicitly — a direct /dp/ASIN link, which becomes a search link for the
+ * corrected query, since this process cannot resolve a new ASIN and a search
+ * page for the right product beats a confident link to the wrong one.
+ */
 export async function refineReply(formData: FormData): Promise<void> {
   const id = str(formData, "id");
   const instruction = str(formData, "instruction");
@@ -74,38 +104,72 @@ export async function refineReply(formData: FormData): Promise<void> {
   if (!reply || reply.status !== ReplyStatus.PENDING_APPROVAL) return;
 
   const model = process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5";
-  const anchor = reply.linkAnchor ?? "";
+  const associateTag = process.env.AMAZON_ASSOCIATE_TAG ?? "";
+  // An operator-pasted link is authoritative — never infer over it.
+  const linkIsPinned = Boolean(reply.post.operatorLinkUrl);
+  // Rows drafted before linkQuery existed fall back to the evaluation that
+  // produced them, so old pending replies are still correctable.
+  const currentQuery =
+    reply.linkQuery ??
+    (
+      await prisma.candidateEvaluation.findFirst({
+        where: { postId: reply.postId, recommendedSearchQuery: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: { recommendedSearchQuery: true },
+      })
+    )?.recommendedSearchQuery ??
+    null;
+  const canRebuildLink = Boolean(associateTag) && !linkIsPinned && Boolean(currentQuery);
+
+  const oldAnchor = reply.linkAnchor ?? "";
   const maxLength = Number(process.env.REPLY_MAX_LENGTH ?? 240);
-  const textBudget = maxLength - (anchor ? anchor.length + 1 : 0);
-  const wordBudget = Math.max(12, Math.floor(textBudget / 6.5));
-  const currentText = anchor
-    ? reply.replyText.slice(0, reply.replyText.lastIndexOf(anchor)).trim()
+  const currentText = oldAnchor
+    ? reply.replyText.slice(0, reply.replyText.lastIndexOf(oldAnchor)).trim()
     : reply.replyText;
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 30_000 });
-  const response = await client.messages.create({
+  const response = await client.messages.parse({
     model,
     max_tokens: 512,
-    ...(model.includes("haiku") ? {} : { output_config: { effort: "low" as const } }),
+    output_config: {
+      ...(model.includes("haiku") ? {} : { effort: "low" as const }),
+      format: zodOutputFormat(RefinementSchema),
+    },
     system:
       "You revise a short Bluesky reply written by the TrendCart recommendation bot. " +
       "The operator's direction is AUTHORITATIVE — follow it exactly; it may be the precise " +
-      "message or framing they want used. Do not include any URL (a clickable link is appended " +
-      "after your text automatically). No hashtags, no @-mentions, no hype, no invented facts. " +
-      `Return ONLY the revised text, at most ${wordBudget} words.`,
+      "message or framing they want used. Do not include any URL in the text (a clickable " +
+      "link is appended automatically). No hashtags, no @-mentions, no hype, no invented facts. " +
+      `Keep "text" to at most ${Math.max(12, Math.floor((maxLength - oldAnchor.length - 1) / 6.5))} words.\n\n` +
+      "productQuery is the Amazon search that the reply's link points at. If the direction " +
+      "says or implies the link is on the WRONG product — a different game, edition, platform, " +
+      "author, or format — return the CORRECTED query. If the direction is only about wording, " +
+      "tone, or length, return the current query completely unchanged. " +
+      "A query names ONE specific purchasable product, never a genre or category. " +
+      "For legacy-console games name the modern remaster or re-release, never the original disc.",
     messages: [
       {
         role: "user",
-        content: `Operator direction: ${instruction}\n\nOriginal post being replied to:\n<untrusted_post>\n${reply.post.text}\n</untrusted_post>\n\nCurrent reply text (before the link):\n${currentText}`,
+        content:
+          `Operator direction: ${instruction}\n\n` +
+          `Original post being replied to:\n<untrusted_post>\n${reply.post.text}\n</untrusted_post>\n\n` +
+          `Current reply text (before the link):\n${currentText}\n\n` +
+          `Current product query the link points at: ${currentQuery ?? "(unknown)"}`,
       },
     ],
   });
   recordResponseUsage("regenerate", model, response);
-  if (response.stop_reason === "refusal") return;
-  let newText = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("")
+  if (response.stop_reason === "refusal" || !response.parsed_output) return;
+
+  const newQuery = response.parsed_output.productQuery.trim();
+  const queryChanged =
+    canRebuildLink && newQuery.length > 0 && newQuery.toLowerCase() !== currentQuery?.toLowerCase();
+  const anchor = queryChanged ? searchAnchor(newQuery) : oldAnchor;
+
+  // Budget is recomputed against the NEW anchor — a corrected query can be
+  // longer than the one it replaces, and the anchor is reserved first.
+  const textBudget = maxLength - (anchor ? anchor.length + 1 : 0);
+  let newText = response.parsed_output.text
     .replace(/https?:\/\/\S+/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -113,10 +177,32 @@ export async function refineReply(formData: FormData): Promise<void> {
   if (newText.length > textBudget) {
     newText = `${newText.slice(0, Math.max(0, textBudget - 1)).trimEnd()}…`;
   }
-  await prisma.botReply.update({
-    where: { id },
-    data: { replyText: anchor ? `${newText} ${anchor}` : newText },
-  });
+
+  const data: { replyText: string; linkAnchor?: string; linkQuery?: string; linkUrl?: string } = {
+    replyText: anchor ? `${newText} ${anchor}` : newText,
+  };
+
+  if (queryChanged) {
+    data.linkAnchor = anchor;
+    data.linkQuery = newQuery;
+    const target = amazonSearchUrl(newQuery, associateTag);
+    // linkUrl holds the /r/<id> redirect, not the Amazon URL, so the fix is to
+    // repoint the tracker. The reply has never posted, so its counter is 0 and
+    // there is no click history to orphan.
+    const tracked = await prisma.trackedLink.findFirst({
+      where: { kind: "reply", sourceId: reply.id },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (tracked) {
+      await prisma.trackedLink.update({ where: { id: tracked.id }, data: { targetUrl: target } });
+    } else {
+      // Click tracking off (or the mint failed): linkUrl is the raw Amazon URL.
+      data.linkUrl = target;
+    }
+  }
+
+  await prisma.botReply.update({ where: { id }, data });
   revalidatePath("/replies");
 }
 

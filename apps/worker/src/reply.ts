@@ -4,6 +4,7 @@ import {
   canonicalAmazonUrl,
   composeReplyPriceSuffix,
   productMatchConfidence,
+  searchAnchor,
   withAffiliateTag,
   type GenerateReplyInput,
   type LlmClient,
@@ -246,14 +247,13 @@ type ReplyLink = {
   /** 0-100 that the resolved ASIN is really the product meant. Product links
    *  below the floor never self-approve. */
   matchConfidence?: number;
+  /** The product query this link resolves to. Persisted on the reply so the
+   *  dashboard can correct the LINK, not just the text, when the operator says
+   *  it points at the wrong product. Absent for operator-supplied links. */
+  query?: string;
 };
 
 /** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
-function searchAnchor(query: string): string {
-  const short = query.split(/\s+/).slice(0, 4).join(" ");
-  return `${short.length > 34 ? short.slice(0, 34).trimEnd() : short} on Amazon`;
-}
-
 /**
  * Deterministically trim an over-long reply body so `${body}… ${anchor}` fits
  * the length cap, cutting at a word boundary. The anchor (and its facet) are
@@ -421,6 +421,7 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
           config.site.amazonAssociateTag,
         ),
         anchor: searchAnchor(evaluation.recommendedSearchQuery),
+        query: evaluation.recommendedSearchQuery,
         offer,
         matchConfidence,
       };
@@ -434,6 +435,7 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
         kind: "search",
         url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
         anchor: searchAnchor(evaluation.recommendedSearchQuery),
+        query: evaluation.recommendedSearchQuery,
       };
     }
     console.log(
@@ -805,6 +807,7 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
         replyText: text,
         linkUrl: tracked.url,
         linkAnchor: link.anchor,
+        linkQuery: link.query ?? null,
         status,
         approvedAt,
         ...(skipReason ? { skipReason } : {}),

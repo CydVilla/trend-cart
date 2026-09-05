@@ -110,3 +110,17 @@ export function parseCents(raw: string): number | null {
   if (!Number.isFinite(dollars) || dollars < 0) return null;
   return Math.round(dollars * 100);
 }
+
+/**
+ * Anchor text for a product search link: "xenoblade chronicles 2 on Amazon".
+ *
+ * Shared because BOTH the worker (drafting) and the dashboard (regenerating a
+ * reply with operator direction) mint these, and a link whose anchor is
+ * formatted differently in the two paths reads as two different products.
+ * Trimmed to four words / 34 chars so the anchor never eats the reply's
+ * character budget.
+ */
+export function searchAnchor(query: string): string {
+  const short = query.split(/\s+/).slice(0, 4).join(" ");
+  return `${short.length > 34 ? short.slice(0, 34).trimEnd() : short} on Amazon`;
+}
