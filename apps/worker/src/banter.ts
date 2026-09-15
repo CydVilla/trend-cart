@@ -5,6 +5,7 @@ import { AtpAgent } from "@atproto/api";
 import { prisma, PostSource, ReplyStatus, recordResponseUsage } from "@trendcart/db";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
+import { handleLlmError, llmUnavailable } from "./credits.js";
 import { findSensitiveMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
 
@@ -214,6 +215,9 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
       if (response.stop_reason === "refusal" || !response.parsed_output) return null;
       return response.parsed_output;
     } catch (error) {
+      // Banter often runs when nothing else is spending, so it can be the
+      // first call to discover the account is dry — latch from here too.
+      if (await handleLlmError("banter", error)) return null;
       stats.errors += 1;
       console.warn("[banter] judge failed:", error instanceof Error ? error.message : error);
       return null;
@@ -224,6 +228,8 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
     if (stopped) return;
     if (await isPaused()) return;
     if (blueskyBackingOff()) return;
+    // Humor is the most discretionary spend the bot has — first to go.
+    if (await llmUnavailable()) return;
 
     // Daily budget, DB-derived (DRY_RUN drafts count — no row spam).
     const today = await prisma.botReply.count({

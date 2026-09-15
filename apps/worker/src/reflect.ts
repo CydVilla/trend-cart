@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { prisma, ReplyStatus, recordResponseUsage, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
+import { llmUnavailable } from "./credits.js";
 import { FACTCHECK_REJECT_SKIP_REASON } from "./factcheck.js";
 
 /**
@@ -117,6 +118,9 @@ export type ReflectStats = { reflections: number; errors: number };
 
 export async function reflectTick(stats: ReflectStats): Promise<void> {
   if (config.llm.useFake || !config.llm.anthropicApiKey) return;
+  // The learning loop is a luxury when the account is dry — it spends to
+  // summarise history that will still be there when credits return.
+  if (await llmUnavailable()) return;
 
   const existing = await prisma.botMemory.findUnique({ where: { id: LESSONS_ID } });
   if (existing && Date.now() - existing.updatedAt.getTime() < REFRESH_MS) return;

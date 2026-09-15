@@ -18,6 +18,7 @@ import {
   type LlmClient,
 } from "@trendcart/shared";
 import { config } from "../config.js";
+import { llmUnavailable } from "../credits.js";
 import { dealVerdictPasses, factCheckDealListing } from "../factcheck.js";
 import { getOperatorFlags } from "../heartbeat.js";
 import {
@@ -1107,6 +1108,12 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
 
   async function tick(): Promise<void> {
     if ((await getOperatorFlags()).paused) return;
+    // Out of credits the RSS channel stands down entirely rather than
+    // degrading. Its lane gate AND its web-search sale verification are both
+    // model calls, and ADR-0013 forbids self-posting a deal nothing
+    // corroborated — an unverified autopost is worse than silence. Manual
+    // operator deals (scripts/post-deal.ts) remain the live channel.
+    if (await llmUnavailable()) return;
 
     await expireStale();
 

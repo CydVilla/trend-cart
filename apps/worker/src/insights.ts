@@ -3,6 +3,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { prisma, computeFunnel, recordResponseUsage, type FunnelReport, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
+import { llmUnavailable } from "./credits.js";
 
 /**
  * Daily operations report. Computes the discovery→evaluation→posted funnel and
@@ -70,6 +71,9 @@ export type InsightsStats = { reports: number; errors: number };
 
 export async function insightsTick(stats: InsightsStats): Promise<void> {
   if (config.llm.useFake || !config.llm.anthropicApiKey) return;
+  // The learning loop is a luxury when the account is dry — it spends to
+  // summarise history that will still be there when credits return.
+  if (await llmUnavailable()) return;
 
   const existing = await prisma.botMemory.findUnique({ where: { id: INSIGHTS_ID } });
   if (existing && Date.now() - existing.updatedAt.getTime() < REFRESH_MS) return;

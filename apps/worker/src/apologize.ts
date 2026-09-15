@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AtpAgent } from "@atproto/api";
 import { prisma, ReplyStatus, recordResponseUsage, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
+import { handleLlmError, llmUnavailable } from "./credits.js";
 import { isPaused } from "./heartbeat.js";
 
 /**
@@ -118,9 +119,14 @@ export async function considerApology(
   agent: AtpAgent,
   stats: { apologies: number; errors: number },
 ): Promise<void> {
+  // The apology gate is an LLM call on every reply notification. Out of
+  // credits it stands down; opt-out handling in the same tick is unaffected,
+  // which is the part that actually matters for consent.
+  if (await llmUnavailable()) return;
   try {
     await consider(input, agent, stats);
   } catch (error) {
+    if (await handleLlmError("apology", error)) return;
     stats.errors += 1;
     console.warn(
       `[apology] failed for ${input.uri}:`,

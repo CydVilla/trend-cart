@@ -320,6 +320,12 @@ model WorkerHeartbeat {
   /// ones still queue for manual approval). DRY_RUN overrides this.
   autonomous   Boolean  @default(false)
   postingState String
+  /// Set when Anthropic refused a call for lack of credit (or the key was
+  /// revoked); cleared when a probe succeeds. Non-null = LLM FALLBACK MODE:
+  /// every model-dependent loop stands down, the free channels keep running.
+  /// Persisted (not in-memory) so a restart doesn't re-discover it the
+  /// expensive way, and so the dashboard can say why the bot went quiet.
+  llmOutOfCreditsAt DateTime?
   loops        Json
   counters     Json
   /// Flattened snapshot of the thresholds the worker is ACTUALLY running with,

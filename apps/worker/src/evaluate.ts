@@ -8,6 +8,7 @@ import type {
 } from "@trendcart/shared";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
+import { handleLlmError, llmUnavailable } from "./credits.js";
 import { findPromotionalMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
 import { getLearnedGuidelines, getOperatorGuidance } from "./reflect.js";
@@ -190,6 +191,9 @@ async function recordFailedEvaluation(postId: string, message: string): Promise<
 export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats): Promise<void> {
   if (Date.now() < backoffUntil) return;
   if (await isPaused()) return;
+  // Out of credits: classification is the single biggest spender, so it is the
+  // first thing to stand down. Candidates stay PENDING and resume untouched.
+  if (await llmUnavailable()) return;
 
   const now = Date.now();
   const hourAgo = new Date(now - 3_600_000);
@@ -516,6 +520,10 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
     } catch (error) {
       stats.errors += 1;
       const message = error instanceof Error ? error.message : String(error);
+      // Ran dry: latch fallback mode and abandon the tick. Emphatically NOT a
+      // fault of this post — blaming it would tombstone a perfectly good
+      // candidate for an outage that may last weeks.
+      if (await handleLlmError("evaluate", error)) return;
       if (isTransientError(error)) {
         backoffUntil = Date.now() + TRANSIENT_BACKOFF_MS;
         console.error(

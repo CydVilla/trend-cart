@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "calibrate": "tsx scripts/calibrate.ts",
     "probe:catalog": "tsx scripts/creators-probe.ts",
-    "export:dataset": "tsx scripts/export-training-data.ts"
+    "export:dataset": "tsx scripts/export-training-data.ts",
+    "post-deal": "tsx scripts/post-deal.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",

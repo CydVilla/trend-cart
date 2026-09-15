@@ -27,7 +27,27 @@ async function WorkerStatusCard() {
     );
   }
   const stale = Date.now() - heartbeat.updatedAt.getTime() > HEARTBEAT_STALE_MS;
+  const dryAt = heartbeat.llmOutOfCreditsAt;
   return (
+    <>
+    {dryAt && (
+      <div className="mb-3 rounded-lg border border-red-300 bg-red-50 p-4 text-sm">
+        <div className="font-medium text-red-800">
+          LLM fallback mode — out of Anthropic credits since{" "}
+          {dryAt.toLocaleString("en-US")}
+        </div>
+        <p className="mt-1 text-red-700">
+          Discovery, evaluation, replies, banter and the learning loop are standing down, so
+          candidates are queuing untouched rather than being marked failed. Still running:
+          posting, engagement measurement, takedowns, opt-outs, click tracking, and the deal
+          channel. The worker re-checks hourly and resumes on its own once credits are back.
+        </p>
+        <p className="mt-1 text-red-700">
+          Deals can still go out by hand:{" "}
+          <code>pnpm --filter @trendcart/worker post-deal -- --url … --title … --price …</code>
+        </p>
+      </div>
+    )}
     <div
       className={`flex flex-wrap items-center gap-3 rounded-lg border p-4 text-sm ${
         stale ? "border-red-300 bg-red-50" : "border-zinc-200 bg-white"
@@ -42,6 +62,7 @@ async function WorkerStatusCard() {
       <span className="text-zinc-500">{heartbeat.model}</span>
       <span className="text-zinc-400">{heartbeat.postingState}</span>
       {heartbeat.paused && <Badge tone="red">PAUSED</Badge>}
+      {heartbeat.llmOutOfCreditsAt && <Badge tone="red">NO LLM CREDITS</Badge>}
       <span className="text-xs text-zinc-400">
         last tick {heartbeat.updatedAt.toLocaleTimeString("en-US")}
       </span>
@@ -71,6 +92,7 @@ async function WorkerStatusCard() {
         </form>
       </div>
     </div>
+    </>
   );
 }
 

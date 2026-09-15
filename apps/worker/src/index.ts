@@ -10,6 +10,7 @@ import { createDiscoverer, newDiscoverStats } from "./discover.js";
 import { evaluateDueCandidates, type EvaluateStats } from "./evaluate.js";
 import { flushHeartbeat, recordLoopTick, setCountersRef } from "./heartbeat.js";
 import { insightsTick, type InsightsStats } from "./insights.js";
+import { creditProbeTick, outOfCreditsSince, type CreditProbeStats } from "./credits.js";
 import { AnthropicLlmClient, classifyCacheStats } from "./llm/anthropic.js";
 import { FakeLlmClient } from "./llm/fake.js";
 import { createNotificationListener, type NotificationStats } from "./notifications.js";
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
   const dealDiscoverStats = newDealDiscoverStats();
   const dealSuggestStats = newDealSuggestStats();
   const notifyStats: NotifyStats = { pings: 0, errors: 0, disabled: false };
+  const creditStats: CreditProbeStats = { probes: 0, recovered: 0 };
   setCountersRef({
     discover: discoverStats,
     rehydrate: rehydrateStats,
@@ -109,6 +111,7 @@ async function main(): Promise<void> {
     dealDiscover: dealDiscoverStats,
     dealSuggest: dealSuggestStats,
     notify: notifyStats,
+    credits: creditStats,
   });
 
   const llm: LlmClient = config.llm.useFake
@@ -118,6 +121,17 @@ async function main(): Promise<void> {
     `  evaluation:       ${config.llm.useFake ? "FAKE LLM (no API calls)" : config.llm.model} ` +
       `(max ${config.llm.maxEvalsPerHour}/hr)`,
   );
+
+  // Say it loudly at boot: a bot that came up already in fallback mode looks
+  // identical to a broken one in the logs otherwise.
+  const dryAt = await outOfCreditsSince();
+  if (dryAt) {
+    console.warn(
+      `  LLM:              FALLBACK MODE — out of credits since ${dryAt.toISOString()}. ` +
+        `Discovery/evaluation/replies/banter/learning are standing down; posting, outcomes, ` +
+        `takedowns, opt-outs, click tracking and the deal channel keep running. Probing hourly.`,
+    );
+  }
 
   const discoverer = createDiscoverer(discoverStats);
   if (!discoverer) {
@@ -171,6 +185,9 @@ async function main(): Promise<void> {
     // each tick cheap; 30-min cadence just bounds how late in the day it runs).
     ...(banter ? [startLoop("banter", 30 * 60_000, () => banter.tick())] : []),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
+    // Credit probe: self-gates to hourly, and is a no-op unless the bot is
+    // actually in fallback mode — so this is free in the normal case.
+    startLoop("creditProbe", 10 * 60_000, () => creditProbeTick(creditStats)),
     // Operator DM ping — rate-limited internally (one per N hours, max).
     ...(notifier ? [startLoop("notify", 10 * 60_000, () => notifier.tick())] : []),
     // Learning loop: hourly outcome measurement (free public API), daily

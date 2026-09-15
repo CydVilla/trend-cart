@@ -11,6 +11,7 @@ import {
 import { checkSearchAvailability, findBestOffer, type ReplyOffer } from "./availability.js";
 import { fetchTopComments } from "./comments.js";
 import { config } from "./config.js";
+import { handleLlmError, llmUnavailable } from "./credits.js";
 import { isTransientError } from "./evaluate.js";
 import {
   factCheckReply,
@@ -451,6 +452,9 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
   const flags = await getOperatorFlags();
   if (flags.paused) return;
   if (Date.now() < generationBackoffUntil) return;
+  // Out of credits: leave approved-but-undrafted candidates exactly as they
+  // are. The poster keeps draining anything already drafted and approved.
+  if (await llmUnavailable()) return;
 
   const dueWhere = {
     shouldReply: true,
@@ -608,6 +612,9 @@ export async function generateDueReplies(llm: LlmClient, stats: ReplyStats): Pro
       draft = await draftReply(llm, replyInput, link.anchor, priceSuffix);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // Ran dry mid-draft: no FAILED row. The candidate keeps its verdict and
+      // drafts on the first tick after credits return.
+      if (await handleLlmError("reply", error)) return;
       if (isTransientError(error)) {
         // API outage: back off the whole loop, don't blame the candidate.
         generationBackoffUntil = Date.now() + GENERATION_BACKOFF_MS;

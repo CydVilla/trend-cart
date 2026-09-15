@@ -1,6 +1,7 @@
 import { prisma, ReplyStatus } from "@trendcart/db";
 import { computeEngagementScore } from "@trendcart/shared";
 import { config } from "./config.js";
+import { llmUnavailable } from "./credits.js";
 
 /**
  * Jetstream commit events carry no engagement counts (the post was just
@@ -62,6 +63,10 @@ async function markDead(postId: string, now: Date): Promise<void> {
 }
 
 export async function rehydrateTick(stats: RehydrateStats): Promise<void> {
+  // Refreshing engagement on candidates nothing will evaluate is free but
+  // pointless; outcomes.ts (which measures what the bot ALREADY posted) is the
+  // measurement that still matters, and it keeps running.
+  if (await llmUnavailable()) return;
   const now = new Date();
   const oldestCreatedAt = new Date(now.getTime() - config.ingest.rehydrateMaxAgeHours * 3_600_000);
   const staleBefore = new Date(now.getTime() - config.ingest.rehydrateIntervalMinutes * 60_000);

@@ -3,6 +3,40 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — LLM fallback mode
+
+### Fixed
+- **Running out of Anthropic credits no longer destroys the queue.** The
+  refusal arrives as a 400 sharing a status code with ordinary validation
+  errors, so it fell through to the content-failure path: every candidate was
+  blamed, retried three times and written off as permanently UNCERTAIN, and
+  the reply loop wrote FAILED rows the same way. A multi-week funding gap
+  would have tombstoned the entire backlog. Credit exhaustion is now its own
+  failure class (`credits.ts`, `credits.test.ts`).
+
+### Added
+- **LLM fallback mode.** The first credit refusal latches a persisted flag
+  (`WorkerHeartbeat.llmOutOfCreditsAt`). Every model-dependent loop —
+  discovery, rehydration, evaluation, replies, banter, the apology gate, the
+  RSS deal channel and the learning loop — stands down cleanly, leaving
+  candidates PENDING with no verdict written. Posting, outcome measurement,
+  takedowns, opt-outs, click tracking, the deal poster and the Pinterest
+  mirror keep running. An hourly probe clears the latch and resumes
+  everything by itself — no redeploy. Surfaced on the Overview page and in
+  the worker's startup banner. See ADR-0017.
+- **`post-deal` — the operator channel that survives an outage.**
+  `pnpm --filter @trendcart/worker post-deal -- --url … --title … --price …
+  [--was …] [--dry]` validates the link, composes and validates the copy, and
+  queues a MANUAL DealPost the poster publishes within ~30s. No model call, no
+  Amazon API. The operator reading the price off Amazon is the attestation
+  ADR-0013 requires, and MANUAL deals already bypass the global throttles.
+  **Always `--dry` first** — a READY row is picked up within 30s.
+
+### Notes
+- No hosting-cost change: one nullable column, no new dyno, no new addon. The
+  migration applies through the existing Procfile `release` phase, and
+  fallback mode strictly reduces API calls and DB writes.
+
 ## 2026-07-27 (later) — The click counter stops counting robots
 
 ### Changed

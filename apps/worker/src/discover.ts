@@ -3,6 +3,7 @@ import { prisma } from "@trendcart/db";
 import { computeEngagementScore } from "@trendcart/shared";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
+import { llmUnavailable } from "./credits.js";
 import { findPromotionalMatch, findSensitiveMatch } from "./filters.js";
 
 /**
@@ -167,6 +168,10 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
 
   async function tick(): Promise<void> {
     if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
+    // Discovery exists only to feed the classifier. With no credits every
+    // candidate it saved would expire unevaluated inside 24h — pure DB churn,
+    // and a fake cliff in the funnel stats that would poison the baseline.
+    if (await llmUnavailable()) return;
     if (!agent) {
       const candidate = new AtpAgent({ service: "https://bsky.social" });
       try {

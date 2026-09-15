@@ -249,6 +249,50 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `APOLOGY_ENABLED` | One-time fixed-template apology when someone replies negatively to the bot (default true) |
 | `APOLOGY_MAX_PER_DAY` | Daily apology cap (default 3); plus one per author per `APOLOGY_AUTHOR_COOLDOWN_DAYS` (default 7) |
 
+## LLM fallback mode (running out of credits)
+
+Anthropic credits running out used to be the worst kind of failure: the
+refusal looks like an ordinary 400, so every candidate got blamed and marked
+permanently failed. Now it's a recognized state.
+
+The first credit refusal latches `WorkerHeartbeat.llmOutOfCreditsAt`, and:
+
+| Stands down | Keeps running |
+|---|---|
+| discovery, rehydration | posting (drains anything already approved) |
+| evaluation, reply drafting | outcome measurement + received replies |
+| banter, apology gate | takedowns, **opt-outs** |
+| reflection, insights | click tracking, Pinterest mirror |
+| RSS deal channel | **deal poster** |
+
+Candidates stay `PENDING` — no verdict, no failure row — so the backlog
+resumes intact. A probe runs hourly and clears the latch on its own once
+credits are back; there is nothing to redeploy. The Overview page shows why
+the bot went quiet, and the worker says so at startup.
+
+The RSS channel stands down rather than degrading: its lane gate and its sale
+verification are both model calls, and ADR-0013 forbids self-posting a price
+nothing corroborated.
+
+### Posting deals by hand
+
+The channel that survives is the operator one — no model, no Amazon API:
+
+```bash
+# ALWAYS dry-run first: a queued deal is picked up within ~30s.
+pnpm --filter @trendcart/worker post-deal -- \
+  --url "https://www.amazon.com/dp/B0CQ1BN1DL" \
+  --title "Anker 737 Power Bank" \
+  --price 89.99 --was 149.99 --dry
+```
+
+Drop `--dry` to queue it. Reading the price off Amazon yourself is the
+attestation ADR-0013 requires before any price is advertised — the same bar
+the automated channel clears with a web-search fact check. `MANUAL` deals
+bypass the global deal throttles by design (those caps restrain automated
+bursts, not a human). Needs `DEALS_ENABLED=true` and `DRY_RUN=false`; the
+poster refuses a price snapshot older than `DEAL_MAX_PRICE_AGE_HOURS`.
+
 ## Safety model
 
 The bot only replies when **all** of these pass:
