@@ -21,6 +21,7 @@ export type LlmOperation =
   | "factcheck"
   | "deal-factcheck"
   | "deal-lane"
+  | "deal-copy"
   | "banter"
   | "reflect"
   | "insights";
@@ -33,6 +34,7 @@ export const LLM_OPERATIONS: { key: LlmOperation; label: string; note: string }[
   { key: "factcheck", label: "Fact check", note: "web-search check before a self-approved reply posts" },
   { key: "deal-factcheck", label: "Deal check", note: "web-search corroboration before a deal posts" },
   { key: "deal-lane", label: "Deal lane gate", note: "is this RSS item on-topic for a lane" },
+  { key: "deal-copy", label: "Deal copy", note: "LLM-written lead for a curator (Wario64) deal post" },
   { key: "banter", label: "Banter judge", note: "the daily humor lane" },
   { key: "reflect", label: "Reflection", note: "daily learning pass over your decisions" },
   { key: "insights", label: "Insights", note: "daily funnel report" },

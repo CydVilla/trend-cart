@@ -11,6 +11,7 @@ import {
 import {
   PAAPI_SEARCH_INDEXES,
   amazonSearchUrl,
+  canonicalCuratorUrl,
   isAmazonHost,
   parseCents,
   searchAnchor,
@@ -701,9 +702,15 @@ function sourceFields(formData: FormData): {
   minPriceCents: number | null;
   maxPriceCents: number | null;
 } | null {
-  const url = str(formData, "url");
+  const rawUrl = str(formData, "url");
   const topic = str(formData, "topic");
   if (!topic) return null;
+  // A bsky.app profile makes this a curator-account source (ADR-0017). Store
+  // the canonical form: the worker routes on the exact URL prefix.
+  const url = /^https?:\/\/(?:www\.)?bsky\.app\//i.test(rawUrl)
+    ? canonicalCuratorUrl(rawUrl)
+    : rawUrl;
+  if (!url) return null;
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;

@@ -5,6 +5,7 @@ import type {
   JudgeSuggestionInput,
   LlmClient,
   SuggestionVerdict,
+  WriteDealPostInput,
 } from "@trendcart/shared";
 import { findPromotionalMatch, findSensitiveMatch } from "../filters.js";
 
@@ -147,5 +148,16 @@ export class FakeLlmClient implements LlmClient {
       purchaseIntentScore: highConversionLane === "other" ? 35 : 72,
       reason: `fake: ${matches ? "shares a keyword with" : "no keyword overlap with"} the lane topic`,
     };
+  }
+
+  async writeDealPost(input: WriteDealPostInput): Promise<string> {
+    // Fixed phrasing per kind — fake mode only proves the LLM-copy path runs.
+    const verb =
+      input.kind === "preorder"
+        ? "is up for pre-order on Amazon"
+        : input.kind === "restock"
+          ? "is back in stock on Amazon"
+          : "is on sale on Amazon";
+    return `${input.productTitle} ${verb}`;
   }
 }

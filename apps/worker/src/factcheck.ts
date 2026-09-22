@@ -4,6 +4,7 @@ import { extractAsin, isAmazonHost } from "@trendcart/shared";
 import { recordResponseUsage } from "@trendcart/db";
 import { z } from "zod";
 import { config } from "./config.js";
+import { noteLlmBillingBlocked, noteLlmCallSucceeded } from "./llm-health.js";
 
 /**
  * Pre-publication fact check for replies about to post WITHOUT a human look —
@@ -376,6 +377,7 @@ export async function factCheckDealListing(input: {
         },
       ],
     });
+    noteLlmCallSucceeded();
     const dealSearchesUsed = response.usage.server_tool_use?.web_search_requests ?? 0;
     recordResponseUsage("deal-factcheck", config.llm.model, response, { webSearches: dealSearchesUsed });
     if (response.stop_reason === "refusal" || !response.parsed_output) return null;
@@ -417,6 +419,9 @@ export async function factCheckDealListing(input: {
       ...evidence,
     };
   } catch (error) {
+    // Out of credit: arm the shared gate so callers can tell "couldn't check"
+    // apart from "checked and failed" (the gate logs it once).
+    if (noteLlmBillingBlocked(error)) return null;
     console.warn(
       "[factcheck] deal check failed (item will be skipped):",
       error instanceof Error ? error.message : error,

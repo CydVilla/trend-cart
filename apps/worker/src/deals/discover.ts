@@ -164,7 +164,12 @@ export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
     ];
     const dayAgo = new Date(Date.now() - 24 * 3_600_000);
     const queuedToday = await prisma.dealPost.count({
-      where: { status: { in: activeStatuses }, createdAt: { gte: dayAgo } },
+      // Curator posts have their own budget (ADR-0017) — they don't spend this one.
+      where: {
+        source: { not: DealSource.CURATED },
+        status: { in: activeStatuses },
+        createdAt: { gte: dayAgo },
+      },
     });
     if (queuedToday >= config.deals.maxPostsPerDay) return skip("daily_cap");
     const discoveredToday = await prisma.dealPost.count({

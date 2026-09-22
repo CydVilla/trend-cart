@@ -349,6 +349,31 @@ export const config = {
       maxSaleEvidenceAgeHours: envInt("DEAL_RSS_SALE_EVIDENCE_MAX_AGE_HOURS", 6),
       verificationTtlMinutes: envInt("DEAL_RSS_VERIFICATION_TTL_MINUTES", 60),
     },
+
+    /* Curator-account channel (ADR-0017): a deal source whose URL is a
+       bsky.app profile (e.g. Wario64) is polled through the public Bluesky
+       API, its amzn.to links resolved to an ASIN, and survivors self-post
+       PRICE-FREE copy with OUR tag. Rides the RSS loop (DEAL_SUGGESTIONS_
+       ENABLED) but keeps its own cadence and budget, since curators post far
+       more often than RSS feeds refresh. LLM steps (lane gate, fact check,
+       copy) run whenever credit is available and fall back to keyword lanes,
+       the curator's fresh post as evidence, and a template when it isn't. */
+    curated: {
+      /* Off = audit-only: DRY_RUN rows record what WOULD post. */
+      autopost: envBool("DEAL_CURATED_AUTOPOST", false),
+      intervalMinutes: envInt("DEAL_CURATED_INTERVAL_MINUTES", 3),
+      maxPostsPerDay: envInt("DEAL_CURATED_MAX_POSTS_PER_DAY", 12),
+      /* Gap between curated posts (independent of the RSS/PA-API gap). */
+      cooldownMinutes: envInt("DEAL_CURATED_COOLDOWN_MINUTES", 20),
+      /* A curator post older than this is not evidence of a live deal. */
+      maxSourceAgeMinutes: envInt("DEAL_CURATED_MAX_AGE_MINUTES", 120),
+      /* Newest posts read per poll (Bluesky caps a page at 100). */
+      postsPerFetch: envInt("DEAL_CURATED_POSTS_PER_FETCH", 30),
+      /* With credit: web-search existence/orderability check before posting. */
+      factCheck: envBool("DEAL_CURATED_FACTCHECK", true),
+      /* With credit: LLM-written lead sentence instead of the template. */
+      llmCopy: envBool("DEAL_CURATED_LLM_COPY", true),
+    },
   },
 
   /* Amazon Product Advertising API 5.0 credentials. When either key is

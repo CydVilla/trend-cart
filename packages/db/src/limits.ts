@@ -11,7 +11,8 @@
  * Gates mirrored here:
  *   repliesLastHour/Day  apps/worker/src/reply.ts  (ACTIVE_STATUSES, non-banter)
  *   evalsLastHour        apps/worker/src/evaluate.ts (excludes policy/operator)
- *   dealPostsLastDay     apps/worker/src/deals/poster.ts (non-MANUAL, POSTED)
+ *   dealPostsLastDay     apps/worker/src/deals/poster.ts (non-MANUAL, non-CURATED, POSTED)
+ *   curatedPostsLastDay  apps/worker/src/deals/poster.ts (CURATED, POSTED)
  *   banterLastDay        apps/worker/src/banter.ts
  *   pinsLastDay          apps/worker/src/pinterest/poster.ts
  */
@@ -63,7 +64,15 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
   });
   const dealPostsLastDay = await prisma.dealPost.count({
     where: {
-      source: { not: DealSource.MANUAL },
+      source: { notIn: [DealSource.MANUAL, DealSource.CURATED] },
+      status: DealPostStatus.POSTED,
+      postedAt: { gte: new Date(now - DAY_MS) },
+    },
+  });
+  // Curator posts (ADR-0017) run on their own budget, so they get their own bar.
+  const curatedPostsLastDay = await prisma.dealPost.count({
+    where: {
+      source: DealSource.CURATED,
       status: DealPostStatus.POSTED,
       postedAt: { gte: new Date(now - DAY_MS) },
     },
@@ -86,6 +95,7 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
     repliesLastDay,
     evalsLastHour,
     dealPostsLastDay,
+    curatedPostsLastDay,
     banterLastDay,
     pinsLastDay,
   };

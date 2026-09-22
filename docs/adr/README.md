@@ -21,3 +21,4 @@ made. Format: Status / Context / Decision / Consequences.
 | [0014](0014-multimodal-context.md) | The classifier sees what it judges: images, comments, purchasability | Accepted |
 | [0015](0015-timeliness-over-thresholds.md) | Timeliness over thresholds: measured gates, freshest-first spend | Accepted |
 | [0016](0016-growth-loop.md) | The growth loop: click tracking, operator pings; radar → banter (addendum) | Accepted |
+| [0017](0017-curator-account-deals.md) | Curator-account deal sources (Wario64): price-free relays, tokenless fallback | Accepted |

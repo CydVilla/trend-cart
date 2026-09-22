@@ -565,6 +565,15 @@ export default async function DealsPage() {
         price-free copy attributed to the source (max{" "}
         <code>DEAL_RSS_MAX_POSTS_PER_DAY</code>/day). No third-party price is ever advertised.
       </p>
+      <p className="-mt-1 mb-3 text-xs text-zinc-500">
+        <strong>Curator accounts:</strong> paste a Bluesky profile URL (e.g.{" "}
+        <code>https://bsky.app/profile/wario64.bsky.social</code>) instead of an RSS feed. The
+        worker reads that account every <code>DEAL_CURATED_INTERVAL_MINUTES</code>, resolves its
+        Amazon short links to the product, and relays fresh deals with your tag — price-free, on
+        its own budget (<code>DEAL_CURATED_MAX_POSTS_PER_DAY</code>). Without LLM credit it uses
+        keyword lanes and template copy; with credit it adds the lane judge, web check, and
+        written copy.
+      </p>
 
       <form
         action={createSuggestionSource}
@@ -581,7 +590,9 @@ export default async function DealsPage() {
             />
           </label>
           <label className="block">
-            <span className="text-xs font-medium uppercase text-zinc-500">RSS URL</span>
+            <span className="text-xs font-medium uppercase text-zinc-500">
+              RSS URL or Bluesky profile
+            </span>
             <input
               name="url"
               required

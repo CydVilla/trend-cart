@@ -33,6 +33,7 @@ export type MeterKey =
   | "repliesLastDay"
   | "evalsLastHour"
   | "dealPostsLastDay"
+  | "curatedPostsLastDay"
   | "banterLastDay"
   | "pinsLastDay";
 

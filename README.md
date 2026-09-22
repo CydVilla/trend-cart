@@ -193,6 +193,14 @@ Two automated paths feed the same exactly-once poster:
   per item from "Discovered by feeds". Set `PUBLIC_BASE_URL` (click tracking
   defaults on) so real deal-link clicks can reallocate future lane slots;
   missing trackers are treated as unknown, never as zero-click failures.
+- **Curator accounts** (ADR-0017): add a deal source whose URL is a Bluesky
+  profile (`https://bsky.app/profile/wario64.bsky.social` ships seeded) and
+  the worker reads that account every few minutes, resolves its amzn.to links
+  to the product, and relays fresh deals with **your** tag, price-free and
+  credited to the curator, on its own budget (`DEAL_CURATED_MAX_POSTS_PER_DAY`,
+  `DEAL_CURATED_COOLDOWN_MINUTES`). Works with zero LLM credit (keyword lanes,
+  template copy, the curator's fresh post as evidence); with credit it adds the
+  lane judge, a web-search check, and LLM-written copy automatically.
 
 PA-API needs an approved Associate account (3 qualifying sales in 180 days).
 The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
@@ -237,6 +245,10 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `DEAL_RSS_AUTOPOST` | `true` = automated price-free RSS deal posts publish (default false = audit-only; needs `DEALS_ENABLED`) |
 | `DEAL_RSS_MAX_POSTS_PER_DAY` | Daily budget for RSS-sourced deal posts (default 2) |
 | `DEAL_SUGGESTIONS_ENABLED` | The RSS deal-discovery loop itself (default true, still needs `DEALS_ENABLED`) |
+| `DEAL_CURATED_AUTOPOST` | `true` = curator-account (Wario64) deal posts publish (default false = audit-only; rides `DEAL_SUGGESTIONS_ENABLED`) |
+| `DEAL_CURATED_MAX_POSTS_PER_DAY` / `DEAL_CURATED_COOLDOWN_MINUTES` | Curator channel budget (default 12/day, 20 min apart) — separate from the RSS/PA-API caps |
+| `DEAL_CURATED_INTERVAL_MINUTES` / `DEAL_CURATED_MAX_AGE_MINUTES` | Poll cadence (default 3) and how old a curator post may be to count as a live deal (default 120) |
+| `DEAL_CURATED_FACTCHECK` / `DEAL_CURATED_LLM_COPY` | With LLM credit: web-search check and LLM-written copy for curator deals (default true; tokenless fallbacks either way) |
 | `VISION_ENABLED` / `COMMENTS_ENABLED` | Multimodal context: post image thumbnails as vision input; top replies as conversation context (default true) |
 | `MAX_CANDIDATE_AGE_HOURS` | Never ingest posts older than this (default 16) — timeliness beats stale volume |
 | `PLAYFUL_AUTO_APPROVE` | Joke-first replies self-post in autonomous mode (default false — they queue for approval) |

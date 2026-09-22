@@ -3,6 +3,35 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-09-22 — Curator accounts: Wario64 deals, our tag, no tokens needed
+
+### Added
+- **Curator-account deal sources** (ADR-0017). A deal source whose URL is a
+  Bluesky profile is read through the public AppView every
+  `DEAL_CURATED_INTERVAL_MINUTES` (3). Each post's amzn.to link is resolved
+  to its ASIN from the redirect header alone, rebuilt canonically with our
+  tag, and relayed as a price-free post credited to the curator ("… is on
+  sale on Amazon (via Wario64) — see the deal #ad"). Pre-orders and restocks
+  get their own wording, never "on sale". New `CURATED` deal source with its
+  own budget (`DEAL_CURATED_MAX_POSTS_PER_DAY` 12, `DEAL_CURATED_COOLDOWN_MINUTES`
+  20) that doesn't touch the RSS/PA-API caps, and its own bar on the Limits
+  page. Migration `curated_deal_source` adds the enum value and seeds the
+  Wario64 source (exclude keywords for flagged price errors, YMMV, targeted
+  offers). Publishing is gated by `DEAL_CURATED_AUTOPOST` (default off).
+- **Tokenless mode, decided per call.** Curator deals run on keyword lanes, a
+  template, and the curator's fresh post as evidence when the Anthropic
+  account is out of credit. When credit is available they automatically use
+  the LLM lane judge, the web-search listing check, and LLM-written copy,
+  which is re-validated in code (no price, names Amazon and the product,
+  kind-correct), falling back to the template on any rejection.
+
+### Fixed
+- **Running out of credit no longer writes RSS deal candidates off.** The
+  deal fact check now arms the shared billing gate; while it's armed the RSS
+  lane gate and promotion stand down (candidates stay NEW) instead of
+  dismissing every candidate as "amazon_sale_unverified".
+- The PA-API feed's daily cap no longer counts curator posts.
+
 ## 2026-07-27 (later) — The click counter stops counting robots
 
 ### Changed

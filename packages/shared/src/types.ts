@@ -179,6 +179,21 @@ export type SuggestionVerdict = {
   reason: string;
 };
 
+/** What a curator's deal post announces. Pre-orders and restocks sit at list
+ * price, so their copy must never say "on sale". */
+export type CuratedDealKind = "sale" | "preorder" | "restock";
+
+/** One curator-account deal (e.g. Wario64) to write price-free copy for. */
+export type WriteDealPostInput = {
+  /** Product name extracted from the curator's post — UNTRUSTED text. */
+  productTitle: string;
+  kind: CuratedDealKind;
+  lane: HighConversionLane;
+  /** Character budget for the model's lead sentence ONLY. The caller appends
+   *  the attribution, link anchor, and #ad disclosure in code. */
+  textBudget: number;
+};
+
 /**
  * Provider-agnostic LLM interface. Implementations: AnthropicLlmClient,
  * FakeLlmClient. Keeping this narrow makes it trivial to swap or mock.
@@ -187,4 +202,6 @@ export interface LlmClient {
   classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult>;
   generateReply(input: GenerateReplyInput): Promise<string>;
   judgeDealSuggestion(input: JudgeSuggestionInput): Promise<SuggestionVerdict>;
+  /** One price-free lead sentence for a curated deal post. */
+  writeDealPost(input: WriteDealPostInput): Promise<string>;
 }

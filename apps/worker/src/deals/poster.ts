@@ -143,10 +143,20 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     // Manual "post deal now" posts are operator-initiated — they bypass the
     // global throttles. The AUTOMATED price-trigger and DISCOVERED feed finds
     // are rate-limited here, so a burst of fires can't flood the profile.
+    // CURATED (curator-account, ADR-0017) posts run on their own budget and
+    // gap, and don't count against the other channels' — or vice versa.
     if (candidate.source !== DealSource.MANUAL) {
+      const curated = candidate.source === DealSource.CURATED;
+      const channelPosts = curated
+        ? { source: DealSource.CURATED }
+        : { source: { notIn: [DealSource.MANUAL, DealSource.CURATED] } };
+      const cooldownMinutes = curated
+        ? config.deals.curated.cooldownMinutes
+        : config.deals.globalCooldownMinutes;
+      const dailyCap = curated ? config.deals.curated.maxPostsPerDay : config.deals.maxPostsPerDay;
       const lastPosted = await prisma.dealPost.findFirst({
         where: {
-          source: { not: DealSource.MANUAL },
+          ...channelPosts,
           status: DealPostStatus.POSTED,
           postedAt: { not: null },
         },
@@ -155,18 +165,18 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       });
       if (
         lastPosted?.postedAt &&
-        Date.now() - lastPosted.postedAt.getTime() < config.deals.globalCooldownMinutes * 60_000
+        Date.now() - lastPosted.postedAt.getTime() < cooldownMinutes * 60_000
       ) {
         return;
       }
       const postedToday = await prisma.dealPost.count({
         where: {
-          source: { not: DealSource.MANUAL },
+          ...channelPosts,
           status: DealPostStatus.POSTED,
           postedAt: { gte: new Date(Date.now() - 24 * 3_600_000) },
         },
       });
-      if (postedToday >= config.deals.maxPostsPerDay) return;
+      if (postedToday >= dailyCap) return;
     }
 
     // CLAIM before any network call — count===1 makes publishing exactly-once.
@@ -182,12 +192,14 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     });
     const listing: TrackedListing = deal.listing;
 
-    // RSS-sourced posts (DISCOVERED with no feedId) are the PRICE-FREE
-    // channel: no price is advertised, so price freshness doesn't apply and
-    // no priced embed may ever render (salePriceCents is an unattested hint).
-    const priceFree =
-      (deal.source === DealSource.DISCOVERED && !deal.feedId) || deal.salePriceCents <= 0;
-    const rssAutonomous = deal.source === DealSource.DISCOVERED && !deal.feedId;
+    // RSS-sourced posts (DISCOVERED with no feedId) and curator posts
+    // (CURATED) are the PRICE-FREE channels: no price is advertised, so price
+    // freshness doesn't apply and no priced embed may ever render
+    // (salePriceCents is zeroed; any source price stays an unattested hint).
+    const rssAutonomous =
+      (deal.source === DealSource.DISCOVERED && !deal.feedId) ||
+      deal.source === DealSource.CURATED;
+    const priceFree = rssAutonomous || deal.salePriceCents <= 0;
 
     // Pre-flight: paused listing, or a price snapshot too stale to advertise.
     if (!listing.isActive) {

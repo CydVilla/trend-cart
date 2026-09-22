@@ -394,11 +394,14 @@ enum DealPostStatus {
 }
 
 /// How a deal post was triggered. AUTOMATED = watchlist price trigger;
-/// DISCOVERED = found on sale by a DealFeed search; MANUAL = operator.
+/// DISCOVERED = found on sale by a DealFeed search or an RSS source;
+/// MANUAL = operator; CURATED = mirrored from a curator account on Bluesky
+/// (e.g. Wario64) — price-free, with its own daily budget and cooldown.
 enum DealSource {
   AUTOMATED
   DISCOVERED
   MANUAL
+  CURATED
 }
 
 /// How a TrackedListing entered the table. WATCHLIST rows are operator-curated
@@ -587,7 +590,8 @@ model DealSuggestionSource {
   id   String @id @default(cuid())
   /// Display name, unique so seeding stays idempotent.
   name String @unique
-  /// RSS 2.0 feed URL.
+  /// RSS 2.0 feed URL — or `https://bsky.app/profile/<handle>` for a curator
+  /// account, polled through the public Bluesky API (the CURATED channel).
   url  String
   /// Plain-words criteria for what belongs in this lane — the LLM topical
   /// gate judges each item title against this.

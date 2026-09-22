@@ -299,3 +299,26 @@ export const PAAPI_SEARCH_INDEXES = [
   "ToysAndGames",
   "VideoGames",
 ] as const;
+
+/** Curator-account deal sources (ADR-0017) are stored under this URL prefix;
+ *  the worker routes any source that starts with it to the Bluesky reader. */
+export const CURATOR_URL_PREFIX = "https://bsky.app/profile/";
+
+const BSKY_PROFILE_RE = /^https?:\/\/(?:www\.)?bsky\.app\/profile\/([A-Za-z0-9._:-]+)\/?$/i;
+const HANDLE_RE = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*$/;
+const DID_RE = /^did:[a-z]+:[a-z0-9._:-]+$/;
+
+/** "https://bsky.app/profile/Wario64.bsky.social" → "wario64.bsky.social"
+ *  (a handle or DID), or null when the URL is not a Bluesky profile. */
+export function curatorProfileHandle(url: string): string | null {
+  const match = url.trim().match(BSKY_PROFILE_RE);
+  if (!match) return null;
+  const actor = match[1]!.toLowerCase();
+  return HANDLE_RE.test(actor) || DID_RE.test(actor) ? actor : null;
+}
+
+/** Canonical stored form of a curator source URL, or null if not one. */
+export function canonicalCuratorUrl(url: string): string | null {
+  const actor = curatorProfileHandle(url);
+  return actor ? `${CURATOR_URL_PREFIX}${actor}` : null;
+}

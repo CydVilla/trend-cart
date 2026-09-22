@@ -75,9 +75,10 @@ export function noteLlmBillingBlocked(error: unknown): boolean {
   blockedUntil = Date.now() + BILLING_BACKOFF_MS;
   if (firstTrip) {
     console.error(
-      `[llm] OUT OF CREDIT — pausing evaluation and reply generation for ` +
-        `${BILLING_BACKOFF_MS / 60_000}m. Candidates stay PENDING and are NOT ` +
-        `written off; top up at console.anthropic.com and the next tick resumes. ` +
+      `[llm] OUT OF CREDIT — pausing evaluation, reply generation, and RSS deal ` +
+        `checks for ${BILLING_BACKOFF_MS / 60_000}m (curator deals continue tokenless). ` +
+        `Candidates stay PENDING and are NOT written off; top up at ` +
+        `console.anthropic.com and the next tick resumes. ` +
         `Reason: ${error instanceof Error ? error.message : String(error)}`,
     );
   }

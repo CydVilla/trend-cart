@@ -200,6 +200,7 @@ export function buildSettingsSnapshot(): SettingsSnapshot {
       kind: "cap",
       group: "Deal channel",
       meter: "dealPostsLastDay",
+      note: "watchlist, PA-API and RSS posts — curator posts have their own cap",
       inactive: !deals,
     },
     {
@@ -219,6 +220,37 @@ export function buildSettingsSnapshot(): SettingsSnapshot {
       group: "Deal channel",
       unit: "min",
       inactive: !deals,
+    },
+    {
+      key: "DEAL_CURATED_MAX_POSTS_PER_DAY",
+      label: "Curator (Wario64) posts per day",
+      value: config.deals.curated.maxPostsPerDay,
+      kind: "cap",
+      group: "Deal channel",
+      meter: "curatedPostsLastDay",
+      note: config.deals.curated.autopost
+        ? "price-free posts relayed from bsky.app deal sources"
+        : "audit-only until DEAL_CURATED_AUTOPOST=true",
+      inactive: !rss,
+    },
+    {
+      key: "DEAL_CURATED_COOLDOWN_MINUTES",
+      label: "Gap between curator posts",
+      value: config.deals.curated.cooldownMinutes,
+      kind: "duration",
+      group: "Deal channel",
+      unit: "min",
+      inactive: !rss,
+    },
+    {
+      key: "DEAL_CURATED_MAX_AGE_MINUTES",
+      label: "Curator post freshness",
+      value: config.deals.curated.maxSourceAgeMinutes,
+      kind: "duration",
+      group: "Deal channel",
+      unit: "min",
+      note: "older curator posts aren't evidence of a live deal",
+      inactive: !rss,
     },
     {
       key: "DEAL_MAX_PRICE_AGE_HOURS",
