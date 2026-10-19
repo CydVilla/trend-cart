@@ -12,7 +12,7 @@ import type {
   SuggestionVerdict,
   WriteDealPostInput,
 } from "@trendcart/shared";
-import { HIGH_CONVERSION_LANE_SLUGS } from "@trendcart/shared";
+import { HIGH_CONVERSION_LANE_SLUGS, modelCapabilities } from "@trendcart/shared";
 import { recordResponseUsage } from "@trendcart/db";
 import { config } from "../config.js";
 
@@ -314,9 +314,25 @@ export class AnthropicLlmClient implements LlmClient {
       : new Anthropic({ timeout: 60_000 });
   }
 
-  /** Haiku-tier models reject the effort parameter — send it only where supported. */
-  private get supportsEffort(): boolean {
-    return !this.model.includes("haiku");
+  private get caps() {
+    return modelCapabilities(this.model);
+  }
+
+  /** `effort: "low"` where the model takes it — every call here is a scoped task. */
+  private get lowEffort() {
+    return this.caps.effort ? { effort: "low" as const } : {};
+  }
+
+  /** `temperature: 0` where the model still accepts sampling params; newer
+   *  models 400 on it and are steered by the prompt + structured output. */
+  private get deterministic() {
+    return this.caps.temperature ? { temperature: 0 } : {};
+  }
+
+  /** On models that think by default, thinking spends from max_tokens before
+   *  the answer does — a cap sized for the answer alone truncates it. */
+  private maxTokens(answer: number): number {
+    return this.caps.thinksByDefault ? Math.max(answer * 4, 1024) : answer;
   }
 
   async classifyPost(input: ClassifyPostInput): Promise<CandidateEvaluationResult> {
@@ -355,14 +371,12 @@ export class AnthropicLlmClient implements LlmClient {
     ];
     const response = await this.client.messages.parse({
       model: this.model,
-      max_tokens: 1024,
+      max_tokens: this.maxTokens(1024),
       // Deterministic: borderline candidates must classify the same way every
       // run — flip-flop here means unstable posting AND noisy calibration.
-      temperature: 0,
+      ...this.deterministic,
       // Classification is a scoped task — low effort keeps latency/cost down.
-      output_config: this.supportsEffort
-        ? { effort: "low", format: zodOutputFormat(EvaluationSchema) }
-        : { format: zodOutputFormat(EvaluationSchema) },
+      output_config: { ...this.lowEffort, format: zodOutputFormat(EvaluationSchema) },
       system: CLASSIFY_SYSTEM,
       messages: [{ role: "user", content }],
     });
@@ -393,13 +407,11 @@ export class AnthropicLlmClient implements LlmClient {
   async judgeDealSuggestion(input: JudgeSuggestionInput): Promise<SuggestionVerdict> {
     const response = await this.client.messages.parse({
       model: this.model,
-      max_tokens: 256,
+      max_tokens: this.maxTokens(256),
       // Deterministic for the same reason as classification: the same
       // headline must gate the same way on every fetch.
-      temperature: 0,
-      output_config: this.supportsEffort
-        ? { effort: "low", format: zodOutputFormat(SuggestionVerdictSchema) }
-        : { format: zodOutputFormat(SuggestionVerdictSchema) },
+      ...this.deterministic,
+      output_config: { ...this.lowEffort, format: zodOutputFormat(SuggestionVerdictSchema) },
       system: SUGGESTION_SYSTEM,
       messages: [
         {
@@ -424,8 +436,8 @@ export class AnthropicLlmClient implements LlmClient {
 
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: 512,
-      ...(this.supportsEffort ? { output_config: { effort: "low" as const } } : {}),
+      max_tokens: this.maxTokens(512),
+      output_config: this.lowEffort,
       system: REPLY_SYSTEM,
       messages: [
         { role: "user", content: buildContent(buildReplyPrompt(input, wordBudget), input.images) },
@@ -452,8 +464,8 @@ export class AnthropicLlmClient implements LlmClient {
     const wordBudget = Math.max(8, Math.floor(input.textBudget / 6.5));
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: 200,
-      ...(this.supportsEffort ? { output_config: { effort: "low" as const } } : {}),
+      max_tokens: this.maxTokens(200),
+      output_config: this.lowEffort,
       system: DEAL_COPY_SYSTEM,
       messages: [
         {

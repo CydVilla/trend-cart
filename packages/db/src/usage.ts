@@ -43,18 +43,25 @@ export const LLM_OPERATIONS: { key: LlmOperation; label: string; note: string }[
 type ModelPrice = { inputPerMTok: number; outputPerMTok: number };
 
 /**
- * USD per million tokens, Anthropic first-party rates (verified 2026-08-05).
- * Keys are matched as prefixes so dated snapshots (claude-haiku-4-5-20251001)
- * resolve to their family.
+ * USD per million tokens, Anthropic first-party rates (verified 2026-10-19).
+ * Keys are matched as LONGEST prefix, so dated snapshots
+ * (claude-haiku-4-5-20251001) resolve to their family and claude-opus-5-5
+ * never falls through to claude-opus-5's card.
+ *
+ * Haiku 5.5 has a second card ($0.50 / $2.50) for prompts over 100K tokens;
+ * every prompt here is a few thousand tokens, so only the short card is listed.
  */
 const MODEL_PRICES: Record<string, ModelPrice> = {
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
+  "claude-haiku-5-5": { inputPerMTok: 0.1, outputPerMTok: 0.5 },
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
-  "claude-sonnet-5": { inputPerMTok: 3, outputPerMTok: 15 },
+  "claude-sonnet-5": { inputPerMTok: 2, outputPerMTok: 10 },
+  "claude-sonnet-5-5": { inputPerMTok: 2, outputPerMTok: 10 },
   "claude-opus-4-6": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-7": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
   "claude-opus-5": { inputPerMTok: 5, outputPerMTok: 25 },
+  "claude-opus-5-5": { inputPerMTok: 4, outputPerMTok: 20 },
   "claude-fable-5": { inputPerMTok: 10, outputPerMTok: 50 },
 };
 

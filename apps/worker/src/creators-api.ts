@@ -1,8 +1,8 @@
 import { config } from "./config.js";
 
 /**
- * Amazon Creators API — getItems (watchlist price polling) + searchItems
- * (deal-feed discovery) client.
+ * Amazon Creators API — searchItems (deal-feed discovery, reply availability)
+ * + getItems (scripts/creators-probe.ts eligibility check) client.
  *
  * Replaces the PA-API 5.0 SigV4 client: PA-API was deprecated 2026-04-30 and
  * its endpoint switched off 2026-05-15, so the old AWS-signed transport can

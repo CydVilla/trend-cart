@@ -29,6 +29,22 @@ test("dated model snapshots resolve to their family's rate card", () => {
   );
 });
 
+test("Haiku 5.5 prices at its own card, not Haiku 4.5's", () => {
+  // $0.10/MTok in, $0.50/MTok out — a 10x drop that must show on the Limits page.
+  const micros = costMicros(
+    "claude-haiku-5-5",
+    { ...NO_USAGE, inputTokens: 1_000_000, outputTokens: 1_000_000 },
+    "5m",
+  );
+  assert.equal(micros, 600_000); // $0.60
+});
+
+test("a longer model ID wins over its shorter prefix", () => {
+  // claude-opus-5-5 starts with claude-opus-5 — it must not inherit that card.
+  assert.equal(modelPrice("claude-opus-5-5").price.inputPerMTok, 4);
+  assert.equal(modelPrice("claude-opus-5").price.inputPerMTok, 5);
+});
+
 test("cache reads bill at 0.1x input and 1h writes at 2x", () => {
   // The 1h TTL was chosen in llm/anthropic.ts precisely because it doubles the
   // write price to convert misses into 0.1x reads — if these multipliers drift,

@@ -132,9 +132,10 @@ async function main(): Promise<void> {
     console.warn("  mentions/opt-out:  disabled (no Bluesky credentials)");
   }
 
-  // Deal channel: ships dark behind DEALS_ENABLED. Two automated paths feed
-  // one poster — RSS (no PA-API, price-free copy, DEAL_RSS_AUTOPOST) and
-  // PA-API feed discovery (attested prices, once credentials exist).
+  // Deal channel: ships dark behind DEALS_ENABLED. Three automated paths feed
+  // one poster — curator accounts (DEAL_CURATED_AUTOPOST), RSS (price-free
+  // copy, DEAL_RSS_AUTOPOST), and Creators API feed discovery (attested
+  // prices, once Amazon grants access).
   const notifier = createNotifier(notifyStats);
   if (!notifier) {
     console.log("  operator email:   disabled (set RESEND_API_KEY + NOTIFY_EMAIL_TO to enable)");
@@ -172,7 +173,7 @@ async function main(): Promise<void> {
     // each tick cheap; 30-min cadence just bounds how late in the day it runs).
     ...(banter ? [startLoop("banter", 30 * 60_000, () => banter.tick())] : []),
     startLoop("heartbeat", 30_000, () => flushHeartbeat()),
-    // Operator DM ping — rate-limited internally (one per N hours, max).
+    // Operator email ping — rate-limited internally (one per N hours, max).
     ...(notifier ? [startLoop("notify", 10 * 60_000, () => notifier.tick())] : []),
     // Learning loop: hourly outcome measurement (free public API), daily
     // reflection (one small LLM call — reflectTick no-ops until stale).

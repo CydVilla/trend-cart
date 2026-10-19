@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { extractAsin, isAmazonHost } from "@trendcart/shared";
+import { extractAsin, isAmazonHost, modelCapabilities } from "@trendcart/shared";
 import { recordResponseUsage } from "@trendcart/db";
 import { z } from "zod";
 import { config } from "./config.js";
@@ -157,10 +157,9 @@ export function validateDealSearchEvidence(input: {
 export type FactCheckInput = {
   postText: string;
   replyText: string;
-  /** "search" = query targets a specific product; "category" = generic. */
   /** "product" = a resolved ASIN with a live price; "search" = a query page. */
-  linkKind: "search" | "category" | "product";
-  /** The Amazon search query the link runs (product query or category name). */
+  linkKind: "search" | "product";
+  /** The Amazon search query the link runs. */
   linkQuery: string;
   suggestedReplyAngle: string | null;
 };
@@ -173,18 +172,17 @@ export async function factCheckReply(input: FactCheckInput): Promise<FactCheckVe
   if (!config.llm.anthropicApiKey) return null;
   try {
     const client = new Anthropic({ apiKey: config.llm.anthropicApiKey, timeout: 90_000 });
-    // Haiku-tier models only support the basic web-search tool variant (and
-    // reject the effort parameter); newer tiers get dynamic filtering.
-    const haiku = config.llm.model.includes("haiku");
+    const caps = modelCapabilities(config.llm.model);
     const response = await client.messages.parse({
       model: config.llm.model,
-      max_tokens: 2048,
-      output_config: haiku
-        ? { format: zodOutputFormat(VerdictSchema) }
-        : { effort: "low", format: zodOutputFormat(VerdictSchema) },
+      max_tokens: caps.thinksByDefault ? 4096 : 2048,
+      output_config: {
+        ...(caps.effort ? { effort: "low" as const } : {}),
+        format: zodOutputFormat(VerdictSchema),
+      },
       tools: [
         {
-          type: haiku ? "web_search_20250305" : "web_search_20260209",
+          type: caps.dynamicWebSearch ? "web_search_20260209" : "web_search_20250305",
           name: "web_search",
           max_uses: config.factCheck.maxSearches,
         },
@@ -197,7 +195,7 @@ export async function factCheckReply(input: FactCheckInput): Promise<FactCheckVe
             `Link: ${
               input.linkKind === "product"
                 ? `Amazon product page for "${sanitize(input.linkQuery)}" (a specific listing, resolved via Amazon's catalog API)`
-                : `Amazon search for "${sanitize(input.linkQuery)}" (${input.linkKind === "search" ? "specific product query" : "generic category query"})`
+                : `Amazon search for "${sanitize(input.linkQuery)}" (specific product query)`
             }\n` +
             (input.suggestedReplyAngle
               ? `Reply angle the classifier chose: ${sanitize(input.suggestedReplyAngle)}\n`
@@ -348,16 +346,17 @@ export async function factCheckDealListing(input: {
   if (!config.llm.anthropicApiKey) return null;
   try {
     const client = new Anthropic({ apiKey: config.llm.anthropicApiKey, timeout: 90_000 });
-    const haiku = config.llm.model.includes("haiku");
+    const caps = modelCapabilities(config.llm.model);
     const response = await client.messages.parse({
       model: config.llm.model,
-      max_tokens: 2048,
-      output_config: haiku
-        ? { format: zodOutputFormat(DealVerdictSchema) }
-        : { effort: "low", format: zodOutputFormat(DealVerdictSchema) },
+      max_tokens: caps.thinksByDefault ? 4096 : 2048,
+      output_config: {
+        ...(caps.effort ? { effort: "low" as const } : {}),
+        format: zodOutputFormat(DealVerdictSchema),
+      },
       tools: [
         {
-          type: haiku ? "web_search_20250305" : "web_search_20260209",
+          type: caps.dynamicWebSearch ? "web_search_20260209" : "web_search_20250305",
           name: "web_search",
           max_uses: config.factCheck.maxSearches,
         },

@@ -128,11 +128,12 @@ export default async function DealsPage() {
     <div>
       <h1 className="mb-1 text-2xl font-bold">Deal channel</h1>
       <p className="mb-4 text-sm text-zinc-500">
-        Fully automated, two paths into one poster: <strong>deal RSS sources</strong> (live today,
-        no Amazon keys — items enter a ranked high-intent queue, then exact-ASIN/current-sale
-        evidence is verified before the winner self-posts with
-        PRICE-FREE copy attributed to the source) and <strong>deal feeds</strong> (Wario64-style
-        PA-API sale discovery with real attested prices — lights up once you have API keys).
+        Fully automated, three paths into one poster: <strong>curator accounts</strong> (Wario64 and
+        co., relayed price-free with our tag), <strong>deal RSS sources</strong> (no Amazon keys —
+        items enter a ranked high-intent queue, then exact-ASIN/current-sale evidence is verified
+        before the winner self-posts with PRICE-FREE copy attributed to the source) and{" "}
+        <strong>deal feeds</strong> (Creators API sale discovery with real attested prices — lights
+        up once Amazon grants API access).
         Every post carries your affiliate link and an in-post <code>#ad</code> disclosure.
       </p>
 
@@ -155,9 +156,10 @@ export default async function DealsPage() {
         </div>
       )}
       <div className="mb-6 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-500">
-        Deal feeds (attested prices) run only when Amazon PA-API keys are configured on the worker
-        (<code>PA_API_ACCESS_KEY</code>/<code>PA_API_SECRET_KEY</code>). Until then, the RSS
-        sources below are the whole channel — automated, price-free posts that need no API keys.
+        Deal feeds (attested prices) run only once Amazon grants Creators API access
+        (<code>CREATORS_API_CLIENT_ID</code>/<code>CREATORS_API_CLIENT_SECRET</code>; access needs
+        10 qualifying sales in the trailing 30 days). Until then, curator accounts and the RSS
+        sources below are the whole channel — price-free posts that need no API keys.
       </div>
       {!CLICK_TRACKING_ACTIVE && (
         <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
@@ -554,11 +556,11 @@ export default async function DealsPage() {
         </div>
       )}
 
-      {/* RSS deal sources — the automated no-PA-API channel */}
+      {/* RSS deal sources — the automated no-Amazon-API channel */}
       <SectionHeading>Deal RSS sources ({suggestionSources.length})</SectionHeading>
       <p className="-mt-2 mb-3 text-xs text-zinc-500">
         Deal-site RSS feeds (e.g. Slickdeals) the worker reads for Amazon items —{" "}
-        <strong>works without PA-API keys, fully automated</strong>. Each source keeps one topical
+        <strong>works without Amazon API keys, fully automated</strong>. Each source keeps one topical
         lane: keyword filters run first, an LLM assigns a high-conversion lane and purchase-intent
         score, candidates compete globally, and strict web verification must confirm the exact
         ASIN is currently discounted on Amazon before a survivor can self-post with
@@ -660,7 +662,7 @@ export default async function DealsPage() {
       </form>
 
       {suggestionSources.length === 0 ? (
-        <EmptyState>No RSS sources yet — add one above; it&apos;s the automated no-PA-API deal channel.</EmptyState>
+        <EmptyState>No RSS sources yet — add one above; it&apos;s the automated no-Amazon-API deal channel.</EmptyState>
       ) : (
         <div className="mb-8 space-y-3">
           {suggestionSources.map((source) => (

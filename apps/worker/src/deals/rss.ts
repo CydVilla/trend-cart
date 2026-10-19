@@ -3,8 +3,7 @@ import { extractAsin, isAmazonHost, parseCents } from "@trendcart/shared";
 /**
  * Dependency-free RSS 2.0 parsing + Amazon-product extraction for the deal
  * suggestion loop. Deal feeds (Slickdeals et al.) are RSS 2.0; we only need
- * four fields per item, so a scoped regex parser beats an XML dependency —
- * same reasoning as the hand-signed SigV4 client.
+ * four fields per item, so a scoped regex parser beats an XML dependency.
  *
  * Everything here treats feed content as UNTRUSTED text: titles go to the
  * LLM gate inside untrusted tags, URLs are validated against the Amazon host

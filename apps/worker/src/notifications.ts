@@ -4,7 +4,7 @@ import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-hea
 import { config } from "./config.js";
 
 /**
- * The bot's ears, three jobs:
+ * The bot's ears, two jobs:
  *
  * 1. OPT-OUT: any reply/mention/quote containing an opt-out phrase permanently
  *    silences the bot for that author.
