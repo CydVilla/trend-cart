@@ -1,12 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { AtpAgent } from "@atproto/api";
 import { prisma, PostSource, ReplyStatus, recordResponseUsage } from "@trendcart/db";
+import { blueskyAgent, noteBlueskySessionLost } from "./bluesky-agent.js";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 import { findSensitiveMatch } from "./filters.js";
 import { isPaused } from "./heartbeat.js";
+import { llmBillingBlocked } from "./llm-health.js";
+import { gatedLlmCall, llmJobClient, llmJobParams } from "./llm-job.js";
 
 /**
  * Trending banter: once a day, find a popular post under Bluesky's trending
@@ -30,7 +31,6 @@ import { isPaused } from "./heartbeat.js";
 
 const GETTRENDS_URL = "https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrends";
 const GETTHREAD_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread";
-const MAX_LOGIN_FAILURES = 3;
 /** Trend categories that are never banter material. */
 const BLOCKED_CATEGORIES = new Set(["politics", "news"]);
 /** Topic-name blocklist — belt and suspenders under the category filter. */
@@ -148,35 +148,10 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
     `  trending banter:  ${config.banter.perDay}/day humor reply on a trending post${config.bot.dryRun ? " (DRY_RUN: drafts only)" : ""}`,
   );
 
-  let agent: AtpAgent | null = null;
-  let loginFailures = 0;
-  let stopped = false;
   /** After a round that judged candidates without posting, wait this long
    *  before spending again — the same trending posts are still up. */
   const RETRY_LATCH_MS = 6 * 3_600_000;
   let lastSpentAt = 0;
-
-  async function ensureAgent(): Promise<AtpAgent | null> {
-    if (agent) return agent;
-    const candidate = new AtpAgent({ service: "https://bsky.social" });
-    try {
-      await candidate.login({
-        identifier: config.bluesky.handle,
-        password: config.bluesky.appPassword,
-      });
-      loginFailures = 0;
-      agent = candidate;
-      return agent;
-    } catch (error) {
-      if (noteBlueskyDown(error)) return null;
-      loginFailures += 1;
-      if (loginFailures >= MAX_LOGIN_FAILURES) {
-        console.error("[banter] repeated login failures — disabling until restart");
-        stopped = true;
-      }
-      return null;
-    }
-  }
 
   /** One candidate post: everything the judge needs. */
   async function judge(
@@ -185,7 +160,6 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
     topReplies: Array<{ text: string; likeCount: number }>,
   ): Promise<z.infer<typeof BanterSchema> | null> {
     try {
-      const client = new Anthropic({ apiKey: config.llm.anthropicApiKey, timeout: 60_000 });
       const wordBudget = Math.max(10, Math.floor(config.banter.maxLength / 6.5));
       const repliesBlock =
         topReplies.length > 0
@@ -193,23 +167,28 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
               .map((r) => `- (${r.likeCount}♥) ${sanitize(r.text.slice(0, 200))}`)
               .join("\n")}\n</untrusted_replies>\n`
           : "\n(No notable replies yet — you'd be early. That's fine if the take is strong.)\n";
-      const response = await client.messages.parse({
-        model: config.llm.model,
-        max_tokens: 1024,
-        // No temperature pin and no effort cap: humor wants variance.
-        output_config: { format: zodOutputFormat(BanterSchema) },
-        system: BANTER_SYSTEM,
-        messages: [
-          {
-            role: "user",
-            content:
-              `Trending topic: ${sanitize(topic)}\nWord limit: at most ${wordBudget} words.\n` +
-              `Post engagement: ${post.likeCount ?? 0} likes, ${post.replyCount ?? 0} replies.\n` +
-              repliesBlock +
-              `\n<untrusted_post>\n${sanitize(post.record?.text ?? "")}\n</untrusted_post>`,
-          },
-        ],
-      });
+      // No temperature pin and no effort cap: humor wants variance. The
+      // thinking headroom still applies — a joke cut off mid-JSON is no joke.
+      const params = llmJobParams(config.llm.model, { answerTokens: 1024 });
+      const response = await gatedLlmCall(() =>
+        llmJobClient(config.llm.anthropicApiKey).messages.parse({
+          model: config.llm.model,
+          max_tokens: params.max_tokens,
+          output_config: { ...params.effort, format: zodOutputFormat(BanterSchema) },
+          system: BANTER_SYSTEM,
+          messages: [
+            {
+              role: "user",
+              content:
+                `Trending topic: ${sanitize(topic)}\nWord limit: at most ${wordBudget} words.\n` +
+                `Post engagement: ${post.likeCount ?? 0} likes, ${post.replyCount ?? 0} replies.\n` +
+                repliesBlock +
+                `\n<untrusted_post>\n${sanitize(post.record?.text ?? "")}\n</untrusted_post>`,
+            },
+          ],
+        }),
+      );
+      if (!response) return null; // out of credit — tick() sees the armed gate
       recordResponseUsage("banter", config.llm.model, response);
       if (response.stop_reason === "refusal" || !response.parsed_output) return null;
       return response.parsed_output;
@@ -221,9 +200,11 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
   }
 
   async function tick(): Promise<void> {
-    if (stopped) return;
     if (await isPaused()) return;
     if (blueskyBackingOff()) return;
+    // Out of credit: skip before the trends fetch and search spend, like the
+    // evaluate/reply loops. The day's slot simply runs once credit is back.
+    if (llmBillingBlocked()) return;
 
     // Daily budget, DB-derived (DRY_RUN drafts count — no row spam).
     const today = await prisma.botReply.count({
@@ -245,7 +226,7 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
       .slice(0, 6);
     if (topics.length === 0) return;
 
-    const activeAgent = await ensureAgent();
+    const activeAgent = await blueskyAgent();
     if (!activeAgent) return;
 
     let judgments = 0;
@@ -264,7 +245,7 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
         noteBlueskyUp();
         posts = response.data.posts as unknown as SearchPost[];
       } catch (error) {
-        if (noteBlueskyDown(error)) return;
+        if (noteBlueskyDown(error) || noteBlueskySessionLost(error)) return;
         stats.errors += 1;
         continue;
       }
@@ -303,8 +284,17 @@ export function createBanter(stats: BanterStats): { tick: () => Promise<void> } 
 
         const topReplies = await fetchTopReplies(candidate.uri);
         judgments += 1;
+        const latchedAt = lastSpentAt;
         lastSpentAt = Date.now();
         const verdict = await judge(candidate, query, topReplies);
+        if (!verdict && llmBillingBlocked()) {
+          // Credit ran out under us. The request was rejected before
+          // inference, so nothing was spent: undo the retry latch (or the
+          // first tick after a top-up would wait out the 6h for nothing) and
+          // stand down rather than spend the remaining topics' searches.
+          lastSpentAt = latchedAt;
+          return;
+        }
         if (verdict) {
           console.log(
             `[banter] verdict on "${query}" (${candidate.likeCount}♥): shouldReply=${verdict.shouldReply} confidence=${verdict.confidence} — ${verdict.reason.slice(0, 120)}`,

@@ -1,8 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { prisma, computeFunnel, recordResponseUsage, type FunnelReport, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
+import { llmBillingBlocked } from "./llm-health.js";
+import { gatedLlmCall, llmJobClient, llmJobParams } from "./llm-job.js";
 
 /**
  * Daily operations report. Computes the discovery→evaluation→posted funnel and
@@ -70,6 +71,9 @@ export type InsightsStats = { reports: number; errors: number };
 
 export async function insightsTick(stats: InsightsStats): Promise<void> {
   if (config.llm.useFake || !config.llm.anthropicApiKey) return;
+  // Out of credit: skip before the two funnel scans. The report is daily and
+  // only goes stale, so the first tick after a top-up writes it.
+  if (llmBillingBlocked()) return;
 
   const existing = await prisma.botMemory.findUnique({ where: { id: INSIGHTS_ID } });
   if (existing && Date.now() - existing.updatedAt.getTime() < REFRESH_MS) return;
@@ -111,19 +115,23 @@ export async function insightsTick(stats: InsightsStats): Promise<void> {
     `Active categories (keywords are the Bluesky search queries): ${categories.map((c) => c.name).join(", ")}`,
   ].join("\n");
 
-  const client = new Anthropic({ apiKey: config.llm.anthropicApiKey, timeout: 60_000 });
-  const response = await client.messages.parse({
-    model: config.llm.model,
-    max_tokens: 1200,
-    output_config: { format: zodOutputFormat(InsightsSchema) },
-    system: INSIGHTS_SYSTEM,
-    messages: [
-      {
-        role: "user",
-        content: `${fmtFunnel("All time", allTime)}\n\n${fmtFunnel("Last 7 days", recent)}${ratedBlock}\n\n## Current config\n${configBlock}`,
-      },
-    ],
-  });
+  // Medium effort, same reasoning as reflection: one daily analysis call.
+  const params = llmJobParams(config.llm.model, { answerTokens: 1200, effort: "medium" });
+  const response = await gatedLlmCall(() =>
+    llmJobClient(config.llm.anthropicApiKey).messages.parse({
+      model: config.llm.model,
+      max_tokens: params.max_tokens,
+      output_config: { ...params.effort, format: zodOutputFormat(InsightsSchema) },
+      system: INSIGHTS_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: `${fmtFunnel("All time", allTime)}\n\n${fmtFunnel("Last 7 days", recent)}${ratedBlock}\n\n## Current config\n${configBlock}`,
+        },
+      ],
+    }),
+  );
+  if (!response) return; // stood down on billing — the gate logged it
   recordResponseUsage("insights", config.llm.model, response);
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     stats.errors += 1;

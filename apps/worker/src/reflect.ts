@@ -1,9 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { prisma, ReplyStatus, recordResponseUsage, type Prisma } from "@trendcart/db";
 import { config } from "./config.js";
 import { FACTCHECK_REJECT_SKIP_REASON } from "./factcheck.js";
+import { llmBillingBlocked } from "./llm-health.js";
+import { gatedLlmCall, llmJobClient, llmJobParams } from "./llm-job.js";
 
 /**
  * The bot's learning loop. Once a day it looks at every judgment signal the
@@ -117,6 +118,9 @@ export type ReflectStats = { reflections: number; errors: number };
 
 export async function reflectTick(stats: ReflectStats): Promise<void> {
   if (config.llm.useFake || !config.llm.anthropicApiKey) return;
+  // Out of credit: skip before the seven evidence queries. Lessons only go
+  // stale, so the first tick after a top-up simply reflects then.
+  if (llmBillingBlocked()) return;
 
   const existing = await prisma.botMemory.findUnique({ where: { id: LESSONS_ID } });
   if (existing && Date.now() - existing.updatedAt.getTime() < REFRESH_MS) return;
@@ -265,24 +269,32 @@ export async function reflectTick(stats: ReflectStats): Promise<void> {
   }
 
   const guidance = await getOperatorGuidance();
-  const client = new Anthropic({ apiKey: config.llm.anthropicApiKey, timeout: 60_000 });
-  const response = await client.messages.parse({
-    model: config.llm.model,
-    max_tokens: 1024,
-    output_config: { format: zodOutputFormat(LessonsSchema) },
-    system: REFLECT_SYSTEM,
-    messages: [
-      {
-        role: "user",
-        content:
-          (guidance ? `<operator_guidance>\n${guidance}\n</operator_guidance>\n\n` : "") +
-          (existing?.content
-            ? `Current guidelines (the operator maintains these — preserve them, don't re-add anything they've removed):\n${existing.content}\n\n`
-            : "") +
-          `Evidence from the last 14 days:\n\n<untrusted_examples>\n${sanitize(sections.join("\n\n"))}\n</untrusted_examples>`,
-      },
-    ],
-  });
+  // Medium effort: one synthesis call a day across a fortnight of evidence is
+  // worth more thought than the scoped "low" classify calls, and a thinking
+  // model's default (high) would mostly burn the max_tokens headroom.
+  const params = llmJobParams(config.llm.model, { answerTokens: 1024, effort: "medium" });
+  const response = await gatedLlmCall(() =>
+    llmJobClient(config.llm.anthropicApiKey).messages.parse({
+      model: config.llm.model,
+      max_tokens: params.max_tokens,
+      output_config: { ...params.effort, format: zodOutputFormat(LessonsSchema) },
+      system: REFLECT_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content:
+            (guidance ? `<operator_guidance>\n${guidance}\n</operator_guidance>\n\n` : "") +
+            (existing?.content
+              ? `Current guidelines (the operator maintains these — preserve them, don't re-add anything they've removed):\n${existing.content}\n\n`
+              : "") +
+            `Evidence from the last 14 days:\n\n<untrusted_examples>\n${sanitize(sections.join("\n\n"))}\n</untrusted_examples>`,
+        },
+      ],
+    }),
+  );
+  // Stood down on billing (the gate logged it) — not a reflection failure,
+  // and throwing would only add a second log line per tick.
+  if (!response) return;
   recordResponseUsage("reflect", config.llm.model, response);
   if (response.stop_reason === "refusal" || !response.parsed_output) {
     stats.errors += 1;

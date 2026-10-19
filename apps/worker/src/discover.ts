@@ -1,6 +1,6 @@
-import { AtpAgent } from "@atproto/api";
 import { prisma } from "@trendcart/db";
 import { computeEngagementScore } from "@trendcart/shared";
+import { blueskyAgent, noteBlueskySessionLost } from "./bluesky-agent.js";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 import { findPromotionalMatch, findSensitiveMatch } from "./filters.js";
@@ -163,25 +163,12 @@ export async function processSearchResult(
 export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<void> } | null {
   if (!config.bluesky.handle || !config.bluesky.appPassword) return null;
 
-  let agent: AtpAgent | null = null;
-
   async function tick(): Promise<void> {
     if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
-    if (!agent) {
-      const candidate = new AtpAgent({ service: "https://bsky.social" });
-      try {
-        await candidate.login({
-          identifier: config.bluesky.handle,
-          password: config.bluesky.appPassword,
-        });
-      } catch (error) {
-        // Transient outage → back off quietly; a real auth error still throws
-        // loudly so the operator sees the credential problem.
-        if (noteBlueskyDown(error)) return;
-        throw error;
-      }
-      agent = candidate;
-    }
+    // Shared session: a credential failure is logged loudly there (and
+    // counted toward the disable); an outage arms the global backoff.
+    const agent = await blueskyAgent();
+    if (!agent) return;
     const since = new Date(
       Date.now() - config.ingest.maxCandidateAgeHours * 3_600_000,
     ).toISOString();
@@ -214,6 +201,9 @@ export function createDiscoverer(stats: DiscoverStats): { tick: () => Promise<vo
           // Bluesky is down — stop grinding the remaining ~115 queries this
           // cycle; back off and let the next tick probe once the window clears.
           if (noteBlueskyDown(error)) return;
+          // Dead session: the remaining queries would fail the same way —
+          // stop, and the next tick logs in afresh.
+          if (noteBlueskySessionLost(error)) return;
           console.error(
             `[discover] query "${query}" failed:`,
             error instanceof Error ? error.message : error,
