@@ -24,7 +24,7 @@ export function middleware(request: NextRequest): NextResponse {
 
 export const config = {
   // Everything except the public about/disclosure page, the privacy policy
-  // (required by developer-platform app registrations, e.g. Pinterest), the
+  // (required by developer-platform app registrations), the
   // click-redirect (/r/<id> — hit by anyone clicking a bot link, must never
   // 401), the health probe (leaks only liveness booleans), and framework
   // assets requires auth. /recommendations stays listed so legacy links

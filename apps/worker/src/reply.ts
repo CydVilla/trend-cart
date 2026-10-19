@@ -253,7 +253,6 @@ type ReplyLink = {
   query?: string;
 };
 
-/** "hollow knight silksong nintendo switch" → "hollow knight silksong on Amazon" */
 /**
  * Deterministically trim an over-long reply body so `${body}… ${anchor}` fits
  * the length cap, cutting at a word boundary. The anchor (and its facet) are

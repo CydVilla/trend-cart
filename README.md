@@ -165,9 +165,9 @@ affiliate link (`DEAL_POST_STYLE=classic` restores the old copy):
 
 Two automated paths feed the same exactly-once poster:
 
-- **Deal feeds** (ADR-0012, `DEALS_ENABLED=true` + `PA_API_*` keys): saved
+- **Deal feeds** (ADR-0012, `DEALS_ENABLED=true` + `CREATORS_API_*` credentials): saved
   Amazon searches — keywords, category, minimum % off, price band, review
-  floors, sold-by-Amazon toggle — that the worker polls via PA-API SearchItems
+  floors, sold-by-Amazon toggle — that the worker polls via Creators API searchItems
   for products **currently on sale**. "On sale" means a real strikethrough
   (the offer sits below Amazon's own list price), re-verified server-side.
   Discovered deals queue for your approval on the Deals page and auto-expire
@@ -176,7 +176,7 @@ Two automated paths feed the same exactly-once poster:
   (`DEAL_FEED_MAX_POSTS_PER_DAY`, default 2) inside the global cap, and a
   per-ASIN cooldown/dedup row keeps any item from reposting within 7 days —
   pause one in "Discovered by feeds" to ban it permanently.
-- **RSS deal channel** (ADR-0013, **no PA-API needed, fully automated**):
+- **RSS deal channel** (ADR-0013, **no Amazon API needed, fully automated**):
   deal-site RSS feeds are polled for Amazon items; exact-ASIN matching and an
   LLM place candidates into high-conversion lanes (Nintendo/Switch,
   PlayStation/Xbox, PC gaming, storage/SSDs, controllers/parts,
@@ -201,8 +201,15 @@ Two automated paths feed the same exactly-once poster:
   `DEAL_CURATED_COOLDOWN_MINUTES`). Works with zero LLM credit (keyword lanes,
   template copy, the curator's fresh post as evidence); with credit it adds the
   lane judge, a web-search check, and LLM-written copy automatically.
+- **Manual posts** (pre-orders, restocks, anything spotted by hand):
+  `pnpm --filter @trendcart/worker queue:deal --file deals.json --gap 15`
+  (or `--url … --text "… on Amazon #ad"` for one; `--dry` to preview; see
+  `apps/worker/scripts/deals.example.json`). It queues MANUAL rows that the
+  worker's deal poster publishes, so they get click tracking, exactly-once
+  posting, and the per-ASIN cooldown. Copy that states a price is refused
+  unless `--allow-price`; prices move.
 
-PA-API needs an approved Associate account (3 qualifying sales in 180 days).
+The Creators API needs 10 qualifying sales in the trailing 30 days.
 The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
 posting. Caps default deliberately tighter than replies (3 posts/day, 7-day
 per-listing cooldown, 60-min global gap, 1-hour price freshness) — see
@@ -232,15 +239,14 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `MIN_LINK_CONFIDENCE` | Search queries below this confidence (0–100) are never linked (default 75) |
 | `AUTO_MIN_INTENT_SCORE` | Autonomous mode self-approves only above this intent (default 85, matches the posting floor) |
 | `AUTO_MIN_LINK_CONFIDENCE` | ...and above this link confidence for search links (default 75); the web-search fact check is the real backstop |
-| `EVAL_MIN_POST_AGE_MINUTES` | Maturation wait so the engagement snapshot means something |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` default (cheap); swap to an Opus model for max judgment |
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |
 | `BOT_APP_PASSWORD` | Bluesky **app password** (never your real password) |
 | `DEALS_ENABLED` | Master switch for the deal tracker's worker loops (default false) |
-| `PA_API_ACCESS_KEY` / `PA_API_SECRET_KEY` | Amazon Product Advertising API 5.0 keys — enable deal feeds + automated price polling (manual path works without them) |
-| `PA_API_PARTNER_TAG` | PA-API PartnerTag; defaults to `AMAZON_ASSOCIATE_TAG` |
+| `CREATORS_API_CLIENT_ID` / `CREATORS_API_CLIENT_SECRET` | Amazon Creators API credentials (PA-API 5.0's successor) — enable deal feeds; access needs 10 qualifying sales in 30 days |
+| `CREATORS_API_PARTNER_TAG` | Creators API partner tag; defaults to `AMAZON_ASSOCIATE_TAG` |
 | `DEAL_POST_STYLE` | `wario` (default, terse deal-account copy) \| `classic` |
-| `DEAL_FEED_AUTOPOST` | `true` = PA-API feed-discovered deals post without approval (default false) |
+| `DEAL_FEED_AUTOPOST` | `true` = Creators API feed-discovered deals post without approval (default false) |
 | `DEAL_FEED_MAX_POSTS_PER_DAY` | Daily budget for feed-discovered posts (default 2) |
 | `DEAL_RSS_AUTOPOST` | `true` = automated price-free RSS deal posts publish (default false = audit-only; needs `DEALS_ENABLED`) |
 | `DEAL_RSS_MAX_POSTS_PER_DAY` | Daily budget for RSS-sourced deal posts (default 2) |

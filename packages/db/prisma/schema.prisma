@@ -427,12 +427,8 @@ model TrackedListing {
   /// Optional Amazon-hosted image (linked live at post time, never re-hosted).
   imageUrl    String?
   /// The item's normal/full price in integer cents (49999 = $499.99). When
-  /// set, the % discount in the post is computed against this, and the listing
-  /// posts on ANY drop below it (unless a stricter targetPriceCents narrows it).
+  /// set, the % discount in the post is computed against this.
   fullPriceCents   Int?
-  /// Optional stricter alert threshold in cents: only post at/below this. Null
-  /// = post on any drop below fullPriceCents. At least one of the two is set.
-  targetPriceCents Int?
   /// ISO-4217 currency the prices are denominated in.
   currency    String @default("USD")
   /// Operator on/off switch. Inactive rows are never polled and never posted.
@@ -449,16 +445,11 @@ model TrackedListing {
   lastPostedPriceCents Int?
   lastCheckedAt        DateTime?
   lastAvailability     String?
-  lastCheckError       String?
   /// When the bot last POSTED a deal (not stamped under DRY_RUN) — feeds the
   /// per-listing cooldown, restart-proof.
   lastPostedAt         DateTime?
-  /// Provenance of lastPrice: "PAAPI" | "MANUAL".
+  /// Provenance of lastPrice: "PAAPI" | "WEB_VERIFIED" (legacy rows: "MANUAL").
   source               String @default("MANUAL")
-  /// Consecutive poll failures; auto-deactivates the row at the configured cap.
-  consecutiveErrors    Int @default(0)
-  /// Backoff gate: the poll query skips this row until now >= nextCheckAt.
-  nextCheckAt          DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -466,7 +457,6 @@ model TrackedListing {
   dealPosts DealPost[]
 
   @@unique([asin, marketplace])
-  @@index([isActive, armState, nextCheckAt])
 }
 
 /// One deal alert — the audit + publish-queue ledger (analog of BotReply).
@@ -521,8 +511,6 @@ model DealPost {
   replyCount       Int       @default(0)
   quoteCount       Int       @default(0)
   outcomeCheckedAt DateTime?
-  /// Pinterest mirror of this post, once the pinner picks it up.
-  pinterestPin     PinterestPin?
 
   createdAt DateTime @default(now())
 
@@ -530,45 +518,6 @@ model DealPost {
   @@index([status, createdAt])
   @@index([laneKey, postedAt])
   @@index([createdAt])
-}
-
-/// Lifecycle of a Pinterest pin mirrored from a posted deal.
-enum PinterestPinStatus {
-  PENDING
-  POSTING
-  POSTED
-  SKIPPED
-  FAILED
-}
-
-/// Pinterest mirror of a POSTED DealPost: each deal that went out on Bluesky
-/// is also pinned (once) to the bot's Pinterest board. Separate table rather
-/// than columns on DealPost so the Bluesky pipeline stays untouched and the
-/// unique dealPostId is the exactly-once guard.
-model PinterestPin {
-  id         String             @id @default(cuid())
-  dealPostId String             @unique
-  dealPost   DealPost           @relation(fields: [dealPostId], references: [id], onDelete: Cascade)
-  status     PinterestPinStatus @default(PENDING)
-  /// Pinterest board the pin was (or will be) created on.
-  boardId    String?
-  /// Pinterest's pin id once POSTED.
-  pinId      String?
-  /// Frozen pin copy at queue time (title <= 100 chars, description <= 800).
-  title       String
-  description String
-  /// Tracked /r/<id> destination URL (kind "pin"), minted at queue time.
-  link        String
-  /// Amazon-hosted product image the pin renders (Pinterest requires one).
-  imageUrl    String
-  skipReason    String?
-  attemptCount  Int       @default(0)
-  nextAttemptAt DateTime?
-  postedAt      DateTime?
-
-  createdAt DateTime @default(now())
-
-  @@index([status, createdAt])
 }
 
 /// Lifecycle of an RSS-sourced deal candidate. NEW = staged in the ranked

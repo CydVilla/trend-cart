@@ -5,3 +5,4 @@ export * from "./deals";
 export * from "./env";
 export * from "./product-match";
 export * from "./thresholds";
+export * from "./models";

@@ -43,16 +43,13 @@ export const config = {
 
   llm: {
     anthropicApiKey: envString("ANTHROPIC_API_KEY", ""),
-    model: envString("ANTHROPIC_MODEL", "claude-opus-4-8"),
+    model: envString("ANTHROPIC_MODEL", "claude-haiku-4-5"),
     /* Deterministic fake client for pipeline testing without API spend */
     useFake: useFakeLlm,
     /* 50/h clears a discovery burst in ~1 day — at lower caps the July
        insights showed candidates expiring in the eval backlog (81% of all
        reply skips) before the reply loop ever saw them. */
     maxEvalsPerHour: envInt("MAX_LLM_EVALS_PER_HOUR", 50),
-    /* Firehose posts wait this long before evaluation so the engagement
-       snapshot is meaningful; manually injected posts skip the wait. */
-    evalMinPostAgeMinutes: envInt("EVAL_MIN_POST_AGE_MINUTES", 30),
     /* Trending floor: a firehose post must reach this engagement score
        (likes + 3*reposts + 2*replies + 3*quotes) after maturing, or the LLM
        never sees it. Mentions and manual injections are exempt. */
@@ -83,18 +80,27 @@ export const config = {
     minLength: envInt("COMMENTS_MIN_LENGTH", 15),
   },
 
-  /* Pre-publication fact check: replies about to post WITHOUT a human look
-     (autonomous/auto self-approvals) get one LLM call with Anthropic's
-     server-side web_search tool — does the product exist and is it orderable,
-     are the reply's claims right? Fail-safe: any failure or low-confidence
-     verdict demotes the reply to the manual-approval queue instead of
-     auto-posting. Manually approved replies are never checked (the human is
-     the fact-checker there). Cost: ≤1 call + ~1-3 searches per auto-approved
-     reply (~$0.01-0.04 each at the daily reply cap). */
+  /* Pre-publication fact check: every non-operator reply (self-approved or
+     queued for approval) gets one LLM call with Anthropic's server-side
+     web_search tool — does the product exist and is it orderable, are the
+     reply's claims right? Fail-safe: any failure or low-confidence verdict
+     demotes the reply to the manual-approval queue instead of auto-posting.
+     Cost: ≤1 call + ~1-3 searches per reply (~$0.01-0.04 each). Searches are
+     $10/1,000 on every model — after Haiku 5.5 they are most of the bill. */
   factCheck: {
     enabled: envBool("FACTCHECK_ENABLED", true),
-    /* Web searches the checker may run per reply (cost bound). */
+    /* Web searches the checker may run per reply (cost bound). Replies make
+       several claims (product, edition, platform floor), so they keep 3. */
     maxSearches: envInt("FACTCHECK_MAX_SEARCHES", 3),
+    /* Searches per deal CORROBORATION check (existence + orderability of one
+       ASIN). One search finds the listing; prod averaged 2.25 at a cap of 3
+       (Aug–Sep, 552 checks), and the extra searches only re-found it. The
+       strict sale gate, when enabled, still gets maxSearches. */
+    dealMaxSearches: envInt("FACTCHECK_DEAL_MAX_SEARCHES", 1),
+    /* A passing/failing corroboration verdict for an ASIN is reused for this
+       long: the same product resurfaces across overlapping Slickdeals feeds
+       and curator reposts, and "does this listing exist" doesn't change hourly. */
+    dealCacheHours: envInt("FACTCHECK_DEAL_CACHE_HOURS", 6),
     /* Verdict confidence floor: below this, auto-posting demotes to manual. */
     minConfidence: envInt("FACTCHECK_MIN_CONFIDENCE", 60),
     /* Auto-REJECT floor: a verdict that is inaccurate AND at least this
@@ -233,36 +239,14 @@ export const config = {
     globalReplyCooldownMinutes: envInt("GLOBAL_REPLY_COOLDOWN_MINUTES", 90),
   },
 
-  /* Pinterest mirror: every POSTED deal is also pinned (once) to the bot's
-     board. Ships dark until the app's OAuth refresh token exists. Under
-     Pinterest trial-tier access pins are private to the account — that is the
-     intended staging mode; standard access makes the same pins public. */
-  pinterest: {
-    appId: envString("PINTEREST_APP_ID", ""),
-    appSecret: envString("PINTEREST_APP_SECRET", ""),
-    refreshToken: envString("PINTEREST_REFRESH_TOKEN", ""),
-    boardName: envString("PINTEREST_BOARD_NAME", "Amazon Deals & Finds"),
-    /* Pins/day cap. Pinterest tolerates far more, but the mirror should never
-       outpace the deal pipeline that feeds it. */
-    maxPinsPerDay: envInt("PINTEREST_MAX_PINS_PER_DAY", 10),
-  },
-
   /* Deal tracker: standalone deal-alert posts to the bot's own profile.
      Whole feature ships dark behind DEALS_ENABLED; DRY_RUN still gates all
      posting. Caps are deliberately tighter than replies — a standalone promo
      post on the bot's profile is more spam-prone than a contextual reply. */
   deals: {
     enabled: envBool("DEALS_ENABLED", false),
-    checkIntervalMs: envInt("DEAL_CHECK_INTERVAL_MS", 60_000),
-    /* Minimum gap before the same listing is re-polled. */
-    listingRecheckMs: envInt("DEAL_LISTING_RECHECK_MS", 900_000),
-    /* Soft daily PA-API cap, well under Amazon's 8640/day hard limit. */
+    /* Soft daily Creators API call cap. */
     maxApiCallsPerDay: envInt("DEAL_MAX_API_CALLS_PER_DAY", 4_000),
-    /* A listing auto-deactivates after this many consecutive poll failures. */
-    maxConsecutiveErrors: envInt("DEAL_MAX_CONSECUTIVE_ERRORS", 5),
-    listingErrorBackoffHours: envInt("DEAL_LISTING_ERROR_BACKOFF_HOURS", 6),
-    /* Re-arm hysteresis: re-arm only when price > target*(1+pct/100). */
-    rearmBufferPct: envInt("DEAL_REARM_BUFFER_PCT", 3),
     /* Minimum gap between posts for the SAME listing (restart-proof). */
     perListingCooldownHours: envInt("DEAL_PER_LISTING_COOLDOWN_HOURS", 168),
     /* Global caps on standalone deal posts. */
@@ -277,9 +261,9 @@ export const config = {
        "classic" = the original lead-in format on the fixed anchor. */
     postStyle: parseDealPostStyle(envString("DEAL_POST_STYLE", "wario")),
 
-    /* Deal-feed discovery: PA-API SearchItems polls each active DealFeed for
-       products currently on sale (Wario64-style, but approval-gated unless
-       DEAL_FEED_AUTOPOST=true). Needs DEALS_ENABLED + PA-API keys. */
+    /* Deal-feed discovery: Creators API searchItems polls each active DealFeed
+       for products currently on sale (approval-gated unless
+       DEAL_FEED_AUTOPOST=true). Needs DEALS_ENABLED + Creators API credentials. */
     discovery: {
       intervalMinutes: envInt("DEAL_DISCOVERY_INTERVAL_MINUTES", 30),
       /* Feeds polled per tick (each = 1 SearchItems call/page); the rest wait
@@ -292,16 +276,16 @@ export const config = {
          the price snapshot goes stale. DRY_RUN overrides either way. */
       autopost: envBool("DEAL_FEED_AUTOPOST", false),
       /* Daily budget for DISCOVERED posts only — keep it under
-         DEAL_MAX_POSTS_PER_DAY so feed finds can't starve watchlist alerts. */
+         DEAL_MAX_POSTS_PER_DAY so feed finds can't starve the RSS channel. */
       maxPostsPerDay: envInt("DEAL_FEED_MAX_POSTS_PER_DAY", 2),
     },
 
-    /* RSS deal channel: the no-PA-API Wario64 bridge, fully AUTOMATED. Polls
+    /* RSS deal channel: the no-Amazon-API Wario64 bridge, fully AUTOMATED. Polls
        deal RSS feeds (Deals page → Deal sources), lane-gates the items,
        corroborates each survivor with a web-search fact check, and self-posts
        PRICE-FREE copy ("spotted via Slickdeals") — no third-party price is
        ever advertised, honoring ADR-0013's attestation rule without a human
-       in the loop. Needs no Amazon keys; PA-API feeds replace it with real
+       in the loop. Needs no Amazon keys; Creators API feeds replace it with real
        attested prices once credentials exist. */
     suggestions: {
       enabled: envBool("DEAL_SUGGESTIONS_ENABLED", true),
@@ -309,7 +293,7 @@ export const config = {
          records what it WOULD post (audit rows), nothing publishes. */
       autopost: envBool("DEAL_RSS_AUTOPOST", false),
       /* Daily budget for RSS-sourced posts — keep under DEAL_MAX_POSTS_PER_DAY
-         so RSS finds can't starve future PA-API feed finds. */
+         so RSS finds can't starve future Creators API feed finds. */
       maxPostsPerDay: envInt("DEAL_RSS_MAX_POSTS_PER_DAY", 2),
       intervalMinutes: envInt("DEAL_SUGGEST_INTERVAL_MINUTES", 30),
       sourcesPerTick: envInt("DEAL_SUGGEST_SOURCES_PER_TICK", 2),
@@ -363,7 +347,7 @@ export const config = {
       autopost: envBool("DEAL_CURATED_AUTOPOST", false),
       intervalMinutes: envInt("DEAL_CURATED_INTERVAL_MINUTES", 3),
       maxPostsPerDay: envInt("DEAL_CURATED_MAX_POSTS_PER_DAY", 12),
-      /* Gap between curated posts (independent of the RSS/PA-API gap). */
+      /* Gap between curated posts (independent of the RSS/Creators API gap). */
       cooldownMinutes: envInt("DEAL_CURATED_COOLDOWN_MINUTES", 20),
       /* A curator post older than this is not evidence of a live deal. */
       maxSourceAgeMinutes: envInt("DEAL_CURATED_MAX_AGE_MINUTES", 120),
@@ -376,8 +360,6 @@ export const config = {
     },
   },
 
-  /* Amazon Product Advertising API 5.0 credentials. When either key is
-     absent the deal-check loop stands down and only the manual path runs. */
   /* Amazon Creators API — successor to PA-API 5.0, whose endpoint was switched
      off 2026-05-15. Credentials are a Credential ID/Secret pair from
      affiliate-program.amazon.com/creatorsapi (NOT AWS keys); `version` picks

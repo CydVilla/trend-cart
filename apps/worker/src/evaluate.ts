@@ -187,10 +187,10 @@ async function recordFailedEvaluation(postId: string, message: string): Promise<
 }
 
 /**
- * One evaluation pass: pick the highest-engagement matured candidates,
+ * One evaluation pass: pick the highest-engagement trending candidates,
  * enrich with the author's public profile, classify, gate, persist.
- * Firehose posts wait EVAL_MIN_POST_AGE_MINUTES so the engagement snapshot
- * means something; manually injected posts evaluate immediately.
+ * Search-discovered posts arrive with real engagement counts; mentions and
+ * manually injected posts evaluate immediately.
  */
 export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats): Promise<void> {
   if (Date.now() < backoffUntil) return;
@@ -211,7 +211,6 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
   });
   const budget = config.llm.maxEvalsPerHour - recentEvals;
 
-  const maturedBefore = new Date(now - config.llm.evalMinPostAgeMinutes * 60_000);
   const baseWhere = {
     safetyStatus: SafetyStatus.PENDING,
     deadAt: null,
@@ -285,17 +284,10 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
           where: {
             ...baseWhere,
             indexedAt: { gte: runwayCutoff },
-            OR: [
-              // Search-discovered posts arrive already trending with real
-              // counts — no maturation needed, floor re-checked.
-              { source: "SEARCH", engagementScore: { gte: lowestFloor } },
-              // Legacy firehose rows keep the original mature+floor rules.
-              {
-                source: "FIREHOSE",
-                indexedAt: { lte: maturedBefore },
-                engagementScore: { gte: lowestFloor },
-              },
-            ],
+            // Search-discovered posts arrive already trending with real
+            // counts — no maturation needed, floor re-checked.
+            source: "SEARCH",
+            engagementScore: { gte: lowestFloor },
           },
           orderBy: { engagementScore: "desc" },
           take: trendingTake,
@@ -399,13 +391,13 @@ export async function evaluateDueCandidates(llm: LlmClient, stats: EvaluateStats
       continue;
     }
 
-    // Low-signal gate: a firehose STATEMENT (no question / no ask) must show
+    // Low-signal gate: a trending STATEMENT (no question / no ask) must show
     // outsized engagement to justify LLM spend; posts actually asking for
     // recommendations evaluate at the normal floor. Solicited and injected
     // posts never hit this.
     const effectiveFloor = floorFor(post.detectedCategories);
     if (
-      (post.source === "FIREHOSE" || post.source === "SEARCH") &&
+      post.source === "SEARCH" &&
       !INTENT_MARKERS.test(post.text) &&
       post.engagementScore < effectiveFloor * config.llm.lowSignalMultiplier
     ) {

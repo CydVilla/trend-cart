@@ -34,8 +34,7 @@ export type MeterKey =
   | "evalsLastHour"
   | "dealPostsLastDay"
   | "curatedPostsLastDay"
-  | "banterLastDay"
-  | "pinsLastDay";
+  | "banterLastDay";
 
 export type ThresholdEntry = {
   /** The env var that sets it — the thing you'd change to move the line. */

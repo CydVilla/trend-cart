@@ -13,6 +13,7 @@ import {
   amazonSearchUrl,
   canonicalCuratorUrl,
   isAmazonHost,
+  modelCapabilities,
   parseCents,
   searchAnchor,
   withAffiliateTag,
@@ -131,9 +132,10 @@ export async function refineReply(formData: FormData): Promise<void> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 30_000 });
   const response = await client.messages.parse({
     model,
-    max_tokens: 512,
+    // Thinking-by-default models spend from this cap before the answer does.
+    max_tokens: modelCapabilities(model).thinksByDefault ? 2048 : 512,
     output_config: {
-      ...(model.includes("haiku") ? {} : { effort: "low" as const }),
+      ...(modelCapabilities(model).effort ? { effort: "low" as const } : {}),
       format: zodOutputFormat(RefinementSchema),
     },
     system:

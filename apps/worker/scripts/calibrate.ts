@@ -16,6 +16,8 @@
  * Run: pnpm --filter @trendcart/worker calibrate
  * Env: DATABASE_URL, ANTHROPIC_API_KEY (required); ANTHROPIC_MODEL,
  *      CALIBRATE_MAX_PER_CLASS (default 20).
+ *   --no-save  report only; don't overwrite the stored agreement baseline
+ *              (compare a candidate model without moving the weekly trend).
  */
 import { computeFunnel, prisma, type Prisma } from "@trendcart/db";
 import type { CategoryContext } from "@trendcart/shared";
@@ -187,7 +189,9 @@ async function main(): Promise<void> {
 
   // Persist the agreement number only when the run actually measured it — an
   // all-errors run must not overwrite the trend baseline with a bogus 0%.
-  if (reliable) {
+  // --no-save: an A/B run (e.g. ANTHROPIC_MODEL=<candidate>) that must leave
+  // the weekly baseline alone.
+  if (reliable && !process.argv.includes("--no-save")) {
     await prisma.botMemory.upsert({
       where: { id: "calibration" },
       create: {

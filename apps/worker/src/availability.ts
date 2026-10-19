@@ -19,16 +19,6 @@ import { createCatalogClient, CatalogAuthError, type CatalogClient } from "./cre
 let client: CatalogClient | null | undefined;
 let authDead = false;
 
-/**
- * Test seam: replace/reset the lazily created client.
- * @public — kept ahead of the availability tests that will use it; the tag
- * keeps Knip (repo-janitor's weekly sweep) from flagging it as unused.
- */
-export function setCatalogClientForTest(next: CatalogClient | null | undefined): void {
-  client = next;
-  authDead = false;
-}
-
 export type Availability = "orderable" | "unavailable" | "unknown";
 
 export async function checkSearchAvailability(query: string): Promise<Availability> {
