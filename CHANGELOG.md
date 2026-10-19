@@ -3,6 +3,43 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-10-19 — Post-hiatus audit: cleanup, cheaper fact checks, more curators
+
+### Added
+- **Three more curator accounts** (ADR-0017): Nintendeal, preternia, and
+  Frack's Sonic Deals, seeded by migration `more_curator_sources`. Chosen by
+  replaying each account's last 40 Amazon posts through the curator pipeline
+  (27/29, 13/16, 3/5 relayable). They share the CURATED budget; the per-ASIN
+  cooldown posts a deal once whichever curator finds it first.
+- **`queue:deal` CLI** for hand-written deal posts (pre-orders, restocks).
+  It queues MANUAL DealPost rows that the deal poster publishes, so manual
+  posts get click tracking, exactly-once posting, and the per-ASIN cooldown.
+  Replaces two one-off scripts that posted straight to Bluesky.
+- **`calibrate --no-save`** for A/B model runs that mustn't move the weekly
+  baseline. First result: Haiku 5.5 55–57% agreement vs Haiku 4.5's 63% (no
+  false replies, but 17–18 false skips), so classification stays on 4.5.
+
+### Changed
+- **Deal fact checks spend one web search, restricted to amazon.com**
+  (`FACTCHECK_DEAL_MAX_SEARCHES`, was 3 — prod averaged 2.25), and reuse an
+  ASIN's verdict for `FACTCHECK_DEAL_CACHE_HOURS` (6). The corroboration
+  prompt now says the evidence-age window covers only the advisory sale
+  claim, not orderability. Reply fact checks keep 3 searches.
+- **LLM params come from `modelCapabilities()`** (effort, temperature,
+  web-search variant, thinking headroom) instead of `includes("haiku")`,
+  which would have 400'd on Haiku 5.5. Pricing table adds the 5.5 models.
+- The worker's default `ANTHROPIC_MODEL` is Haiku 4.5 (was Opus 4.8).
+- Calibration keeps one open issue (closes last week's) and reads its model
+  from the `ANTHROPIC_MODEL` repo variable.
+
+### Removed
+- **Pinterest mirror**: never configured on prod, 0 pins in 2.5 months.
+  Migration `drop_pinterest_and_watchlist_poller` drops `PinterestPin` and
+  four empty watchlist-poller columns on `TrackedListing`.
+- Dead config: `APOLOGY_*`, the watchlist poller keys,
+  `EVAL_MIN_POST_AGE_MINUTES` and the retired FIREHOSE eval branch.
+- Stale PA-API instructions in the README, Deals page, and comments.
+
 ## 2026-09-22 — Curator accounts: Wario64 deals, our tag, no tokens needed
 
 ### Added
