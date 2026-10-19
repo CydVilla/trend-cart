@@ -23,6 +23,12 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   of the last two revisions, each with 1 false reply; Haiku 4.5 63% → 70%,
   false replies unchanged at 4.
 
+### Fixed
+- **Operator-note posts were told to score 80+** while the same 85 gate
+  applies to them (evaluate.ts runs `applyGates` on every classification),
+  so a note-backed post scored 80–84 was silently dropped. The note
+  instruction now uses the interpolated gate.
+
 ## 2026-10-19 (later) — Revenue by channel; worker survives credit and session loss
 
 ### Added
