@@ -1,6 +1,6 @@
 /**
  * Public privacy policy. Required by third-party developer platforms
- * (e.g. Pinterest app registration) and honest on its own terms: the public
+ * (app registrations) and honest on its own terms: the public
  * surface collects almost nothing, and what it does collect is spelled out.
  */
 export const metadata = {
@@ -22,7 +22,7 @@ export default function PrivacyPage() {
           <h2 className="text-lg font-semibold">What TrendCart is</h2>
           <p className="mt-1">
             TrendCart is a single-operator, automated product-recommendation account. It posts
-            product links on social platforms (such as Bluesky and Pinterest) and serves the
+            product links on social platforms (such as Bluesky) and serves the
             short link redirects behind them. It has no user accounts, no sign-up, and no
             third-party users.
           </p>

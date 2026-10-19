@@ -14,11 +14,10 @@
  *   dealPostsLastDay     apps/worker/src/deals/poster.ts (non-MANUAL, non-CURATED, POSTED)
  *   curatedPostsLastDay  apps/worker/src/deals/poster.ts (CURATED, POSTED)
  *   banterLastDay        apps/worker/src/banter.ts
- *   pinsLastDay          apps/worker/src/pinterest/poster.ts
  */
 
 import type { MeterKey } from "@trendcart/shared";
-import { prisma, DealPostStatus, DealSource, PinterestPinStatus, PostSource, ReplyStatus } from "./index";
+import { prisma, DealPostStatus, DealSource, PostSource, ReplyStatus } from "./index";
 
 /** Statuses that count as "the bot engaged" — mirrors reply.ts ACTIVE_STATUSES. */
 const ACTIVE_REPLY_STATUSES = [
@@ -86,9 +85,6 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
       post: { source: PostSource.BANTER },
     },
   });
-  const pinsLastDay = await prisma.pinterestPin.count({
-    where: { status: PinterestPinStatus.POSTED, postedAt: { gte: new Date(now - DAY_MS) } },
-  });
 
   return {
     repliesLastHour,
@@ -97,7 +93,6 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
     dealPostsLastDay,
     curatedPostsLastDay,
     banterLastDay,
-    pinsLastDay,
   };
 }
 

@@ -297,16 +297,6 @@ export function buildSettingsSnapshot(): SettingsSnapshot {
       inactive: !config.banter.enabled,
       note: "silence beats cringe",
     },
-    {
-      key: "PINTEREST_MAX_PINS_PER_DAY",
-      label: "Pins per day",
-      value: config.pinterest.maxPinsPerDay,
-      kind: "cap",
-      group: "Other lanes",
-      meter: "pinsLastDay",
-      inactive: !config.pinterest.refreshToken,
-      note: "$0 in LLM tokens — pure string work",
-    },
   ];
 
   return {
