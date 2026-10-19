@@ -3,7 +3,7 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
-## Unreleased — Revenue by channel
+## 2026-10-19 (later) — Revenue by channel; worker survives credit and session loss
 
 ### Added
 - **Per-channel tracking IDs**: optional `AMAZON_TAG_REPLY`,
@@ -18,6 +18,19 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   ordered items, sales, ad fees and conversion (ordered items / human
   clicks) per tracking ID and per ASIN, joined to our deal posts and links.
   Re-uploading a range replaces it.
+
+### Fixed
+- **Banter, reflection and insights respect the billing gate.** They built
+  their own Anthropic clients and fired a doomed request every tick through
+  the Sep 20 – Oct 19 credit outage. They now skip while the gate is armed,
+  arm it on a billing error, and build params from `modelCapabilities`.
+- **One shared Bluesky session** (`bluesky-session.ts`) replaces six
+  per-loop logins: concurrent callers share a login, a dropped or expired
+  session logs in again (previously the bot went deaf until restart), and
+  the health backoff is respected.
+- `isPermanentPostError` classifies the error, not its message: an
+  `InvalidToken` matched `/invalid/` and would have permanently failed every
+  reply a dead session touched.
 
 ## 2026-10-19 — Post-hiatus audit: cleanup, cheaper fact checks, more curators
 
