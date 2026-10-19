@@ -13,6 +13,7 @@ import {
   cleanDealTitle,
   CURATOR_URL_PREFIX,
   curatorProfileHandle,
+  dealChannel,
   shortenAmazonTitle,
   validateDealText,
   withAffiliateTag,
@@ -1142,7 +1143,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
 
       const linkUrl = withAffiliateTag(
         canonicalAmazonUrl(candidate.asin, candidate.marketplace),
-        config.site.amazonAssociateTag,
+        config.site.affiliateTags[dealChannel(channel.dealSource, null)],
       );
       const composed = curatedMeta
         ? await composeCurated(candidate.source.name, candidate.asin, meta.lane, curatedMeta, linkUrl)

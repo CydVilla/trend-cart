@@ -10,6 +10,7 @@ import {
 } from "@trendcart/db";
 import {
   PAAPI_SEARCH_INDEXES,
+  affiliateTagFor,
   amazonSearchUrl,
   canonicalCuratorUrl,
   isAmazonHost,
@@ -106,7 +107,9 @@ export async function refineReply(formData: FormData): Promise<void> {
   if (!reply || reply.status !== ReplyStatus.PENDING_APPROVAL) return;
 
   const model = process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5";
-  const associateTag = process.env.AMAZON_ASSOCIATE_TAG ?? "";
+  // The reply channel's tracking ID (falls back to AMAZON_ASSOCIATE_TAG) — a
+  // rebuilt link must report under the same ID the worker would have used.
+  const associateTag = affiliateTagFor("reply");
   // An operator-pasted link is authoritative — never infer over it.
   const linkIsPinned = Boolean(reply.post.operatorLinkUrl);
   // Rows drafted before linkQuery existed fall back to the evaluation that
@@ -336,7 +339,7 @@ export async function injectPost(formData: FormData): Promise<void> {
   // Operator link: strict Amazon allowlist, and NEVER accepted untagged —
   // if the tag env is missing, the link is dropped rather than posted bare.
   const rawLink = str(formData, "link");
-  const tag = process.env.AMAZON_ASSOCIATE_TAG ?? "";
+  const tag = affiliateTagFor("reply");
   let operatorLinkUrl: string | null = null;
   if (rawLink && tag) {
     try {

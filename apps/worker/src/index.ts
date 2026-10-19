@@ -56,6 +56,10 @@ async function main(): Promise<void> {
   console.log(`  discovery:        Bluesky search, every ${config.ingest.discoverIntervalMinutes}m (top posts, last 24h)`);
   console.log(`  trending floor:   engagement >= ${config.llm.minEngagementScore}`);
   console.log(`  affiliate tag:    ${config.site.amazonAssociateTag || "(unset)"}`);
+  // Only channels with their own tracking ID; the rest use the base tag.
+  for (const [channel, tag] of Object.entries(config.site.affiliateTags)) {
+    if (tag && tag !== config.site.amazonAssociateTag) console.log(`    ${channel.padEnd(14)}  ${tag}`);
+  }
 
   await prisma.$queryRaw`SELECT 1`;
 

@@ -1,5 +1,6 @@
 import { prisma, computeFunnel } from "@trendcart/db";
 import { Badge, SectionHeading, formatDate } from "../ui";
+import { RevenueSection } from "./revenue";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,12 @@ type Recommendation = { title: string; detail: string; impact: "high" | "medium"
 const impactTone = (impact: string): "red" | "amber" | "zinc" =>
   impact === "high" ? "red" : impact === "medium" ? "amber" : "zinc";
 
-export default async function InsightsPage() {
+export default async function InsightsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
   const [funnel, report] = await Promise.all([
     computeFunnel(prisma, { floor: FLOOR }),
     prisma.botMemory.findUnique({ where: { id: "insights" } }),
@@ -81,6 +87,9 @@ export default async function InsightsPage() {
           funnel below is current in the meantime.
         </div>
       )}
+
+      {/* Sales: uploaded Associates reports per tracking ID / ASIN */}
+      <RevenueSection outcome={params} />
 
       {/* Funnel */}
       <SectionHeading>Funnel</SectionHeading>

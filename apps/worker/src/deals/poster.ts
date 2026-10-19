@@ -3,10 +3,12 @@ import { prisma, DealPostStatus, DealSource, type DealPost, type TrackedListing 
 import {
   composeDealPost,
   DEAL_ANCHOR,
+  dealChannel,
   extractAsin,
   formatMoney,
   isAmazonHost,
   validateDealText,
+  withAffiliateTag,
 } from "@trendcart/shared";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "../bluesky-health.js";
 import { config } from "../config.js";
@@ -192,6 +194,16 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     });
     const listing: TrackedListing = deal.listing;
 
+    // The channel's tracking ID is applied HERE, at publish, not trusted from
+    // the queue-time snapshot: rows queued before a channel got its own
+    // AMAZON_TAG_* var (or by a script that still uses the base tag) would
+    // otherwise post under the wrong ID and blur the per-channel report.
+    // withAffiliateTag replaces any existing tag, so this is idempotent.
+    const linkUrl = withAffiliateTag(
+      deal.linkUrl,
+      config.site.affiliateTags[dealChannel(deal.source, deal.feedId)],
+    );
+
     // RSS-sourced posts (DISCOVERED with no feedId) and curator posts
     // (CURATED) are the PRICE-FREE channels: no price is advertised, so price
     // freshness doesn't apply and no priced embed may ever render
@@ -244,7 +256,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         wasPriceCents: deal.wasPriceCents,
         currency: deal.currency,
         priceAsOf: deal.priceAsOf,
-        linkUrl: deal.linkUrl,
+        linkUrl: linkUrl,
         maxLength: config.deals.postMaxLength,
         style: config.deals.postStyle,
       });
@@ -255,17 +267,17 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       text = composed.text;
       anchor = composed.anchor;
     }
-    const validation = validateDealText(text, deal.linkUrl, config.deals.postMaxLength, anchor);
+    const validation = validateDealText(text, linkUrl, config.deals.postMaxLength, anchor);
     if (!validation.ok) {
       await terminal(deal.id, DealPostStatus.FAILED, `validation failed: ${validation.reason}`);
       return;
     }
     try {
-      if (!isAmazonHost(new URL(deal.linkUrl).hostname)) {
+      if (!isAmazonHost(new URL(linkUrl).hostname)) {
         await terminal(deal.id, DealPostStatus.FAILED, "link is not an Amazon URL");
         return;
       }
-      if (rssAutonomous && extractAsin(deal.linkUrl) !== listing.asin) {
+      if (rssAutonomous && extractAsin(linkUrl) !== listing.asin) {
         await terminal(deal.id, DealPostStatus.FAILED, "affiliate link ASIN does not match listing");
         return;
       }
@@ -284,7 +296,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     }
 
     try {
-      const tracked = await createTrackedLink(deal.linkUrl, "deal", deal.id);
+      const tracked = await createTrackedLink(linkUrl, "deal", deal.id);
       const facets = buildFacets(text, tracked.url, anchor);
       const thumb = priceFree ? null : await uploadThumb(activeAgent, listing.imageUrl);
       const wasClause =
@@ -295,7 +307,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         ? {
             $type: "app.bsky.embed.external",
             external: {
-              uri: deal.linkUrl,
+              uri: linkUrl,
               title: listing.title,
               description: `Now ${formatMoney(deal.salePriceCents, deal.currency)}${wasClause} on Amazon.`,
               thumb,
@@ -312,7 +324,8 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       await prisma.$transaction([
         prisma.dealPost.update({
           where: { id: deal.id },
-          data: { status: DealPostStatus.POSTED, postUri: result.uri, postedAt: new Date() },
+          // linkUrl too, so the ledger records the tag that actually went out.
+          data: { status: DealPostStatus.POSTED, postUri: result.uri, postedAt: new Date(), linkUrl },
         }),
         prisma.trackedListing.update({
           where: { id: listing.id },
