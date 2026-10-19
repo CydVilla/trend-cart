@@ -3,6 +3,26 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — Classifier prompt calibrated for Haiku 5.5
+
+### Changed
+- **Classify prompt states the real intent gate.** Rule 6 still said
+  `productIntentScore >= 60` while `applyGates` cuts at
+  `MIN_PRODUCT_INTENT_SCORE` (85). Haiku 4.5 happens to answer "yes" with
+  85; Haiku 5.5 answers "yes" with 65–82 and every one was dropped. The
+  prompt now interpolates the gate and anchors the scale to it.
+- Clarified, without loosening the hard rules: self-promo means the author
+  makes/sells the product (news and publications covering someone else's
+  product are not ads); a joke *about* a product is enthusiasm, a mishap
+  stays incidental; an author owning/playing the product is never a skip
+  reason; an open "recs welcome" counts as asking; mature-genre mainstream
+  products aren't "adult content". Tightened: a legacy title's modern
+  edition must be the same title, and gadgets for playing legacy media
+  (GB Operator, flash carts) fall under the platform floor.
+- Calibration (no-save, 2026-10-19): Haiku 5.5 55–57% → 68% on all 5 runs
+  of the last two revisions, each with 1 false reply; Haiku 4.5 63% → 70%,
+  false replies unchanged at 4.
+
 ## 2026-10-19 (later) — Revenue by channel; worker survives credit and session loss
 
 ### Added
