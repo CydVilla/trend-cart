@@ -3,6 +3,37 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## 2026-10-19 (evening) — Classifier calibrated for Haiku 5.5; prod switches to it
+
+### Changed
+- **Classify prompt states the real intent gate.** Rule 6 still said
+  `productIntentScore >= 60` while `applyGates` cuts at
+  `MIN_PRODUCT_INTENT_SCORE` (85). Haiku 4.5 happens to answer "yes" with
+  85; Haiku 5.5 answers "yes" with 65–82 and every one was dropped. The
+  prompt now interpolates the gate and anchors the scale to it.
+- Clarified, without loosening the hard rules: self-promo means the author
+  makes/sells the product (news and publications covering someone else's
+  product are not ads); a joke *about* a product is enthusiasm, a mishap
+  stays incidental; an author owning/playing the product is never a skip
+  reason; an open "recs welcome" counts as asking; mature-genre mainstream
+  products aren't "adult content". Tightened: a legacy title's modern
+  edition must be the same title, and gadgets for playing legacy media
+  (GB Operator, flash carts) fall under the platform floor.
+- Calibration (no-save, 2026-10-19): Haiku 5.5 55–57% → 68% on all 5 runs
+  of the last two revisions, each with 1 false reply; Haiku 4.5 63% → 70%,
+  false replies unchanged at 4.
+  Independent re-run before deploy: Haiku 5.5 68% (1 false reply, 12 false
+  skips), Haiku 4.5 73% (4 false replies, 7 false skips).
+- **Prod `ANTHROPIC_MODEL` → `claude-haiku-5-5`** (and the calibration repo
+  variable). Chosen for precision — one wrong reply in 40 vs four — at about
+  a tenth of the token price. Revert = set the var back to `claude-haiku-4-5`.
+
+### Fixed
+- **Operator-note posts were told to score 80+** while the same 85 gate
+  applies to them (evaluate.ts runs `applyGates` on every classification),
+  so a note-backed post scored 80–84 was silently dropped. The note
+  instruction now uses the interpolated gate.
+
 ## 2026-10-19 (later) — Revenue by channel; worker survives credit and session loss
 
 ### Added
