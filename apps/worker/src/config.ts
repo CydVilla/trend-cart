@@ -80,18 +80,27 @@ export const config = {
     minLength: envInt("COMMENTS_MIN_LENGTH", 15),
   },
 
-  /* Pre-publication fact check: replies about to post WITHOUT a human look
-     (autonomous/auto self-approvals) get one LLM call with Anthropic's
-     server-side web_search tool — does the product exist and is it orderable,
-     are the reply's claims right? Fail-safe: any failure or low-confidence
-     verdict demotes the reply to the manual-approval queue instead of
-     auto-posting. Manually approved replies are never checked (the human is
-     the fact-checker there). Cost: ≤1 call + ~1-3 searches per auto-approved
-     reply (~$0.01-0.04 each at the daily reply cap). */
+  /* Pre-publication fact check: every non-operator reply (self-approved or
+     queued for approval) gets one LLM call with Anthropic's server-side
+     web_search tool — does the product exist and is it orderable, are the
+     reply's claims right? Fail-safe: any failure or low-confidence verdict
+     demotes the reply to the manual-approval queue instead of auto-posting.
+     Cost: ≤1 call + ~1-3 searches per reply (~$0.01-0.04 each). Searches are
+     $10/1,000 on every model — after Haiku 5.5 they are most of the bill. */
   factCheck: {
     enabled: envBool("FACTCHECK_ENABLED", true),
-    /* Web searches the checker may run per reply (cost bound). */
+    /* Web searches the checker may run per reply (cost bound). Replies make
+       several claims (product, edition, platform floor), so they keep 3. */
     maxSearches: envInt("FACTCHECK_MAX_SEARCHES", 3),
+    /* Searches per deal CORROBORATION check (existence + orderability of one
+       ASIN). One search finds the listing; prod averaged 2.25 at a cap of 3
+       (Aug–Sep, 552 checks), and the extra searches only re-found it. The
+       strict sale gate, when enabled, still gets maxSearches. */
+    dealMaxSearches: envInt("FACTCHECK_DEAL_MAX_SEARCHES", 1),
+    /* A passing/failing corroboration verdict for an ASIN is reused for this
+       long: the same product resurfaces across overlapping Slickdeals feeds
+       and curator reposts, and "does this listing exist" doesn't change hourly. */
+    dealCacheHours: envInt("FACTCHECK_DEAL_CACHE_HOURS", 6),
     /* Verdict confidence floor: below this, auto-posting demotes to manual. */
     minConfidence: envInt("FACTCHECK_MIN_CONFIDENCE", 60),
     /* Auto-REJECT floor: a verdict that is inaccurate AND at least this
