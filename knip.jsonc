@@ -10,7 +10,8 @@
   "workspaces": {
     // scripts/*.ts are operator CLIs: calibrate + export-training-data run
     // via package.json scripts, threshold-sweep is a manual analysis CLI,
-    // post-intro is rerunnable to update the pinned profile intro.
+    // post-intro is rerunnable to update the pinned profile intro, queue-deal
+    // is the manual deal-post CLI.
     "apps/worker": {
       "entry": ["src/**/*.test.ts", "scripts/*.ts"]
     },

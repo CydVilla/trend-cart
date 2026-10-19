@@ -201,8 +201,15 @@ Two automated paths feed the same exactly-once poster:
   `DEAL_CURATED_COOLDOWN_MINUTES`). Works with zero LLM credit (keyword lanes,
   template copy, the curator's fresh post as evidence); with credit it adds the
   lane judge, a web-search check, and LLM-written copy automatically.
+- **Manual posts** (pre-orders, restocks, anything spotted by hand):
+  `pnpm --filter @trendcart/worker queue:deal --file deals.json --gap 15`
+  (or `--url … --text "… on Amazon #ad"` for one; `--dry` to preview; see
+  `apps/worker/scripts/deals.example.json`). It queues MANUAL rows that the
+  worker's deal poster publishes, so they get click tracking, exactly-once
+  posting, and the per-ASIN cooldown. Copy that states a price is refused
+  unless `--allow-price`; prices move.
 
-PA-API needs an approved Associate account (3 qualifying sales in 180 days).
+The Creators API needs 10 qualifying sales in the trailing 30 days.
 The whole feature ships dark behind `DEALS_ENABLED`; `DRY_RUN` still gates all
 posting. Caps default deliberately tighter than replies (3 posts/day, 7-day
 per-listing cooldown, 60-min global gap, 1-hour price freshness) — see
