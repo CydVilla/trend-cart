@@ -417,7 +417,7 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
         kind: "product",
         url: withAffiliateTag(
           canonicalAmazonUrl(offer.asin, config.creatorsApi.marketplace),
-          config.site.amazonAssociateTag,
+          config.site.affiliateTags.reply,
         ),
         anchor: searchAnchor(evaluation.recommendedSearchQuery),
         query: evaluation.recommendedSearchQuery,
@@ -432,7 +432,7 @@ async function chooseLink(evaluation: CandidateEvaluation, post: Post): Promise<
     if (availability !== "unavailable") {
       return {
         kind: "search",
-        url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.amazonAssociateTag),
+        url: amazonSearchUrl(evaluation.recommendedSearchQuery, config.site.affiliateTags.reply),
         anchor: searchAnchor(evaluation.recommendedSearchQuery),
         query: evaluation.recommendedSearchQuery,
       };

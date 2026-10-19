@@ -1,7 +1,14 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { config as loadEnv } from "dotenv";
-import { envBool, envInt, envString, parseDealPostStyle, requireEnv } from "@trendcart/shared";
+import {
+  envBool,
+  envInt,
+  envString,
+  parseDealPostStyle,
+  requireEnv,
+  resolveAffiliateTags,
+} from "@trendcart/shared";
 
 // Load the repo-root .env whether we're run from the repo root or apps/worker.
 for (const candidate of [
@@ -119,7 +126,14 @@ export const config = {
   },
 
   site: {
+    /* Base tracking ID. Gates whether links are minted at all; the tag a link
+       actually carries comes from affiliateTags below. */
     amazonAssociateTag: envString("AMAZON_ASSOCIATE_TAG", ""),
+    /* Per-channel tracking IDs (AMAZON_TAG_REPLY, AMAZON_TAG_DEAL_RSS, …),
+       each falling back to AMAZON_ASSOCIATE_TAG. Amazon only reports sales
+       per tracking ID, so this split is what lets the Insights page say which
+       channel converts. See packages/shared/src/affiliate-tags.ts. */
+    affiliateTags: resolveAffiliateTags(),
   },
 
   /* Click tracking: route posted affiliate links through a first-party

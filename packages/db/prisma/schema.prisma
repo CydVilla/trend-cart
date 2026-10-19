@@ -645,3 +645,62 @@ model DealFeed {
 
   @@index([isActive, lastRunAt])
 }
+
+/// Which Associates Central report a row came from. ORDERS = what was bought
+/// (by order date); EARNINGS = what shipped and paid (by ship date, with the
+/// commission). They overlap but never sum: an order shows up in both.
+enum AssociatesReportKind {
+  ORDERS
+  EARNINGS
+}
+
+/// One per-day, per-tracking-ID, per-ASIN line from an uploaded Amazon
+/// Associates report (Insights page). Amazon has no per-click or per-post
+/// attribution and no API until Creators API access, so these hand-uploaded
+/// CSVs are the only sales data there is; the tracking ID (one per channel,
+/// AMAZON_TAG_*) is what ties a sale back to a channel, and the ASIN to the
+/// TrackedLink / DealPost that promoted it. Re-uploading a range REPLACES its
+/// rows (per kind and tracking ID), so overlapping downloads never double count.
+model AssociatesReportRow {
+  id         String               @id @default(cuid())
+  kind       AssociatesReportKind
+  /// Amazon's calendar day (US Pacific): order date or ship date by kind.
+  day        DateTime             @db.Date
+  trackingId String
+  asin       String
+  title      String
+  category   String?
+  /// ORDERS: items ordered. EARNINGS: items shipped.
+  items      Int
+  /// EARNINGS only: items returned.
+  returns    Int                  @default(0)
+  /// ORDERS: price × qty. EARNINGS: shipped revenue. Integer cents.
+  salesCents Int
+  /// EARNINGS only: commission ("Ad Fees") in cents — the money we make.
+  feeCents   Int                  @default(0)
+  /// Items that were NOT the linked product (Amazon "indirect" sales). They
+  /// credit the tracking ID but will never match a post's ASIN.
+  indirectItems Int               @default(0)
+  importedAt DateTime             @default(now())
+
+  @@unique([kind, day, trackingId, asin])
+  @@index([asin])
+  @@index([trackingId, day])
+}
+
+/// One uploaded Associates report and the date range it COVERS. Conversion's
+/// denominator (clicks in the window) needs the declared range: at a few
+/// sales a month most days have no order rows at all, so the rows alone
+/// would shrink the window and overstate conversion.
+model AssociatesReportUpload {
+  id        String               @id @default(cuid())
+  kind      AssociatesReportKind
+  fromDay   DateTime             @db.Date
+  toDay     DateTime             @db.Date
+  /// Rows written (after per-day/tag/ASIN aggregation) and rows unreadable.
+  rows      Int
+  skipped   Int                  @default(0)
+  createdAt DateTime             @default(now())
+
+  @@index([kind, createdAt])
+}

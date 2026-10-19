@@ -37,6 +37,34 @@ export function isTransientBlueskyError(error: unknown): boolean {
   );
 }
 
+/**
+ * "Our session is dead", as opposed to "this request was refused" — the same
+ * set the SDK's own refresh path treats as fatal to a session. The poster
+ * must check this BEFORE isPermanentPostError: "InvalidToken" contains
+ * "invalid", and a dead session would otherwise permanently fail every reply
+ * it touched.
+ */
+export function isBlueskySessionError(error: unknown): boolean {
+  const e = error as { status?: unknown; error?: unknown } | null;
+  if (e?.status === 401) return true;
+  return (
+    typeof e?.error === "string" &&
+    ["ExpiredToken", "InvalidToken", "AuthenticationRequired"].includes(e.error)
+  );
+}
+
+/**
+ * Errors that mean "this record can never be posted" (blocked by the target,
+ * target deleted, rejected as invalid) — FAIL it now rather than burning the
+ * remaining attempts. Shared by the reply and deal posters. Outages and dead
+ * sessions are never permanent, whatever their message says.
+ */
+export function isPermanentPostError(error: unknown): boolean {
+  if (isTransientBlueskyError(error) || isBlueskySessionError(error)) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return /blocked|not found|invalid|deleted|suspended/i.test(message);
+}
+
 /** True while inside an active backoff window — Bluesky loops skip their tick. */
 export function blueskyBackingOff(): boolean {
   return Date.now() < backoffUntil;

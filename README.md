@@ -135,8 +135,10 @@ re-pasting an existing candidate resets its verdict for a fresh run),
 anchor and its exact link destination; the mode banner reflects the worker's
 real heartbeat, not env guesses; pending replies can be edited inline or
 regenerated with a direction), **Categories** (the discovery control panel —
-keywords are the Bluesky search queries), **Insights** (the live funnel plus
-the bot's daily read on it), and — on Overview — a worker status card with
+keywords are the Bluesky search queries), **Insights** (the live funnel, the
+bot's daily read on it, and **Revenue by channel** — upload the Associates
+Orders/Earnings CSVs to see orders, ad fees and conversion per tracking ID
+and per ASIN), and — on Overview — a worker status card with
 the **Autonomous** toggle and a **Pause bot** kill switch, the **Operator
 guidance** box (standing instructions the bot obeys above anything it learned), and an
 editable "What the bot has learned" card once the reflection job has run.
@@ -241,6 +243,7 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `AUTO_MIN_LINK_CONFIDENCE` | ...and above this link confidence for search links (default 75); the web-search fact check is the real backstop |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5` default (cheap); swap to an Opus model for max judgment |
 | `AMAZON_ASSOCIATE_TAG` | Your Associates store ID, appended to Amazon links at render time |
+| `AMAZON_TAG_REPLY` / `_DEAL_RSS` / `_DEAL_CURATED` / `_DEAL_FEED` / `_DEAL_MANUAL` | Optional per-channel tracking IDs (each falls back to `AMAZON_ASSOCIATE_TAG`). Amazon only splits sales by tracking ID, so these are what let Insights → *Revenue by channel* attribute orders. Create each ID in Associates Central first |
 | `BOT_APP_PASSWORD` | Bluesky **app password** (never your real password) |
 | `DEALS_ENABLED` | Master switch for the deal tracker's worker loops (default false) |
 | `CREATORS_API_CLIENT_ID` / `CREATORS_API_CLIENT_SECRET` | Amazon Creators API credentials (PA-API 5.0's successor) — enable deal feeds; access needs 10 qualifying sales in 30 days |

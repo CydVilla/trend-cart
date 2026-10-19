@@ -1,5 +1,5 @@
-import { AtpAgent } from "@atproto/api";
 import { prisma } from "@trendcart/db";
+import { blueskyAgent, noteBlueskySessionLost } from "./bluesky-agent.js";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 
@@ -72,26 +72,16 @@ export function createNotificationListener(
 ): { tick: () => Promise<void> } | null {
   if (!config.bluesky.handle || !config.bluesky.appPassword) return null;
 
-  let agent: AtpAgent | null = null;
   // Start 30 min back so mentions arriving during a restart aren't lost;
   // Post.uri uniqueness + skipDuplicates make reprocessing idempotent.
   let lastSeen = new Date(Date.now() - 30 * 60_000);
 
   async function tick(): Promise<void> {
     if (blueskyBackingOff()) return; // Bluesky is down — skip until the probe window
-    if (!agent) {
-      const candidate = new AtpAgent({ service: "https://bsky.social" });
-      try {
-        await candidate.login({
-          identifier: config.bluesky.handle,
-          password: config.bluesky.appPassword,
-        });
-      } catch (error) {
-        if (noteBlueskyDown(error)) return; // transient outage — back off, retry later
-        throw error;
-      }
-      agent = candidate;
-    }
+    // Shared session: login failures are logged (and counted toward the
+    // disable) there; this loop just waits for the next tick.
+    const agent = await blueskyAgent();
+    if (!agent) return;
     // Paginate so a burst (>50 notifications between ticks) can't silently
     // drop opt-outs or requests; process OLDEST-FIRST so a later opt-out is
     // never erased by an earlier mention.
@@ -99,7 +89,7 @@ export function createNotificationListener(
     try {
       response = await agent.listNotifications({ limit: 50 });
     } catch (error) {
-      if (noteBlueskyDown(error)) return;
+      if (noteBlueskyDown(error) || noteBlueskySessionLost(error)) return;
       throw error;
     }
     noteBlueskyUp();

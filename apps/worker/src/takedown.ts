@@ -1,5 +1,5 @@
-import { AtpAgent } from "@atproto/api";
 import { prisma, ReplyStatus } from "@trendcart/db";
+import { blueskyAgent, noteBlueskySessionLost } from "./bluesky-agent.js";
 import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
 import { config } from "./config.js";
 
@@ -14,7 +14,6 @@ import { config } from "./config.js";
  * bot must not leave a disliked reply standing.
  */
 
-const MAX_LOGIN_FAILURES = 3;
 const BATCH = 5;
 
 /** "Record already gone" errors — the goal state; stamp and move on. */
@@ -27,34 +26,7 @@ export type TakedownStats = { removed: number; errors: number };
 export function createTakedown(stats: TakedownStats): { tick: () => Promise<void> } | null {
   if (!config.bluesky.handle || !config.bluesky.appPassword) return null;
 
-  let agent: AtpAgent | null = null;
-  let loginFailures = 0;
-  let stopped = false;
-
-  async function ensureAgent(): Promise<AtpAgent | null> {
-    if (agent) return agent;
-    const candidate = new AtpAgent({ service: "https://bsky.social" });
-    try {
-      await candidate.login({
-        identifier: config.bluesky.handle,
-        password: config.bluesky.appPassword,
-      });
-      loginFailures = 0;
-      agent = candidate;
-      return agent;
-    } catch (error) {
-      if (noteBlueskyDown(error)) return null;
-      loginFailures += 1;
-      if (loginFailures >= MAX_LOGIN_FAILURES) {
-        console.error("[takedown] repeated login failures — disabling until restart");
-        stopped = true;
-      }
-      return null;
-    }
-  }
-
   async function tick(): Promise<void> {
-    if (stopped) return;
     if (blueskyBackingOff()) return;
 
     const due = await prisma.botReply.findMany({
@@ -70,7 +42,7 @@ export function createTakedown(stats: TakedownStats): { tick: () => Promise<void
     });
     if (due.length === 0) return;
 
-    const activeAgent = await ensureAgent();
+    const activeAgent = await blueskyAgent();
     if (!activeAgent) return;
 
     for (const reply of due) {
@@ -79,7 +51,8 @@ export function createTakedown(stats: TakedownStats): { tick: () => Promise<void
         noteBlueskyUp();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (noteBlueskyDown(error)) return; // outage — retry the batch later
+        // Outage or dead session — retry the batch later (on a fresh login).
+        if (noteBlueskyDown(error) || noteBlueskySessionLost(error)) return;
         if (!isAlreadyGone(message)) {
           // Transient/unknown failure: leave takedownAt null so the next
           // tick retries. Never stamp a deletion that didn't happen.

@@ -19,6 +19,10 @@ const nextConfig = {
   // from node_modules at runtime, never bundled — bundling strands the
   // engine binary and crashes on hosted Linux.
   serverExternalPackages: ["@prisma/client"],
+  // The Insights page uploads Amazon Associates CSV reports through a server
+  // action; the 1 MB default rejects a long date range before the action's
+  // own 4 MB sanity check can explain why.
+  experimental: { serverActions: { bodySizeLimit: "5mb" } },
   // The curated recommendation pages were retired (replies link straight to
   // Amazon); any old links out in the wild land on the disclosure page.
   redirects: async () => [

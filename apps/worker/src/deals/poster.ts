@@ -1,19 +1,26 @@
-import { AtpAgent, type AppBskyRichtextFacet } from "@atproto/api";
+import type { AppBskyRichtextFacet, AtpAgent } from "@atproto/api";
 import { prisma, DealPostStatus, DealSource, type DealPost, type TrackedListing } from "@trendcart/db";
 import {
   composeDealPost,
   DEAL_ANCHOR,
+  dealChannel,
   extractAsin,
   formatMoney,
   isAmazonHost,
   validateDealText,
+  withAffiliateTag,
 } from "@trendcart/shared";
-import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "../bluesky-health.js";
+import { blueskyAgent, blueskyLoginDisabled, noteBlueskySessionLost } from "../bluesky-agent.js";
+import {
+  blueskyBackingOff,
+  isPermanentPostError,
+  noteBlueskyDown,
+  noteBlueskyUp,
+} from "../bluesky-health.js";
 import { config } from "../config.js";
 import { isPaused } from "../heartbeat.js";
 import { createTrackedLink } from "../tracking.js";
 
-const MAX_LOGIN_FAILURES = 3;
 const MAX_POST_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 10 * 60_000;
 /** Bluesky uploadBlob hard cap. */
@@ -22,10 +29,6 @@ const IMAGE_HOST_RE = /(^|\.)media-amazon\.com$|(^|\.)images-amazon\.com$|(^|\.)
 
 export type DealPostStats = { posted: number; postFailed: number; disabled: boolean };
 export type DealPoster = { tick: () => Promise<void>; enabled: boolean };
-
-function isPermanentPostError(message: string): boolean {
-  return /blocked|not found|invalid|deleted|suspended/i.test(message);
-}
 
 /** Byte-offset facets over the link anchor and the "#ad" tag. UTF-8 bytes,
  *  not JS char indices — a multibyte title shifts the offsets. The anchor is
@@ -71,36 +74,16 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
   }
   console.log(`  deal posting:     enabled as @${config.bluesky.handle}`);
 
-  let agent: AtpAgent | null = null;
-  let loginFailures = 0;
   let stopped = false;
 
+  /** The shared session; repeated credential failures there stop this loop. */
   async function ensureAgent(): Promise<AtpAgent | null> {
-    if (agent) return agent;
-    const candidate = new AtpAgent({ service: "https://bsky.social" });
-    try {
-      await candidate.login({
-        identifier: config.bluesky.handle,
-        password: config.bluesky.appPassword,
-      });
-      loginFailures = 0;
-      agent = candidate;
-      return agent;
-    } catch (error) {
-      // Transient outage ≠ bad credentials — back off, never permanently disable.
-      if (noteBlueskyDown(error)) return null;
-      loginFailures += 1;
-      console.error(
-        `[dealPoster] login failed (${loginFailures}/${MAX_LOGIN_FAILURES}):`,
-        error instanceof Error ? error.message : error,
-      );
-      if (loginFailures >= MAX_LOGIN_FAILURES) {
-        console.error("[dealPoster] disabling until restart — check BOT_APP_PASSWORD");
-        stats.disabled = true;
-        stopped = true;
-      }
-      return null;
+    const agent = await blueskyAgent();
+    if (!agent && blueskyLoginDisabled()) {
+      stats.disabled = true;
+      stopped = true;
     }
+    return agent;
   }
 
   /** Best-effort external-card thumbnail. Any failure → link-only post. */
@@ -192,6 +175,16 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     });
     const listing: TrackedListing = deal.listing;
 
+    // The channel's tracking ID is applied HERE, at publish, not trusted from
+    // the queue-time snapshot: rows queued before a channel got its own
+    // AMAZON_TAG_* var (or by a script that still uses the base tag) would
+    // otherwise post under the wrong ID and blur the per-channel report.
+    // withAffiliateTag replaces any existing tag, so this is idempotent.
+    const linkUrl = withAffiliateTag(
+      deal.linkUrl,
+      config.site.affiliateTags[dealChannel(deal.source, deal.feedId)],
+    );
+
     // RSS-sourced posts (DISCOVERED with no feedId) and curator posts
     // (CURATED) are the PRICE-FREE channels: no price is advertised, so price
     // freshness doesn't apply and no priced embed may ever render
@@ -244,7 +237,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         wasPriceCents: deal.wasPriceCents,
         currency: deal.currency,
         priceAsOf: deal.priceAsOf,
-        linkUrl: deal.linkUrl,
+        linkUrl: linkUrl,
         maxLength: config.deals.postMaxLength,
         style: config.deals.postStyle,
       });
@@ -255,17 +248,17 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       text = composed.text;
       anchor = composed.anchor;
     }
-    const validation = validateDealText(text, deal.linkUrl, config.deals.postMaxLength, anchor);
+    const validation = validateDealText(text, linkUrl, config.deals.postMaxLength, anchor);
     if (!validation.ok) {
       await terminal(deal.id, DealPostStatus.FAILED, `validation failed: ${validation.reason}`);
       return;
     }
     try {
-      if (!isAmazonHost(new URL(deal.linkUrl).hostname)) {
+      if (!isAmazonHost(new URL(linkUrl).hostname)) {
         await terminal(deal.id, DealPostStatus.FAILED, "link is not an Amazon URL");
         return;
       }
-      if (rssAutonomous && extractAsin(deal.linkUrl) !== listing.asin) {
+      if (rssAutonomous && extractAsin(linkUrl) !== listing.asin) {
         await terminal(deal.id, DealPostStatus.FAILED, "affiliate link ASIN does not match listing");
         return;
       }
@@ -284,7 +277,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     }
 
     try {
-      const tracked = await createTrackedLink(deal.linkUrl, "deal", deal.id);
+      const tracked = await createTrackedLink(linkUrl, "deal", deal.id);
       const facets = buildFacets(text, tracked.url, anchor);
       const thumb = priceFree ? null : await uploadThumb(activeAgent, listing.imageUrl);
       const wasClause =
@@ -295,7 +288,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         ? {
             $type: "app.bsky.embed.external",
             external: {
-              uri: deal.linkUrl,
+              uri: linkUrl,
               title: listing.title,
               description: `Now ${formatMoney(deal.salePriceCents, deal.currency)}${wasClause} on Amazon.`,
               thumb,
@@ -312,7 +305,8 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       await prisma.$transaction([
         prisma.dealPost.update({
           where: { id: deal.id },
-          data: { status: DealPostStatus.POSTED, postUri: result.uri, postedAt: new Date() },
+          // linkUrl too, so the ledger records the tag that actually went out.
+          data: { status: DealPostStatus.POSTED, postUri: result.uri, postedAt: new Date(), linkUrl },
         }),
         prisma.trackedListing.update({
           where: { id: listing.id },
@@ -324,8 +318,9 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       console.log(`[dealPoster] posted deal for ${listing.asin} (${listing.title})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // Bluesky outage → release the claim without burning an attempt.
-      if (noteBlueskyDown(error)) {
+      // Bluesky outage or dead session → release the claim without burning
+      // an attempt (the next tick backs off, or logs in afresh).
+      if (noteBlueskyDown(error) || noteBlueskySessionLost(error)) {
         await prisma.dealPost.update({
           where: { id: deal.id },
           data: { status: DealPostStatus.READY },
@@ -333,7 +328,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
         return;
       }
       const attempts = deal.attemptCount + 1;
-      if (isPermanentPostError(message) || attempts >= MAX_POST_ATTEMPTS) {
+      if (isPermanentPostError(error) || attempts >= MAX_POST_ATTEMPTS) {
         await prisma.dealPost.update({
           where: { id: deal.id },
           data: {

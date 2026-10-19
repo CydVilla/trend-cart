@@ -1,10 +1,15 @@
-import { AtpAgent, RichText } from "@atproto/api";
+import { RichText } from "@atproto/api";
 import { prisma, ReplyStatus } from "@trendcart/db";
-import { blueskyBackingOff, noteBlueskyDown, noteBlueskyUp } from "./bluesky-health.js";
+import { blueskyAgent, blueskyLoginDisabled, noteBlueskySessionLost } from "./bluesky-agent.js";
+import {
+  blueskyBackingOff,
+  isPermanentPostError,
+  noteBlueskyDown,
+  noteBlueskyUp,
+} from "./bluesky-health.js";
 import { config } from "./config.js";
 import { isPaused, setPostingState } from "./heartbeat.js";
 
-const MAX_LOGIN_FAILURES = 3;
 const MAX_POST_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 10 * 60_000;
 const GETPOSTS_URL = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPosts";
@@ -19,11 +24,6 @@ export type Poster = {
   tick: () => Promise<void>;
   enabled: boolean;
 };
-
-/** Errors that mean "this reply can never be posted" (vs. transient network). */
-function isPermanentPostError(message: string): boolean {
-  return /blocked|not found|invalid|deleted|suspended/i.test(message);
-}
 
 async function targetStillExists(uri: string): Promise<boolean> {
   try {
@@ -50,7 +50,8 @@ async function targetStillExists(uri: string): Promise<boolean> {
  *  - pre-flight: the target must still exist and the author must not have
  *    opted out between approval and posting
  *  - transient post errors retry up to 3 times; permanent ones FAIL
- *  - never runs when DRY_RUN=true; repeated login failures disable posting
+ *  - never runs when DRY_RUN=true; repeated login failures (counted by the
+ *    shared session in bluesky-agent.ts) disable posting
  */
 export function createPoster(stats: PosterStats): Poster {
   if (config.bot.dryRun) {
@@ -68,41 +69,22 @@ export function createPoster(stats: PosterStats): Poster {
   console.log(`  posting:          enabled as @${config.bluesky.handle}`);
   setPostingState("enabled");
 
-  let agent: AtpAgent | null = null;
-  let loginFailures = 0;
   let stopped = false;
 
-  async function ensureAgent(): Promise<AtpAgent | null> {
+  /** The shared session, or null with posting state explaining why. */
+  async function ensureAgent() {
+    const agent = await blueskyAgent();
     if (agent) return agent;
-    const candidate = new AtpAgent({ service: "https://bsky.social" });
-    try {
-      await candidate.login({
-        identifier: config.bluesky.handle,
-        password: config.bluesky.appPassword,
-      });
-      loginFailures = 0;
-      agent = candidate;
-      return agent;
-    } catch (error) {
-      // A transient outage (504/network) is NOT a credential problem — back off
-      // and retry later; never let it trip the permanent login-disable.
-      if (noteBlueskyDown(error)) {
-        setPostingState("waiting: Bluesky unreachable");
-        return null;
-      }
-      loginFailures += 1;
-      console.error(
-        `[poster] login failed (${loginFailures}/${MAX_LOGIN_FAILURES}):`,
-        error instanceof Error ? error.message : error,
-      );
-      if (loginFailures >= MAX_LOGIN_FAILURES) {
-        console.error("[poster] disabling posting until restart — check BOT_APP_PASSWORD");
-        setPostingState("disabled: repeated login failures");
-        stats.disabled = true;
-        stopped = true;
-      }
-      return null;
+    if (blueskyLoginDisabled()) {
+      // The shared session logged the credential failures; this loop just
+      // stops and says so on the dashboard.
+      setPostingState("disabled: repeated login failures");
+      stats.disabled = true;
+      stopped = true;
+    } else if (blueskyBackingOff()) {
+      setPostingState("waiting: Bluesky unreachable");
     }
+    return null;
   }
 
   async function releaseClaim(id: string, skipReason: string): Promise<void> {
@@ -244,9 +226,10 @@ export function createPoster(stats: PosterStats): Poster {
       console.log(`[poster] posted reply to ${approved.post.uri}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // A Bluesky outage must not burn this reply's attempts — back off and
-      // release the claim without counting the failure against it.
-      if (noteBlueskyDown(error)) {
+      // A Bluesky outage or a dead session must not burn this reply's
+      // attempts — release the claim without counting the failure against it
+      // (the next tick backs off, or logs in afresh).
+      if (noteBlueskyDown(error) || noteBlueskySessionLost(error)) {
         await prisma.botReply.update({
           where: { id: approved.id },
           data: { status: ReplyStatus.APPROVED },
@@ -254,7 +237,7 @@ export function createPoster(stats: PosterStats): Poster {
         return;
       }
       const attempts = approved.attemptCount + 1;
-      if (isPermanentPostError(message) || attempts >= MAX_POST_ATTEMPTS) {
+      if (isPermanentPostError(error) || attempts >= MAX_POST_ATTEMPTS) {
         await prisma.botReply.update({
           where: { id: approved.id },
           data: {
