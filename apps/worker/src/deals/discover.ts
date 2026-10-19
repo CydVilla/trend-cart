@@ -183,7 +183,7 @@ export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
 
     const linkUrl = withAffiliateTag(
       canonicalAmazonUrl(item.asin, marketplace),
-      config.site.amazonAssociateTag,
+      config.site.affiliateTags.deal_feed,
     );
     const composed = composeDealPost({
       title: item.title,

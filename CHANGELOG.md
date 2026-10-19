@@ -3,6 +3,22 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — Revenue by channel
+
+### Added
+- **Per-channel tracking IDs**: optional `AMAZON_TAG_REPLY`,
+  `AMAZON_TAG_DEAL_RSS`, `AMAZON_TAG_DEAL_CURATED`, `AMAZON_TAG_DEAL_FEED`,
+  `AMAZON_TAG_DEAL_MANUAL`, each falling back to `AMAZON_ASSOCIATE_TAG`
+  (`affiliateTagFor` in shared). Amazon splits sales only by tracking ID, so
+  this is what makes a channel's conversion measurable. Deal posts take
+  their channel's ID at publish time, so already-queued rows switch too.
+- **Insights → Revenue by channel**: upload Associates Central Orders /
+  Earnings CSVs; rows land per day × tracking ID × ASIN in
+  `AssociatesReportRow` (migration `associates_report_rows`) and show
+  ordered items, sales, ad fees and conversion (ordered items / human
+  clicks) per tracking ID and per ASIN, joined to our deal posts and links.
+  Re-uploading a range replaces it.
+
 ## 2026-10-19 — Post-hiatus audit: cleanup, cheaper fact checks, more curators
 
 ### Added

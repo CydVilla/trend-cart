@@ -84,3 +84,6 @@ export * from "./usage";
 
 // Live counts behind the dashboard's cap bars
 export * from "./limits";
+
+// Per-channel revenue: uploaded Associates reports joined to click counts
+export * from "./revenue";
