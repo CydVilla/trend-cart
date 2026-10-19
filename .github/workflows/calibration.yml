@@ -41,13 +41,25 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: claude-haiku-4-5
+          # Repo variable ANTHROPIC_MODEL keeps calibration on the model prod
+          # runs (set it alongside the Heroku config var when switching).
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-haiku-4-5' }}
         run: pnpm --filter @trendcart/worker --silent calibrate | tee calibration-report.md
 
       - name: File the report as an issue
+        # One open report at a time: the new one supersedes last week's, so
+        # unread reports don't pile up (11 had by 2026-10). Agreement history
+        # lives in BotMemory("calibration") and each report's "previous run".
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh label create calibration --color C5DEF5 \
+            --description "Weekly classifier calibration report" 2>/dev/null || true
           TITLE="Calibration report — $(date -u +%Y-%m-%d)"
-          gh issue create --title "$TITLE" --body-file calibration-report.md --label calibration \
-            || gh issue create --title "$TITLE" --body-file calibration-report.md
+          NEW_URL=$(gh issue create --title "$TITLE" --body-file calibration-report.md --label calibration)
+          NEW_NUM="${NEW_URL##*/}"
+          gh issue list --label calibration --state open --json number --jq '.[].number' \
+            | while read -r n; do
+                [ "$n" = "$NEW_NUM" ] && continue
+                gh issue close "$n" --comment "Superseded by #$NEW_NUM." || true
+              done
