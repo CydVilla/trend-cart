@@ -46,6 +46,7 @@ import { config } from "../src/config.js";
  *   pnpm --filter @trendcart/worker queue:deal --file deals.json --dry
  *
  * deals.json: [{ "asin" | "url", "text", "anchor"?, "title"? }, ...]
+ * Hashtags in the copy (#NintendoSwitch2 …) become real Bluesky tags.
  * anchor defaults to "on Amazon"; title (the Deals-page label) defaults to
  * the copy before the anchor. Against prod, run with prod's DATABASE_URL
  * (e.g. `heroku run -a trend-cart -- pnpm --filter @trendcart/worker queue:deal ...`).
@@ -81,10 +82,15 @@ async function resolveAsin(input: DealInput): Promise<string> {
   if (!input.url) throw new Error(`entry needs "asin" or "url": ${input.text}`);
   const direct = extractAsin(input.url);
   if (direct) return direct;
-  const res = await fetch(input.url, { method: "HEAD", redirect: "manual" });
-  const location = res.headers.get("location");
-  const asin = location ? extractAsin(location) : null;
-  if (!asin) throw new Error(`no ASIN in ${input.url}${location ? ` -> ${location}` : ""}`);
+  // Follow the redirect chain with a GET: SiteStripe's link.amazon short
+  // links 404 a HEAD and hop through amzlinks.in before reaching /dp/ASIN.
+  const res = await fetch(input.url, {
+    redirect: "follow",
+    headers: { "user-agent": "Mozilla/5.0 (Macintosh) TrendCart-queue-deal" },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const asin = extractAsin(res.url);
+  if (!asin) throw new Error(`no ASIN in ${input.url} -> ${res.url}`);
   return asin;
 }
 

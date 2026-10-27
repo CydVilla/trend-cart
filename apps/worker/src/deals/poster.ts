@@ -6,6 +6,7 @@ import {
   dealChannel,
   extractAsin,
   formatMoney,
+  hashtagSpans,
   isAmazonHost,
   validateDealText,
   withAffiliateTag,
@@ -30,28 +31,25 @@ const IMAGE_HOST_RE = /(^|\.)media-amazon\.com$|(^|\.)images-amazon\.com$|(^|\.)
 export type DealPostStats = { posted: number; postFailed: number; disabled: boolean };
 export type DealPoster = { tick: () => Promise<void>; enabled: boolean };
 
-/** Byte-offset facets over the link anchor and the "#ad" tag. UTF-8 bytes,
+/** Byte-offset facets over the link anchor and every hashtag ("#ad" plus any
+ *  the copy carries, e.g. #NintendoSwitch2 on a manual post). UTF-8 bytes,
  *  not JS char indices — a multibyte title shifts the offsets. The anchor is
  *  per-post (wario style links the price phrase, classic the fixed one). */
-function buildFacets(text: string, linkUrl: string, anchor: string): AppBskyRichtextFacet.Main[] {
+export function buildFacets(text: string, linkUrl: string, anchor: string): AppBskyRichtextFacet.Main[] {
   const enc = new TextEncoder();
+  const bytes = (index: number) => enc.encode(text.slice(0, index)).length;
   const facets: AppBskyRichtextFacet.Main[] = [];
   const aIdx = text.lastIndexOf(anchor);
   if (aIdx >= 0) {
-    const byteStart = enc.encode(text.slice(0, aIdx)).length;
-    const byteEnd = byteStart + enc.encode(anchor).length;
     facets.push({
-      index: { byteStart, byteEnd },
+      index: { byteStart: bytes(aIdx), byteEnd: bytes(aIdx + anchor.length) },
       features: [{ $type: "app.bsky.richtext.facet#link", uri: linkUrl }],
     });
   }
-  const hIdx = text.lastIndexOf("#ad");
-  if (hIdx >= 0) {
-    const byteStart = enc.encode(text.slice(0, hIdx)).length;
-    const byteEnd = byteStart + enc.encode("#ad").length;
+  for (const { start, end, tag } of hashtagSpans(text)) {
     facets.push({
-      index: { byteStart, byteEnd },
-      features: [{ $type: "app.bsky.richtext.facet#tag", tag: "ad" }],
+      index: { byteStart: bytes(start), byteEnd: bytes(end) },
+      features: [{ $type: "app.bsky.richtext.facet#tag", tag }],
     });
   }
   return facets;
