@@ -322,3 +322,21 @@ export function canonicalCuratorUrl(url: string): string | null {
   const actor = curatorProfileHandle(url);
   return actor ? `${CURATOR_URL_PREFIX}${actor}` : null;
 }
+
+/**
+ * Every hashtag in post copy, as UTF-16 index spans plus the bare tag. A
+ * hashtag only becomes a clickable, feed-indexed Bluesky tag when the post
+ * carries a tag FACET for it — plain "#Switch2" text is invisible to hashtag
+ * feeds — so the deal poster facets each one, not just "#ad". Matches Bluesky's
+ * own rule closely enough for copy we write: "#" at a word start, then a
+ * letter-led run of letters/digits/underscores (so "$99" or "#1" never match).
+ */
+export function hashtagSpans(text: string): Array<{ start: number; end: number; tag: string }> {
+  const spans: Array<{ start: number; end: number; tag: string }> = [];
+  for (const match of text.matchAll(/(^|\s)#(\p{L}[\p{L}\p{N}_]*)/gu)) {
+    const [, lead = "", tag = ""] = match;
+    const start = (match.index ?? 0) + lead.length;
+    spans.push({ start, end: start + 1 + tag.length, tag });
+  }
+  return spans;
+}
