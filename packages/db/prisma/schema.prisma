@@ -704,3 +704,29 @@ model AssociatesReportUpload {
 
   @@index([kind, createdAt])
 }
+
+/// One tracking ID's totals from an uploaded Associates "Tracking Id" SUMMARY
+/// report (Insights page). Unlike Orders/Earnings it carries Amazon's OWN
+/// click count, which is what lets us check our /r/ counters against Amazon's.
+/// The file names no dates, so the range is the one the operator entered;
+/// re-uploading the same range replaces it. Kept apart from
+/// AssociatesReportRow on purpose: its orders and earnings repeat the detail
+/// reports' and must never be summed with them.
+model AssociatesTrackingSummary {
+  id                String   @id @default(cuid())
+  fromDay           DateTime @db.Date
+  toDay             DateTime @db.Date
+  trackingId        String
+  clicks            Int
+  orderedItems      Int
+  orderedSalesCents Int
+  shippedItems      Int
+  returnedItems     Int
+  shippedSalesCents Int
+  earningsCents     Int
+  bonusCents        Int      @default(0)
+  importedAt        DateTime @default(now())
+
+  @@unique([fromDay, toDay, trackingId])
+  @@index([importedAt])
+}

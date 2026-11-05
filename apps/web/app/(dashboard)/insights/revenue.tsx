@@ -1,4 +1,4 @@
-import { prisma, computeRevenueReport } from "@trendcart/db";
+import { prisma, computeRevenueReport, latestTrackingSummary, type TrackingSummaryView } from "@trendcart/db";
 import { formatMoney, type AffiliateChannel } from "@trendcart/shared";
 import { SubmitButton } from "../submit-button";
 import { Badge, SectionHeading } from "../ui";
@@ -53,13 +53,84 @@ function UploadBanner({ outcome }: { outcome: UploadOutcome }) {
   );
 }
 
+const ratio = (r: number | null): string => (r === null ? "—" : `${r.toFixed(2)}×`);
+
+/**
+ * Amazon's own clicks per tracking ID (Tracking Id summary) beside our /r/
+ * counter for the same tag and range. A ratio far from 1× means one side is
+ * miscounting: bots we didn't filter, links posted without our redirect, or a
+ * tag Amazon doesn't recognise.
+ */
+function TrackingSummaryTable({ summary }: { summary: TrackingSummaryView }) {
+  const t = summary.totals;
+  const pooled = summary.rows.some((r) => r.clicks === 0 && r.orderedItems > 0);
+  return (
+    <div className="mb-6">
+      <h3 className="mb-1 text-sm font-semibold">Amazon&apos;s count vs ours</h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        Tracking Id summary {summary.range.from} → {summary.range.to}: {t.clicks} Amazon clicks vs{" "}
+        {t.ourClicks} on our links created in that range, {t.orderedItems} items ordered,{" "}
+        {formatMoney(t.earningsCents)} earned. Its totals overlap the Orders / Earnings reports
+        below and are never added to them.
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-zinc-100 text-xs uppercase text-zinc-400">
+            <tr>
+              <th className="px-3 py-2">Tracking ID</th>
+              <th className="px-3 py-2">Amazon clicks</th>
+              <th className="px-3 py-2">Our clicks</th>
+              <th className="px-3 py-2">Ratio</th>
+              <th className="px-3 py-2">Ordered</th>
+              <th className="px-3 py-2">Conv.</th>
+              <th className="px-3 py-2">Shipped / ret.</th>
+              <th className="px-3 py-2">Earned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.rows.map((r) => (
+              <tr key={r.trackingId} className="border-b border-zinc-50 last:border-0">
+                <td className="px-3 py-2">
+                  <div className="font-mono text-xs">{r.trackingId}</div>
+                  <div className="mt-0.5 flex flex-wrap gap-1">
+                    {r.channels.map((ch) => (
+                      <Badge key={ch} tone={r.channels.length > 1 ? "amber" : "blue"}>
+                        {CHANNEL_LABEL[ch]}
+                      </Badge>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-zinc-600">{r.clicks}</td>
+                <td className="px-3 py-2 text-zinc-600">{r.channels.length > 0 ? r.ourClicks : "—"}</td>
+                <td className="px-3 py-2">{r.channels.length > 0 ? ratio(r.clickRatio) : "—"}</td>
+                <td className="px-3 py-2">{r.orderedItems}</td>
+                <td className="px-3 py-2 font-medium">{conv(r.conversion)}</td>
+                <td className="px-3 py-2 text-zinc-600">
+                  {r.shippedItems} / {r.returnedItems}
+                </td>
+                <td className="px-3 py-2 font-medium text-emerald-700">{formatMoney(r.earningsCents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {pooled && (
+        <p className="mt-2 text-xs text-amber-700">
+          Rows with orders but no clicks (such as &ldquo;Other&rdquo;) are orders Amazon didn&apos;t
+          credit to a listed tracking ID, so they can&apos;t be tied to a channel.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * Revenue by channel: the hand-uploaded Associates Orders/Earnings reports,
  * split by tracking ID (one per channel via AMAZON_TAG_*) and joined to our
  * own human-click counts. The question it answers: which channel converts.
  */
 export async function RevenueSection({ outcome }: { outcome: UploadOutcome }) {
-  const report = await computeRevenueReport(prisma);
+  const [report, summary] = await Promise.all([computeRevenueReport(prisma), latestTrackingSummary(prisma)]);
   const t = report.totals;
   const shared = report.channels.some((c) => c.channels.length > 1);
 
@@ -78,6 +149,14 @@ export async function RevenueSection({ outcome }: { outcome: UploadOutcome }) {
           required
           className="max-w-full text-xs"
         />
+        <label className="flex items-center gap-1 text-xs text-zinc-500">
+          From
+          <input type="date" name="from" className="rounded border border-zinc-200 px-1 py-0.5 text-xs" />
+        </label>
+        <label className="flex items-center gap-1 text-xs text-zinc-500">
+          To
+          <input type="date" name="to" className="rounded border border-zinc-200 px-1 py-0.5 text-xs" />
+        </label>
         <SubmitButton
           pendingLabel="Importing…"
           className="rounded bg-zinc-900 px-3 py-1 text-xs font-medium text-white hover:bg-zinc-700"
@@ -85,13 +164,16 @@ export async function RevenueSection({ outcome }: { outcome: UploadOutcome }) {
           Upload report
         </SubmitButton>
         <span className="text-xs text-zinc-400">
-          Associates Central → Reports → Download reports → <b>Orders</b> or <b>Earnings</b> (CSV).
-          Re-uploading a range replaces it.
+          Associates Central → Reports → Download reports → <b>Orders</b> or <b>Earnings</b> (CSV),
+          or the <b>Tracking Id</b> summary with the From/To range you downloaded (the file
+          doesn&apos;t say). Re-uploading a range replaces it.
         </span>
       </form>
 
+      {summary && <TrackingSummaryTable summary={summary} />}
+
       {!report.coverage ? (
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
+        summary ? null : <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
           No reports uploaded yet. Amazon only splits sales by tracking ID, so give each channel its
           own ID first (AMAZON_TAG_REPLY, AMAZON_TAG_DEAL_RSS, AMAZON_TAG_DEAL_CURATED, …) — until
           then every sale lands under the one shared tag.

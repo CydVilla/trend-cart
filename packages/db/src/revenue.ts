@@ -5,6 +5,8 @@ import {
   tagOfUrl,
   type AffiliateChannel,
   type ParsedAssociatesReport,
+  type ParsedTrackingSummary,
+  type TrackingSummaryLine,
 } from "@trendcart/shared";
 
 /**
@@ -310,5 +312,114 @@ export async function computeRevenueReport(
       (a, b) => b.feeCents - a.feeCents || b.orderedItems - a.orderedItems || b.clicks - a.clicks,
     ),
     asins: ranked,
+  };
+}
+
+// ── Tracking Id summary ─────────────────────────────────────
+
+/**
+ * Store a Tracking Id summary, replacing any earlier upload of the SAME
+ * range (a re-download after Amazon revises late orders). Other ranges are
+ * kept: summaries can't be split by day, so overlapping ones aren't merged.
+ */
+export async function importTrackingSummary(
+  prisma: PrismaClient,
+  summary: ParsedTrackingSummary,
+): Promise<{ written: number; replaced: number }> {
+  const fromDay = day(summary.range.from);
+  const toDay = day(summary.range.to);
+  const [deleted, created] = await prisma.$transaction([
+    prisma.associatesTrackingSummary.deleteMany({ where: { fromDay, toDay } }),
+    prisma.associatesTrackingSummary.createMany({
+      data: summary.lines.map((l) => ({ fromDay, toDay, ...l })),
+    }),
+  ]);
+  return { written: created.count, replaced: deleted.count };
+}
+
+export type TrackingSummaryRow = TrackingSummaryLine & {
+  channels: AffiliateChannel[];
+  /** Human clicks on OUR links carrying this tag, created in the range. */
+  ourClicks: number;
+  /** Amazon clicks / our clicks, null without ours. */
+  clickRatio: number | null;
+  /** orderedItems / Amazon clicks, null without clicks. */
+  conversion: number | null;
+};
+
+export type TrackingSummaryView = {
+  range: { from: string; to: string };
+  importedAt: Date;
+  rows: TrackingSummaryRow[];
+  /** Totals across rows; ourClicks counts every link in the range, tagged or not. */
+  totals: { clicks: number; ourClicks: number; orderedItems: number; earningsCents: number };
+};
+
+/**
+ * The most recently uploaded Tracking Id summary, each row joined to our own
+ * click counter for the same tag over the same range (links created from a
+ * day before through a day after — the same lifetime-counter approximation
+ * as computeRevenueReport). Null before any upload.
+ */
+export async function latestTrackingSummary(
+  prisma: PrismaClient,
+  opts: { env?: Record<string, string | undefined> } = {},
+): Promise<TrackingSummaryView | null> {
+  const env = opts.env ?? process.env;
+  const latest = await prisma.associatesTrackingSummary.findFirst({
+    orderBy: { importedAt: "desc" },
+    select: { fromDay: true, toDay: true, importedAt: true },
+  });
+  if (!latest) return null;
+  const [rows, links] = await Promise.all([
+    prisma.associatesTrackingSummary.findMany({
+      where: { fromDay: latest.fromDay, toDay: latest.toDay },
+      orderBy: { clicks: "desc" },
+    }),
+    prisma.trackedLink.findMany({
+      where: {
+        createdAt: {
+          gte: new Date(latest.fromDay.getTime() - 24 * 3_600_000),
+          lt: new Date(latest.toDay.getTime() + 2 * 24 * 3_600_000),
+        },
+      },
+      select: { targetUrl: true, clickCount: true },
+    }),
+  ]);
+  const ours = new Map<string, number>();
+  let ourTotal = 0;
+  for (const link of links) {
+    ourTotal += link.clickCount;
+    const tag = tagOfUrl(link.targetUrl)?.toLowerCase();
+    if (tag) ours.set(tag, (ours.get(tag) ?? 0) + link.clickCount);
+  }
+  const out: TrackingSummaryRow[] = rows.map((r) => {
+    const ourClicks = ours.get(r.trackingId.toLowerCase()) ?? 0;
+    return {
+      trackingId: r.trackingId,
+      clicks: r.clicks,
+      orderedItems: r.orderedItems,
+      orderedSalesCents: r.orderedSalesCents,
+      shippedItems: r.shippedItems,
+      returnedItems: r.returnedItems,
+      shippedSalesCents: r.shippedSalesCents,
+      earningsCents: r.earningsCents,
+      bonusCents: r.bonusCents,
+      channels: channelsForTag(r.trackingId, env),
+      ourClicks,
+      clickRatio: ourClicks > 0 ? r.clicks / ourClicks : null,
+      conversion: rate(r.orderedItems, r.clicks),
+    };
+  });
+  return {
+    range: { from: ymdOf(latest.fromDay), to: ymdOf(latest.toDay) },
+    importedAt: latest.importedAt,
+    rows: out,
+    totals: {
+      clicks: out.reduce((n, r) => n + r.clicks, 0),
+      ourClicks: ourTotal,
+      orderedItems: out.reduce((n, r) => n + r.orderedItems, 0),
+      earningsCents: out.reduce((n, r) => n + r.earningsCents, 0),
+    },
   };
 }

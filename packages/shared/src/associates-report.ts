@@ -366,3 +366,149 @@ export function parseAssociatesReport(
 
   return { kind, lines, range, skipped, warnings };
 }
+
+// ── Summary reports ─────────────────────────────────────────
+//
+// Associates Central also offers per-period SUMMARY downloads (Tracking Id,
+// Linked Product, Category). They carry no per-day or per-order rows and no
+// date range at all — the operator states the range on upload. Only the
+// Tracking Id summary is imported: it is the one place Amazon reports its
+// own CLICK count per tracking ID, which we compare with our /r/ counters.
+// Linked Product and Category summaries would just repeat its totals with
+// no tracking ID, so they are refused with a pointer to the right file.
+//
+// Summary cells are floats ("1261.0", "63.449999999999996") or "-" for none.
+
+/** Which Associates download a file is, judged by its header row. */
+export type AssociatesReportShape =
+  | "detail" // Orders / Earnings: ASIN + tracking ID per row
+  | "tracking_summary"
+  | "product_summary"
+  | "category_summary";
+
+export function detectAssociatesReport(text: string): AssociatesReportShape | null {
+  const clean = text.replace(/^\uFEFF/, "");
+  const firstLines = clean.split(/\r?\n/, 20);
+  const delimiter = firstLines.some((l) => l.split("\t").length > 3) ? "\t" : ",";
+  for (const row of parseDelimited(firstLines.join("\n"), delimiter)) {
+    const names = new Set(row.map(normalizeHeader));
+    const has = (aliases: readonly string[]): boolean => aliases.some((a) => names.has(a));
+    const tracking = has(COLUMNS.trackingId);
+    if (has(COLUMNS.asin) && tracking) return "detail";
+    if (!names.has("clicks")) continue;
+    if (tracking) return "tracking_summary";
+    if (has(COLUMNS.asin)) return "product_summary";
+    if (names.has("category")) return "category_summary";
+  }
+  return null;
+}
+
+/** One tracking ID's totals for the period a summary report covers. */
+export type TrackingSummaryLine = {
+  trackingId: string;
+  /** Amazon's own click count for this ID (all link types, all surfaces). */
+  clicks: number;
+  orderedItems: number;
+  orderedSalesCents: number;
+  shippedItems: number;
+  returnedItems: number;
+  shippedSalesCents: number;
+  /** Total earnings (shipped minus returned commission), cents. */
+  earningsCents: number;
+  bonusCents: number;
+};
+
+export type ParsedTrackingSummary = {
+  range: { from: string; to: string };
+  lines: TrackingSummaryLine[];
+};
+
+const SUMMARY_COLUMNS = {
+  trackingId: COLUMNS.trackingId,
+  clicks: ["clicks"],
+  orderedItems: ["items ordered", "ordered items"],
+  orderedRevenue: ["ordered revenue"],
+  shippedItems: ["items shipped", "shipped items"],
+  returnedItems: ["items returned", "returned items", "returns"],
+  shippedRevenue: ["items shipped revenue", "shipped revenue", "shipped items revenue"],
+  earnings: ["total earnings", "earnings"],
+  bonus: ["bonus"],
+} as const;
+
+/** "1261.0" / "4" / "-" / "" → whole count. A fractional count is unreadable. */
+function parseSummaryCount(raw: string): number | null {
+  const s = raw.trim().replace(/,/g, "");
+  if (s === "" || s === "-") return 0;
+  if (!/^-?\d+(\.0+)?$/.test(s)) return null;
+  return Number.parseInt(s, 10);
+}
+
+/**
+ * Parse a Tracking Id summary. `range` is the period the operator downloaded,
+ * since the file never says. Every row must be readable — a summary has a
+ * handful of rows, and silently dropping one would misstate a whole channel.
+ */
+export function parseTrackingSummaryReport(
+  text: string,
+  range: { from: string; to: string },
+): ParsedTrackingSummary | AssociatesReportError {
+  if (range.from > range.to) return { error: `range starts after it ends (${range.from} → ${range.to})` };
+  const clean = text.replace(/^\uFEFF/, "");
+  const firstLines = clean.split(/\r?\n/, 10);
+  const delimiter = firstLines.some((l) => l.split("\t").length > 3) ? "\t" : ",";
+  const rows = parseDelimited(clean, delimiter);
+
+  let headerAt = -1;
+  const cols: Partial<Record<keyof typeof SUMMARY_COLUMNS, number>> = {};
+  for (let i = 0; i < Math.min(rows.length, 20) && headerAt < 0; i++) {
+    const names = rows[i]!.map(normalizeHeader);
+    if (!names.includes("clicks") || !COLUMNS.trackingId.some((a) => names.includes(a))) continue;
+    headerAt = i;
+    for (const field of Object.keys(SUMMARY_COLUMNS) as (keyof typeof SUMMARY_COLUMNS)[]) {
+      const idx = SUMMARY_COLUMNS[field].map((a) => names.indexOf(a)).find((n) => n >= 0);
+      if (idx !== undefined) cols[field] = idx;
+    }
+  }
+  if (headerAt < 0) return { error: "no header row with Tracking Id and Clicks columns" };
+
+  const cell = (row: string[], col: number | undefined): string =>
+    col === undefined ? "" : (row[col] ?? "").trim();
+  const byTag = new Map<string, TrackingSummaryLine>();
+  for (let i = headerAt + 1; i < rows.length; i++) {
+    const row = rows[i]!;
+    if (row.every((c) => c.trim() === "")) continue;
+    const trackingId = cell(row, cols.trackingId);
+    if (!trackingId || /^total$/i.test(trackingId)) continue;
+    const counts = {
+      clicks: parseSummaryCount(cell(row, cols.clicks)),
+      orderedItems: parseSummaryCount(cell(row, cols.orderedItems)),
+      shippedItems: parseSummaryCount(cell(row, cols.shippedItems)),
+      returnedItems: parseSummaryCount(cell(row, cols.returnedItems)),
+    };
+    const money = {
+      orderedSalesCents: parseMoneyCents(cell(row, cols.orderedRevenue)),
+      shippedSalesCents: parseMoneyCents(cell(row, cols.shippedRevenue)),
+      earningsCents: parseMoneyCents(cell(row, cols.earnings)),
+      bonusCents: parseMoneyCents(cell(row, cols.bonus)),
+    };
+    const bad = Object.entries({ ...counts, ...money }).find(([, v]) => v === null);
+    if (bad) return { error: `line ${i + 1}: unreadable ${bad[0]} for "${trackingId.slice(0, 40)}"` };
+    const line = byTag.get(trackingId) ?? {
+      trackingId,
+      clicks: 0,
+      orderedItems: 0,
+      orderedSalesCents: 0,
+      shippedItems: 0,
+      returnedItems: 0,
+      shippedSalesCents: 0,
+      earningsCents: 0,
+      bonusCents: 0,
+    };
+    for (const [k, v] of Object.entries({ ...counts, ...money })) {
+      line[k as keyof typeof counts | keyof typeof money] += v!;
+    }
+    byTag.set(trackingId, line);
+  }
+  if (byTag.size === 0) return { error: "tracking ID summary has no rows" };
+  return { range, lines: [...byTag.values()].sort((a, b) => b.clicks - a.clicks) };
+}
