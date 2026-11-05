@@ -3,6 +3,20 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — Tracking Id summary upload
+
+### Added
+- **Insights → Amazon's count vs ours.** The upload now also takes the
+  Associates *Tracking Id* summary, with a From/To range typed on the form
+  (the file names no dates). It shows Amazon's own clicks per tracking ID
+  beside our `/r/` clicks for the same tag and range, plus orders,
+  conversion and earnings. It's stored in `AssociatesTrackingSummary`
+  (migration `associates_tracking_summary`), kept apart from the Orders /
+  Earnings rows so the overlapping totals are never added together.
+  Re-uploading the same range replaces it.
+- Uploading the *Linked Product* or *Category* summary now gets a clear
+  error naming the right file, instead of the generic "no header row".
+
 ## 2026-10-19 (evening) — Classifier calibrated for Haiku 5.5; prod switches to it
 
 ### Changed

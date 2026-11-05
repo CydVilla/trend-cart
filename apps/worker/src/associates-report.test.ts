@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  detectAssociatesReport,
   parseAssociatesReport,
+  parseTrackingSummaryReport,
   parseDelimited,
   parseMoneyCents,
   parseReportDate,
@@ -134,4 +136,75 @@ test("quoted fields keep delimiters, escaped quotes and newlines", () => {
     ["a", "b,c", 'say "hi"', "two\nlines"],
     ["x", "y"],
   ]);
+});
+
+// ── Summary reports (shape of the real 2026-11-04 downloads) ──
+
+const TRACKING_SUMMARY_CSV = [
+  "Tracking Id,Clicks,Items Ordered,Ordered Revenue,Items Shipped,Items Returned,Items Shipped Revenue,Items Returned Revenue,Total Earnings,Bonus,Items Shipped Earnings,Items Returned Earnings",
+  "villa03b-20,1261.0,-,-,-,-,-,-,-,0.0,-,-",
+  "Other,0.0,4.0,93.28,3.0,0.0,63.449999999999996,0.0,2.13,0.0,2.13,0.0",
+  "",
+].join("\n");
+
+const PRODUCT_SUMMARY_CSV = [
+  "Date,Category,Product Title,ASIN,Clicks,Indirect Items Ordered,Direct Items Ordered,Items Ordered,Direct Conversion Rate,Order Quantity,Product Conversion Rate,Order Conversion Rate,Commission Rate,Ordered Revenue,Items Shipped,Items Returned,Items Shipped Revenue,Items Shipped Earnings,Items Returned Revenue,Items Returned Earnings,Total Earnings",
+  "11-04-2026,-,-,None,438.0,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-",
+].join("\n");
+
+const CATEGORY_SUMMARY_CSV = [
+  "Date,Category,Clicks,Indirect Items Ordered,Direct Items Ordered,Items Ordered,Direct Conversion Rate,Order Quantity,Product Conversion Rate,Order Conversion Rate,Commission Rate,Ordered Revenue,Items Shipped,Items Returned,Items Shipped Revenue,Items Shipped Earnings,Items Returned Revenue,Items Returned Earnings,Bonus,Total Earnings",
+  "11-04-2026,Video Games,354.0,-,-,-,-,-,-,-,-,-,-,-,-,-,-,-,0.0,-",
+].join("\n");
+
+test("detect: summaries vs detail reports", () => {
+  assert.equal(detectAssociatesReport(TRACKING_SUMMARY_CSV), "tracking_summary");
+  assert.equal(detectAssociatesReport(PRODUCT_SUMMARY_CSV), "product_summary");
+  assert.equal(detectAssociatesReport(CATEGORY_SUMMARY_CSV), "category_summary");
+  assert.equal(detectAssociatesReport(ORDERS_CSV), "detail");
+  assert.equal(detectAssociatesReport(EARNINGS_TSV), "detail");
+  assert.equal(detectAssociatesReport("hello,world\n1,2"), null);
+});
+
+test("tracking summary: float counts, '-' as zero, float-noise money rounded", () => {
+  const r = parseTrackingSummaryReport(TRACKING_SUMMARY_CSV, { from: "2026-10-06", to: "2026-11-04" });
+  if ("error" in r) assert.fail(r.error);
+  assert.deepEqual(r.range, { from: "2026-10-06", to: "2026-11-04" });
+  assert.deepEqual(r.lines, [
+    {
+      trackingId: "villa03b-20",
+      clicks: 1261,
+      orderedItems: 0,
+      orderedSalesCents: 0,
+      shippedItems: 0,
+      returnedItems: 0,
+      shippedSalesCents: 0,
+      earningsCents: 0,
+      bonusCents: 0,
+    },
+    {
+      trackingId: "Other",
+      clicks: 0,
+      orderedItems: 4,
+      orderedSalesCents: 9328,
+      shippedItems: 3,
+      returnedItems: 0,
+      shippedSalesCents: 6345,
+      earningsCents: 213,
+      bonusCents: 0,
+    },
+  ]);
+});
+
+test("tracking summary: unreadable cell fails the whole file, never a silent drop", () => {
+  const bad = TRACKING_SUMMARY_CSV.replace("1261.0", "12.5");
+  const r = parseTrackingSummaryReport(bad, { from: "2026-10-06", to: "2026-11-04" });
+  assert.ok("error" in r && /clicks/.test(r.error));
+  const backwards = parseTrackingSummaryReport(TRACKING_SUMMARY_CSV, { from: "2026-11-04", to: "2026-10-06" });
+  assert.ok("error" in backwards);
+});
+
+test("orders/earnings parser still refuses summaries", () => {
+  assert.ok("error" in parseAssociatesReport(TRACKING_SUMMARY_CSV));
+  assert.ok("error" in parseAssociatesReport(PRODUCT_SUMMARY_CSV));
 });
