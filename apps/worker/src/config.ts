@@ -386,6 +386,8 @@ export const config = {
       /* A feed item older than this is not evidence of a live deal. */
       maxSourceAgeHours: envInt("DEAL_EBAY_MAX_AGE_HOURS", 6),
       /* Browse API saved searches. Off until both keys are set. */
+      /* Also post single eBay listings a curator account (Wario64) links to. */
+      curatorLinks: envBool("DEAL_EBAY_CURATOR_LINKS", true),
       appId: envString("EBAY_APP_ID", ""),
       certId: envString("EBAY_CERT_ID", ""),
       minDiscountPercent: envInt("DEAL_EBAY_MIN_DISCOUNT_PERCENT", 20),

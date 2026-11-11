@@ -63,3 +63,25 @@ is a `TrackedListing` with `marketplace = www.ebay.com` and the item ID in `asin
   through the Partner Network, and isn't guaranteed. Keys may not be enough.
 - Whether classic-link sales arrive through Impact's Actions API, and with
   `customid` as a sub-ID, is unconfirmed until the first real sale.
+
+## Addendum (2026-11-11): curator eBay links
+
+A third supply: a curator account's post (ADR-0017) that links exactly one US
+eBay listing and yields no Amazon candidate. Curators link eBay through general
+shorteners (`buff.ly`), so a short link counts as eBay only when its line of
+the post names eBay, and only if its first redirect lands on a `/itm/` page.
+That redirect header is the only thing requested; eBay itself is never fetched
+through the curator's tracking link.
+
+The listing is then read through the Browse API. Its title and price are
+eBay's, never the curator's wording. The curator's judgment replaces the
+20%-markdown rule; new, fixed price, single variation, in stock and the seller
+thresholds still apply. The post goes out on the eBay channel's budget, priced
+like a saved-search post, with "(via <curator>)".
+
+eBay's own curated deals (the Deal API behind ebay.com/deals: daily, spotlight
+and event deals) were also considered. The production keyset cannot use it:
+the `buy.deal` scope is refused and the endpoint returns 403. It is a
+limited-release API that eBay grants per application. Scraping the deals page
+is not an option under the API license.
+

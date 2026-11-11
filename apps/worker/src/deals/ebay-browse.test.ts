@@ -214,3 +214,30 @@ test("the poster can recognize a link that already names its post", () => {
   assert.equal(hasEbayCustomId(AFFILIATE, "other"), false);
   assert.equal(hasEbayCustomId("not a url", "x"), false);
 });
+
+test("a curator's pick may skip the markdown rule but not the seller rules", async () => {
+  const noMarkdown = item({ marketingPrice: undefined });
+  const strict = createEbayBrowseClient(creds, criteria, fakeEbay(() => json(noMarkdown)).fetchImpl, () => NOW);
+  assert.deepEqual(await strict.check("306591775745", "p"), { status: "unavailable", reason: "discount_too_small" });
+
+  const { fetchImpl, calls } = fakeEbay(() => json(noMarkdown));
+  const relaxed = await createEbayBrowseClient(creds, criteria, fetchImpl, () => NOW).check("306591775745", "", {
+    minDiscountPercent: 0,
+  });
+  assert.equal(relaxed?.status, "ok");
+  assert.ok(relaxed?.status === "ok" && relaxed.title.length > 0 && relaxed.discountPercent === 0);
+  // No post exists yet at staging time: no affiliate reference is sent.
+  assert.equal(calls[1]?.headers["x-ebay-c-enduserctx"], "affiliateCampaignId=5339244955");
+
+  const badSeller = item({ marketingPrice: undefined, seller: { feedbackPercentage: "91.0", feedbackScore: 9000 } });
+  const client = createEbayBrowseClient(creds, criteria, fakeEbay(() => json(badSeller)).fetchImpl, () => NOW);
+  assert.deepEqual(await client.check("306591775745", "", { minDiscountPercent: 0 }), {
+    status: "unavailable",
+    reason: "seller_feedback_low",
+  });
+});
+
+test("curator-sourced copy credits the curator and omits a zero discount", () => {
+  const composed = composeBrowseDeal({ ...priced, discountPercent: 0, via: "Wario64" });
+  assert.match(composed?.text ?? "", /^Super Mario Odyssey Nintendo Switch is \$39\.99 on eBay \(via Wario64\) #ad\n\n\(price as of /);
+});

@@ -2,7 +2,9 @@ import {
   canonicalAmazonUrl,
   DEAL_BANNED_PHRASES,
   extractAsin,
+  extractEbayItemId,
   isAmazonHost,
+  isEbayHost,
   validateDealText,
   type CuratedDealKind,
 } from "@trendcart/shared";
@@ -28,6 +30,12 @@ const RESOLVE_TIMEOUT_MS = 10_000;
 const MAX_REDIRECT_HOPS = 4;
 /** Amazon's own shorteners — resolved by redirect, never by loading a page. */
 const SHORTENER_HOSTS = new Set(["amzn.to", "a.co"]);
+/** eBay's own shortener: always an eBay link. */
+const EBAY_SHORTENER_HOSTS = new Set(["ebay.us"]);
+/** General shorteners curators use for non-Amazon retailers. One is treated
+ *  as an eBay link only when its line of the post names eBay. */
+const GENERIC_SHORTENER_HOSTS = new Set(["buff.ly", "bit.ly"]);
+const EBAY_WORD_RE = /\bebay\b/i;
 
 export type CuratorPost = {
   /** at:// URI — the per-source dedup guid. */
@@ -41,6 +49,9 @@ export type CuratorPost = {
   /** Amazon-host links (facets + link-card embed). `display` is the link's
    *  visible text in the post, used to find which line names the product. */
   amazonLinks: Array<{ uri: string; display: string | null }>;
+  /** Links that are, or on their line claim to be, an eBay listing. Unresolved:
+   *  a short link still has to land on a US eBay /itm/ page to count. */
+  ebayLinks: Array<{ uri: string; display: string | null }>;
 };
 
 export type CuratedMeta = {
@@ -73,7 +84,7 @@ function marketplaceOf(url: URL): string {
 }
 
 /** Parse one getAuthorFeed response. Reposts, replies, other authors' posts,
- *  and posts without an Amazon link are dropped. */
+ *  and posts with neither an Amazon nor an eBay link are dropped. */
 export function parseAuthorFeed(json: unknown, actor: string): CuratorPost[] {
   const feed = rec(json).feed;
   if (!Array.isArray(feed)) return [];
@@ -96,15 +107,27 @@ export function parseAuthorFeed(json: unknown, actor: string): CuratorPost[] {
 
     const bytes = enc.encode(text);
     const amazonLinks: CuratorPost["amazonLinks"] = [];
+    const ebayLinks: CuratorPost["ebayLinks"] = [];
+    const lines = text.split(/\n+/);
     const addLink = (candidate: unknown, display: string | null): void => {
       const link = str(candidate);
       if (!link) return;
+      let host: string;
       try {
-        if (!isAmazonHost(new URL(link).hostname)) return;
+        host = new URL(link).hostname.toLowerCase().replace(/^www\./, "");
       } catch {
         return;
       }
-      if (!amazonLinks.some((l) => l.uri === link)) amazonLinks.push({ uri: link, display });
+      if (isAmazonHost(host)) {
+        if (!amazonLinks.some((l) => l.uri === link)) amazonLinks.push({ uri: link, display });
+        return;
+      }
+      const line = display ? lines.find((l) => l.includes(display)) : undefined;
+      const isEbay =
+        isEbayHost(host) ||
+        EBAY_SHORTENER_HOSTS.has(host) ||
+        (GENERIC_SHORTENER_HOSTS.has(host) && line !== undefined && EBAY_WORD_RE.test(line));
+      if (isEbay && !ebayLinks.some((l) => l.uri === link)) ebayLinks.push({ uri: link, display });
     };
     for (const facet of Array.isArray(record.facets) ? record.facets : []) {
       const index = rec(rec(facet).index);
@@ -122,7 +145,7 @@ export function parseAuthorFeed(json: unknown, actor: string): CuratorPost[] {
     const embed = rec(record.embed);
     addLink(rec(embed.external).uri, null);
     addLink(rec(rec(embed.media).external).uri, null);
-    if (amazonLinks.length === 0) continue;
+    if (amazonLinks.length === 0 && ebayLinks.length === 0) continue;
 
     const rkey = uri.split("/").pop() ?? "";
     const dates = [validDate(record.createdAt), validDate(post.indexedAt)].filter(
@@ -135,12 +158,13 @@ export function parseAuthorFeed(json: unknown, actor: string): CuratorPost[] {
       publishedAt:
         dates.length > 0 ? new Date(Math.min(...dates.map((d) => d.getTime()))) : null,
       amazonLinks,
+      ebayLinks,
     });
   }
   return posts;
 }
 
-/** Newest top-level posts of a curator account, Amazon-linked only. */
+/** Newest top-level posts of a curator account that link Amazon or eBay. */
 export async function fetchCuratorPosts(
   actor: string,
   limit: number,
@@ -184,6 +208,46 @@ export async function resolveAmazonLink(
       const asin = extractAsin(url.toString());
       return asin ? { asin, marketplace: marketplaceOf(url) } : null;
     }
+    if (hop === MAX_REDIRECT_HOPS) return null;
+    const response = await fetchImpl(url, {
+      method: "HEAD",
+      redirect: "manual",
+      headers: { "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(RESOLVE_TIMEOUT_MS),
+    });
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status >= 400 || !location) {
+      if (response.status >= 500) throw new Error(`shortener HTTP ${response.status}`);
+      return null;
+    }
+    current = new URL(location, url).toString();
+  }
+  return null;
+}
+
+/**
+ * Follow a curator's eBay link to the listing's item number. Only the
+ * shortener is ever requested (HEAD, redirects not followed): the first hop
+ * that is a US eBay URL is read as text and never fetched, so no eBay page is
+ * loaded and the curator's own tracking link is not followed onto eBay.
+ * Null = not a single US listing. THROWS on a network failure (retry later).
+ */
+export async function resolveEbayLink(
+  raw: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  let current = raw;
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    let url: URL;
+    try {
+      url = new URL(current);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    const bare = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (isEbayHost(url.hostname)) return extractEbayItemId(url.toString());
+    if (!EBAY_SHORTENER_HOSTS.has(bare) && !GENERIC_SHORTENER_HOSTS.has(bare)) return null;
     if (hop === MAX_REDIRECT_HOPS) return null;
     const response = await fetchImpl(url, {
       method: "HEAD",

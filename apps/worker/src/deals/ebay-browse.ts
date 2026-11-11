@@ -48,7 +48,7 @@ export type BrowseListing = {
 
 /** What the pre-post re-read found. */
 export type BrowseCheck =
-  | { status: "ok"; priceCents: number; discountPercent: number; affiliateUrl: string }
+  | { status: "ok"; title: string; priceCents: number; discountPercent: number; affiliateUrl: string }
   | { status: "unavailable"; reason: string };
 
 type JsonRecord = Record<string, unknown>;
@@ -124,8 +124,9 @@ export function parseItemCheck(json: unknown, criteria: BrowseCriteria, now: Dat
   if (!affiliateUrl) return { status: "unavailable", reason: "no_affiliate_url" };
   return {
     status: "ok",
+    title: String(raw.title ?? "").trim(),
     priceCents: usdCents(raw.price) ?? 0,
-    discountPercent: Number(rec(raw.marketingPrice).discountPercentage),
+    discountPercent: Number(rec(raw.marketingPrice).discountPercentage) || 0,
     affiliateUrl,
   };
 }
@@ -151,8 +152,10 @@ export function browseFeedItem(listing: BrowseListing, fetchedAt: Date): EbayIte
 
 export type EbayBrowseClient = {
   search: (query: string, priceBand: { minCents: number | null; maxCents: number | null }) => Promise<BrowseListing[]>;
-  /** Null = the check couldn't finish; try again later. */
-  check: (itemId: string, postId: string) => Promise<BrowseCheck | null>;
+  /** Null = the check couldn't finish; try again later. `relax` loosens the
+   *  saved-search criteria for a listing a curator vouched for; an empty
+   *  `postId` reads the listing without minting a post reference. */
+  check: (itemId: string, postId: string, relax?: Partial<BrowseCriteria>) => Promise<BrowseCheck | null>;
 };
 
 export function createEbayBrowseClient(
@@ -221,18 +224,18 @@ export function createEbayBrowseClient(
       return parseSearchResults(await response.json(), criteria);
     },
 
-    async check(itemId, postId) {
+    async check(itemId, postId, relax) {
       try {
         const id = encodeURIComponent(`v1|${itemId}|0`);
         const response = await fetchImpl(`${API_BASE}/buy/browse/v1/item/${id}`, {
-          headers: await headers(postId),
+          headers: await headers(postId || undefined),
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         });
         if (response.status === 404 || response.status === 409) {
           return { status: "unavailable", reason: `http_${response.status}` };
         }
         if (!response.ok) return null;
-        return parseItemCheck(await response.json(), criteria, clock());
+        return parseItemCheck(await response.json(), { ...criteria, ...relax }, clock());
       } catch {
         return null;
       }
@@ -249,12 +252,15 @@ export function composeBrowseDeal(input: {
   priceAsOf: Date;
   linkUrl: string;
   maxLength: number;
+  /** Credit for the curator whose post surfaced the listing. */
+  via?: string | null;
 }): { text: string; anchor: string } | null {
-  const title = shortenAmazonTitle(input.listingTitle, 120);
+  const title = shortenAmazonTitle(input.listingTitle, input.via ? 100 : 120);
   if (title.length < 8 || hasPriceClaim(title) || input.priceCents <= 0) return null;
   const anchor = `${formatMoney(input.priceCents)} on eBay`;
   const pct = Math.round(input.discountPercent);
   const off = pct >= 1 ? ` (${pct}% off)` : "";
-  const text = `${title} is ${anchor}${off} #ad\n\n(price as of ${formatAsOf(input.priceAsOf)} — subject to change)`;
+  const via = input.via ? ` (via ${input.via})` : "";
+  const text = `${title} is ${anchor}${off}${via} #ad\n\n(price as of ${formatAsOf(input.priceAsOf)} — subject to change)`;
   return validateDealText(text, input.linkUrl, input.maxLength, anchor).ok ? { text, anchor } : null;
 }
