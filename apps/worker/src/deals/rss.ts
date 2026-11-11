@@ -92,7 +92,8 @@ export type AmazonMatch = AmazonRef & {
     | "amazon-product-attribute"
     | "direct-body-link"
     | "ebay-exit-link"
-    | "ebay-browse";
+    | "ebay-browse"
+    | "curator-ebay-link";
 };
 
 const URL_RE = /https?:\/\/[^\s"'<>\\]+/gi;

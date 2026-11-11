@@ -12,6 +12,7 @@ import {
 import {
   canonicalAmazonUrl,
   canonicalEbayUrl,
+  EBAY_MARKETPLACE,
   canonicalListingUrl,
   cleanDealTitle,
   CURATOR_URL_PREFIX,
@@ -40,6 +41,7 @@ import {
   extractCuratedProduct,
   fetchCuratorPosts,
   resolveAmazonLink,
+  resolveEbayLink,
   templateLead,
   validateCuratedLead,
   type CuratedItem,
@@ -138,6 +140,9 @@ type Channel = {
   gatingPosts: Prisma.DealPostWhereInput;
   /** Which sources' staged candidates this channel promotes. */
   poolSource: Prisma.DealSuggestionSourceWhereInput;
+  /** Narrows the pool further: a curator source feeds two channels, split by
+   *  which marketplace the candidate is on. */
+  poolWhere?: Prisma.DealSuggestionWhereInput;
 };
 
 const RSS_CHANNEL: Channel = {
@@ -170,6 +175,7 @@ const CURATED_CHANNEL: Channel = {
   ownPosts: { source: DealSource.CURATED },
   gatingPosts: { source: DealSource.CURATED },
   poolSource: { url: { startsWith: CURATOR_URL_PREFIX } },
+  poolWhere: { marketplace: { not: EBAY_MARKETPLACE } },
 };
 
 const EBAY_CHANNEL: Channel = {
@@ -182,10 +188,19 @@ const EBAY_CHANNEL: Channel = {
   maxEvidenceAgeHours: config.deals.ebay.maxSourceAgeHours,
   ownPosts: { source: DealSource.EBAY },
   gatingPosts: { source: DealSource.EBAY },
-  poolSource: { OR: [{ url: EBAY_SOURCE_URL }, { url: { startsWith: EBAY_SEARCH_URL_PREFIX } }] },
+  // A curator's eBay links (ADR-0018 addendum) post here, not as curated posts.
+  poolSource: {
+    OR: [
+      { url: EBAY_SOURCE_URL },
+      { url: { startsWith: EBAY_SEARCH_URL_PREFIX } },
+      { url: { startsWith: CURATOR_URL_PREFIX } },
+    ],
+  },
+  poolWhere: { marketplace: EBAY_MARKETPLACE },
 };
 
 const ebayEnabled = Boolean(config.deals.ebay.campaignId);
+const CURATOR_EBAY_RELAX = { minDiscountPercent: 0 };
 // Sandbox keys (App ID "…-SBX-…") only work on eBay's sandbox host, whose
 // listings are fake — they must never drive the live channel.
 const ebaySandboxKeys = /-SBX-/i.test(config.deals.ebay.appId);
@@ -346,6 +361,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
 
   /** amzn.to link → resolved product (null = definitively not one product). */
   const resolvedLinks = new Map<string, AmazonRef | null>();
+  const resolvedEbayLinks = new Map<string, string | null>();
   /** Curator posts already judged without a ledger row (no ASIN to key it). */
   const settledPosts = new Map<string, true>();
 
@@ -1042,6 +1058,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
         status: SuggestionStatus.NEW,
         createdAt: { lte: stagedBefore },
         source: { isActive: true, ...channel.poolSource },
+        ...channel.poolWhere,
       },
       include: { source: { select: { id: true, name: true, url: true } } },
       orderBy: { createdAt: "desc" },
@@ -1159,9 +1176,11 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       let verifiedAt: Date | null;
       // The post ID goes to eBay as the affiliate reference, so it has to be
       // chosen before the listing is re-read rather than by the database.
-      const browsePostId = isEbaySearchSource(candidate.source)
-        ? `eb${randomBytes(11).toString("hex")}`
-        : null;
+      const curatorEbay = channel.name === "ebay" && isCuratorSource(candidate.source);
+      const browsePostId =
+        isEbaySearchSource(candidate.source) || curatorEbay
+          ? `eb${randomBytes(11).toString("hex")}`
+          : null;
       let browseCheck: Extract<BrowseCheck, { status: "ok" }> | null = null;
       if (config.llm.useFake) {
         verdict = {
@@ -1186,7 +1205,13 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
           await releaseCandidate(candidate.id, candidate.gateVerdict, "ebay_browse_disabled");
           continue;
         }
-        const check = await ebayBrowse.check(candidate.asin, browsePostId);
+        // A curator's pick needn't be a formal markdown; every other listing
+        // standard (new, fixed price, in stock, seller record) still applies.
+        const check = await ebayBrowse.check(
+          candidate.asin,
+          browsePostId,
+          curatorEbay ? CURATOR_EBAY_RELAX : undefined,
+        );
         if (!check) {
           await releaseCandidate(candidate.id, candidate.gateVerdict, "ebay_check_failed");
           skip("ebay_check_failed");
@@ -1278,6 +1303,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
               priceAsOf: now,
               linkUrl,
               maxLength: config.deals.postMaxLength,
+              via: curatorEbay ? curatorLabel(candidate.source.name) : null,
             })
           : channel.name === "ebay"
           ? composeEbayDeal({
@@ -1580,6 +1606,19 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     if (!hasFreshSaleTimestamp(post.publishedAt, new Date(), CURATED_CHANNEL.maxEvidenceAgeHours)) {
       return "done";
     }
+    // Amazon first. The eBay listing is the fallback, so one curator post
+    // never yields two of ours.
+    const amazon: ItemOutcome =
+      post.amazonLinks.length > 0 ? await handleCuratorAmazon(source, post, llmBudget) : "done";
+    if (amazon !== "done" || post.ebayLinks.length === 0) return amazon;
+    return handleCuratorEbay(source, post, llmBudget);
+  }
+
+  async function handleCuratorAmazon(
+    source: DealSuggestionSource,
+    post: CuratorPost,
+    llmBudget: { remaining: number },
+  ): Promise<ItemOutcome> {
     const products = new Map<string, { ref: AmazonRef; display: string | null }>();
     for (const link of post.amazonLinks) {
       const ref = await resolveCached(link.uri);
@@ -1602,6 +1641,54 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     return handleItem(source, curatedFeedItem(post, ref, product), llmBudget);
   }
 
+  /** A curator post whose only product link is one eBay listing → a candidate
+   *  for the eBay channel. The listing is read through the Browse API here, so
+   *  the staged title and price are eBay's own, not the curator's wording. */
+  async function handleCuratorEbay(
+    source: DealSuggestionSource,
+    post: CuratorPost,
+    llmBudget: { remaining: number },
+  ): Promise<ItemOutcome> {
+    if (!ebayBrowse || !config.deals.ebay.curatorLinks) {
+      skip("curated_ebay_disabled");
+      return "done";
+    }
+    const itemIds = new Set<string>();
+    for (const link of post.ebayLinks) {
+      const cached = resolvedEbayLinks.get(link.uri);
+      const itemId = cached !== undefined ? cached : await resolveEbayLink(link.uri);
+      remember(resolvedEbayLinks, link.uri, itemId);
+      if (itemId) itemIds.add(itemId);
+    }
+    if (itemIds.size !== 1) {
+      skip(itemIds.size === 0 ? "curated_no_ebay_listing" : "curated_multiple_products");
+      return "done";
+    }
+    const itemId = [...itemIds][0]!;
+    const check = await ebayBrowse.check(itemId, "", CURATOR_EBAY_RELAX);
+    if (!check) return "retry";
+    if (check.status === "unavailable") {
+      skip(`curated_ebay_${check.reason}`);
+      return "done";
+    }
+    const item: EbayItem = {
+      title: check.title,
+      link: post.url,
+      guid: `${post.uri}#ebay`,
+      description: "",
+      content: "",
+      publishedAt: post.publishedAt,
+      ebay: {
+        asin: itemId,
+        marketplace: EBAY_MARKETPLACE,
+        matchConfidence: 100,
+        evidence: "curator-ebay-link",
+        priceCents: check.priceCents,
+      },
+    };
+    return handleItem(source, item, llmBudget);
+  }
+
   async function runCuratorSource(
     source: DealSuggestionSource,
     actor: string,
@@ -1611,10 +1698,13 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     const startedAt = new Date();
     const posts = await fetchCuratorPosts(actor, config.deals.curated.postsPerFetch);
     const known = await prisma.dealSuggestion.findMany({
-      where: { sourceId: source.id, guid: { in: posts.map((post) => post.uri) } },
+      where: {
+        sourceId: source.id,
+        guid: { in: posts.flatMap((post) => [post.uri, `${post.uri}#ebay`]) },
+      },
       select: { guid: true },
     });
-    const seen = new Set(known.map((row) => row.guid));
+    const seen = new Set(known.map((row) => row.guid.replace(/#ebay$/, "")));
     let staged = 0;
     for (const post of posts) {
       if (seen.has(post.uri) || settledPosts.has(post.uri)) continue;

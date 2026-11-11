@@ -3,6 +3,18 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — curator eBay links
+
+### Added
+- **eBay listings a curator links to.** When a curator account's post (Wario64
+  and the like) has no usable Amazon product but links one eBay listing, the
+  listing is posted through the eBay channel with our own affiliate link and
+  "(via <curator>)". The curator's short link is resolved by reading one
+  redirect header; the listing's title and price come from eBay's API, and the
+  seller, condition and stock rules still apply (the 20%-markdown rule does
+  not). Counts against the eBay channel's cap. `DEAL_EBAY_CURATOR_LINKS=false`
+  turns it off.
+
 ## Unreleased — product photos on deal posts
 
 ### Added

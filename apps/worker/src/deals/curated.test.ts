@@ -10,6 +10,7 @@ import {
   hasPriceClaim,
   parseAuthorFeed,
   resolveAmazonLink,
+  resolveEbayLink,
   templateLead,
   validateCuratedLead,
 } from "./curated.js";
@@ -288,4 +289,102 @@ test("curator URLs and labels", () => {
   assert.equal(canonicalCuratorUrl("http://www.bsky.app/profile/wario64.bsky.social"), "https://bsky.app/profile/wario64.bsky.social");
   assert.equal(curatorLabel("Wario64 (Bluesky)"), "Wario64");
   assert.equal(curatorLabel("Wario64"), "Wario64");
+});
+
+/** A curator post with one link facet per [display, uri] pair. */
+function linked(text: string, links: Array<[string, string]>) {
+  const enc = new TextEncoder();
+  return {
+    post: {
+      uri: "at://did:plc:knj5sw5al3sukl6vhkpi7637/app.bsky.feed.post/3mebay",
+      author: { did: "did:plc:knj5sw5al3sukl6vhkpi7637", handle: ACTOR },
+      record: {
+        text,
+        createdAt: "2026-11-11T16:21:00.000Z",
+        facets: links.map(([display, uri]) => {
+          const at = text.indexOf(display);
+          const byteStart = enc.encode(text.slice(0, at)).length;
+          return {
+            index: { byteStart, byteEnd: byteStart + enc.encode(display).length },
+            features: [{ $type: "app.bsky.richtext.facet#link", uri }],
+          };
+        }),
+      },
+      indexedAt: "2026-11-11T16:21:05.000Z",
+    },
+  };
+}
+
+test("a short link counts as eBay only on a line that names eBay", () => {
+  const text =
+    "Cowboy Bebop Steelbook (Blu-ray) available on Amazon ($44.98) amzn.to/3V1IOiQ #ad\n\n" +
+    "Walmart (Please Rewind/Sony) buff.ly/QVCOPkD\neBay (Please Rewind/Sony) buff.ly/pW2ZdCx";
+  const [post] = parseAuthorFeed(
+    {
+      feed: [
+        linked(text, [
+          ["amzn.to/3V1IOiQ", "https://amzn.to/3V1IOiQ"],
+          ["buff.ly/QVCOPkD", "https://buff.ly/QVCOPkD"],
+          ["buff.ly/pW2ZdCx", "https://buff.ly/pW2ZdCx"],
+        ]),
+      ],
+    },
+    ACTOR,
+  );
+  assert.deepEqual(post!.amazonLinks.map((l) => l.uri), ["https://amzn.to/3V1IOiQ"]);
+  assert.deepEqual(post!.ebayLinks, [{ uri: "https://buff.ly/pW2ZdCx", display: "buff.ly/pW2ZdCx" }]);
+});
+
+test("an eBay-only post is kept; direct and ebay.us links need no label", () => {
+  const posts = parseAuthorFeed(
+    {
+      feed: [
+        linked("Metroid Prime 4 is $49.99 at antonline ebay.us/abc123 #ad", [["ebay.us/abc123", "https://ebay.us/abc123"]]),
+        linked("Great price ebay.com/itm/860133586683", [["ebay.com/itm/860133586683", "https://www.ebay.com/itm/860133586683"]]),
+        linked("Target only buff.ly/zzz", [["buff.ly/zzz", "https://buff.ly/zzz"]]),
+      ],
+    },
+    ACTOR,
+  );
+  assert.equal(posts.length, 2);
+  assert.ok(posts.every((p) => p.amazonLinks.length === 0 && p.ebayLinks.length === 1));
+});
+
+function redirects(map: Record<string, { status: number; location?: string }>) {
+  const calls: Array<{ url: string; method?: string; redirect?: string }> = [];
+  const fetchImpl = (async (url: URL, init: RequestInit) => {
+    calls.push({ url: url.toString(), method: init.method, redirect: init.redirect });
+    const hit = map[url.toString()] ?? { status: 404 };
+    return new Response(null, { status: hit.status, headers: hit.location ? { location: hit.location } : {} });
+  }) as unknown as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+test("resolveEbayLink reads the shortener's redirect and never requests eBay", async () => {
+  const { calls, fetchImpl } = redirects({
+    "https://buff.ly/pW2ZdCx": {
+      status: 302,
+      location: "https://www.ebay.com/itm/860133586683?mkcid=1&campid=5339115417&toolid=10001",
+    },
+  });
+  assert.equal(await resolveEbayLink("https://buff.ly/pW2ZdCx", fetchImpl), "860133586683");
+  assert.deepEqual(calls, [{ url: "https://buff.ly/pW2ZdCx", method: "HEAD", redirect: "manual" }]);
+
+  const direct = redirects({});
+  assert.equal(await resolveEbayLink("https://www.ebay.com/itm/Some-Title/860133586683?x=1", direct.fetchImpl), "860133586683");
+  assert.equal(direct.calls.length, 0);
+});
+
+test("resolveEbayLink rejects non-listings, other sites and regional eBay", async () => {
+  const { fetchImpl } = redirects({
+    "https://buff.ly/store": { status: 302, location: "https://www.ebay.com/str/pleaserewind" },
+    "https://buff.ly/walmart": { status: 302, location: "https://www.walmart.com/ip/123" },
+    "https://buff.ly/uk": { status: 302, location: "https://www.ebay.co.uk/itm/860133586683" },
+    "https://buff.ly/dead": { status: 404 },
+  });
+  for (const link of ["https://buff.ly/store", "https://buff.ly/walmart", "https://buff.ly/uk", "https://buff.ly/dead", "https://example.com/x", "not a url"]) {
+    assert.equal(await resolveEbayLink(link, fetchImpl), null, link);
+  }
+  const down = redirects({ "https://buff.ly/x": { status: 503 } });
+  await assert.rejects(resolveEbayLink("https://buff.ly/x", down.fetchImpl), /shortener HTTP 503/);
 });
