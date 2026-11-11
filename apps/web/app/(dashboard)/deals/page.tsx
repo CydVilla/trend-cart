@@ -16,6 +16,7 @@ import {
   updateSuggestionSource,
 } from "../actions";
 import { SubmitButton } from "../submit-button";
+import { AttachImage } from "./attach-image";
 import {
   Badge,
   EmptyState,
@@ -941,6 +942,9 @@ export default async function DealsPage() {
                         </a>
                       ) : (
                         <span className="text-zinc-300">—</span>
+                      )}
+                      {url && dp.status === DealPostStatus.POSTED && String(dp.source) !== "EBAY" && (
+                        <AttachImage dealId={dp.id} />
                       )}
                     </td>
                   </tr>
