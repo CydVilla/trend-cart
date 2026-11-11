@@ -19,13 +19,18 @@ import {
   noteBlueskyUp,
 } from "../bluesky-health.js";
 import { config } from "../config.js";
+import { createCatalogClient, type CatalogClient } from "../creators-api.js";
 import { isPaused } from "../heartbeat.js";
 import { createTrackedLink } from "../tracking.js";
+import { chooseListingImage, imageSize } from "./post-image.js";
 
 const MAX_POST_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 10 * 60_000;
 /** Bluesky uploadBlob hard cap. */
 const MAX_IMAGE_BYTES = 976_560;
+/** After a failed catalog lookup, post without photos for this long. */
+const IMAGE_LOOKUP_BACKOFF_MS = 60 * 60_000;
+const IMAGE_LOOKUP_TIMEOUT_MS = 20_000;
 const IMAGE_HOST_RE = /(^|\.)media-amazon\.com$|(^|\.)images-amazon\.com$|(^|\.)ssl-images-amazon\.com$/i;
 
 export type DealPostStats = { posted: number; postFailed: number; disabled: boolean };
@@ -84,8 +89,51 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     return agent;
   }
 
-  /** Best-effort external-card thumbnail. Any failure → link-only post. */
-  async function uploadThumb(activeAgent: AtpAgent, imageUrl: string | null): Promise<unknown | null> {
+  let catalog: CatalogClient | null | undefined;
+  let imageLookupBlockedUntil = 0;
+
+  /**
+   * The listing's product photo: the one already stored, else Amazon's
+   * primary image for this exact ASIN (see post-image.ts for the guards).
+   * Best-effort — any doubt or failure means a text-only post.
+   */
+  async function listingImageUrl(listing: TrackedListing): Promise<string | null> {
+    if (listing.imageUrl) return listing.imageUrl;
+    if (listing.marketplace !== config.creatorsApi.marketplace) return null;
+    if (Date.now() < imageLookupBlockedUntil) return null;
+    if (catalog === undefined) catalog = createCatalogClient();
+    if (!catalog) return null;
+    try {
+      const items = await Promise.race([
+        catalog.getItemsByAsin([listing.asin]),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("image lookup timed out")), IMAGE_LOOKUP_TIMEOUT_MS),
+        ),
+      ]);
+      const choice = chooseListingImage(listing, items.get(listing.asin));
+      if ("skip" in choice) {
+        console.log(`[dealPoster] no photo for ${listing.asin}: ${choice.skip}`);
+        return null;
+      }
+      await prisma.trackedListing.update({
+        where: { id: listing.id },
+        data: { imageUrl: choice.imageUrl },
+      });
+      return choice.imageUrl;
+    } catch (error) {
+      imageLookupBlockedUntil = Date.now() + IMAGE_LOOKUP_BACKOFF_MS;
+      console.warn(
+        `[dealPoster] photo lookup failed, posting without photos for an hour: ${error instanceof Error ? error.message : error}`,
+      );
+      return null;
+    }
+  }
+
+  /** Best-effort image upload. Any failure → link-only post. */
+  async function uploadImage(
+    activeAgent: AtpAgent,
+    imageUrl: string | null,
+  ): Promise<{ blob: unknown; aspectRatio: { width: number; height: number } | null } | null> {
     if (!imageUrl) return null;
     try {
       const host = new URL(imageUrl).hostname;
@@ -95,8 +143,9 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return null;
       const encoding = response.headers.get("content-type") ?? "image/jpeg";
+      if (!encoding.startsWith("image/")) return null;
       const uploaded = await activeAgent.uploadBlob(bytes, { encoding });
-      return uploaded.data.blob;
+      return { blob: uploaded.data.blob, aspectRatio: imageSize(bytes) };
     } catch {
       return null;
     }
@@ -277,22 +326,36 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     try {
       const tracked = await createTrackedLink(linkUrl, "deal", deal.id);
       const facets = buildFacets(text, tracked.url, anchor);
-      const thumb = priceFree ? null : await uploadThumb(activeAgent, listing.imageUrl);
+      // Amazon's own image for the linked ASIN, when one can be had.
+      const image = await uploadImage(activeAgent, await listingImageUrl(listing));
       const wasClause =
         deal.wasPriceCents && deal.wasPriceCents > deal.salePriceCents
           ? ` (was ${formatMoney(deal.wasPriceCents, deal.currency)})`
           : "";
-      const embed = thumb
-        ? {
-            $type: "app.bsky.embed.external",
-            external: {
-              uri: linkUrl,
-              title: listing.title,
-              description: `Now ${formatMoney(deal.salePriceCents, deal.currency)}${wasClause} on Amazon.`,
-              thumb,
-            },
-          }
-        : undefined;
+      // Price-free channels may never render a priced card, so they attach
+      // the photo itself; priced posts keep the link card with its price line.
+      const embed = !image
+        ? undefined
+        : priceFree
+          ? {
+              $type: "app.bsky.embed.images",
+              images: [
+                {
+                  image: image.blob,
+                  alt: listing.title.slice(0, 300),
+                  ...(image.aspectRatio ? { aspectRatio: image.aspectRatio } : {}),
+                },
+              ],
+            }
+          : {
+              $type: "app.bsky.embed.external",
+              external: {
+                uri: linkUrl,
+                title: listing.title,
+                description: `Now ${formatMoney(deal.salePriceCents, deal.currency)}${wasClause} on Amazon.`,
+                thumb: image.blob,
+              },
+            };
 
       const result = await activeAgent.post({
         text,

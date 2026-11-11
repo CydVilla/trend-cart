@@ -12,6 +12,20 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   so a notification is acknowledged and nothing else happens. Needs
   `EBAY_VERIFICATION_TOKEN`; public, like `/api/health`.
 
+## Unreleased — product photos on deal posts
+
+### Added
+- **Photos on RSS, curated and manual Amazon deal posts.** The poster attaches
+  Amazon's primary image for the exact ASIN the post links to, as a real image
+  embed with the title as alt text. The photo is skipped (text-only post) when
+  the catalog has no row or image for that ASIN, or when Amazon's title for it
+  doesn't match the posted title. Needs Creators API access; while the account
+  is `AssociateNotEligible` every post stays text-only.
+- **Deals → add image.** Each live Amazon deal post in *Recent deal posts* has
+  an "add image" link. Pick any image or screenshot; the browser shrinks it
+  under Bluesky's 976 KB cap and the post is rewritten in place with the image
+  attached (same URL, text and link untouched).
+
 ## Unreleased — Tracking Id summary upload
 
 ### Added
