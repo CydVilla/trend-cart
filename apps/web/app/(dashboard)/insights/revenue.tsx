@@ -1,4 +1,11 @@
-import { prisma, computeRevenueReport, latestTrackingSummary, type TrackingSummaryView } from "@trendcart/db";
+import {
+  prisma,
+  computeEbayRevenue,
+  computeRevenueReport,
+  latestTrackingSummary,
+  type EbayRevenue,
+  type TrackingSummaryView,
+} from "@trendcart/db";
 import { formatMoney, type AffiliateChannel } from "@trendcart/shared";
 import { SubmitButton } from "../submit-button";
 import { Badge, SectionHeading } from "../ui";
@@ -14,6 +21,7 @@ const CHANNEL_LABEL: Record<AffiliateChannel, string> = {
 
 const SOURCE_LABEL: Record<string, string> = {
   CURATED: "curator",
+  EBAY: "ebay",
   DISCOVERED: "rss/feed",
   MANUAL: "manual",
   AUTOMATED: "watchlist",
@@ -124,13 +132,77 @@ function TrackingSummaryTable({ summary }: { summary: TrackingSummaryView }) {
   );
 }
 
+/** eBay earnings per post, from the hourly Impact conversion sync. */
+function EbayRevenueTable({ ebay }: { ebay: EbayRevenue }) {
+  const { totals, unattributed } = ebay;
+  return (
+    <div id="ebay-revenue" className="mt-6">
+      <h3 className="mb-2 text-sm font-semibold">eBay by post</h3>
+      {totals.posts === 0 && totals.orders === 0 ? (
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-500">
+          No eBay posts yet. The channel starts once EBAY_CAMPAIGN_ID is set.
+        </div>
+      ) : (
+        <>
+          <p className="mb-2 text-xs text-zinc-500">
+            {totals.posts} posts · {totals.clicks} clicks · {totals.orders} orders ·{" "}
+            {formatMoney(totals.saleCents)} sales · {formatMoney(totals.payoutCents)} earned
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="border-b border-zinc-100 text-xs uppercase text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2">Post</th>
+                  <th className="px-3 py-2">Clicks</th>
+                  <th className="px-3 py-2">Orders</th>
+                  <th className="px-3 py-2">Sales</th>
+                  <th className="px-3 py-2">Earned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ebay.posts.map((p) => (
+                  <tr key={p.dealPostId} className="border-b border-zinc-50 last:border-0">
+                    <td className="max-w-xs px-3 py-2">
+                      <div className="truncate" title={p.title}>
+                        {p.title}
+                      </div>
+                      <div className="font-mono text-xs text-zinc-400">
+                        {p.itemId}
+                        {p.postedAt ? ` · ${p.postedAt.toISOString().slice(0, 10)}` : ""}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-zinc-600">{p.clicks}</td>
+                    <td className="px-3 py-2">{p.orders}</td>
+                    <td className="px-3 py-2 text-zinc-600">{formatMoney(p.saleCents)}</td>
+                    <td className="px-3 py-2 font-medium text-emerald-700">{formatMoney(p.payoutCents)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {unattributed.orders > 0 && (
+            <p className="mt-2 text-xs text-amber-700">
+              {unattributed.orders} order(s) worth {formatMoney(unattributed.payoutCents)} couldn&apos;t
+              be tied to a post.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
  * Revenue by channel: the hand-uploaded Associates Orders/Earnings reports,
  * split by tracking ID (one per channel via AMAZON_TAG_*) and joined to our
  * own human-click counts. The question it answers: which channel converts.
  */
 export async function RevenueSection({ outcome }: { outcome: UploadOutcome }) {
-  const [report, summary] = await Promise.all([computeRevenueReport(prisma), latestTrackingSummary(prisma)]);
+  const [report, summary, ebay] = await Promise.all([
+    computeRevenueReport(prisma),
+    latestTrackingSummary(prisma),
+    computeEbayRevenue(prisma),
+  ]);
   const t = report.totals;
   const shared = report.channels.some((c) => c.channels.length > 1);
 
@@ -318,6 +390,8 @@ export async function RevenueSection({ outcome }: { outcome: UploadOutcome }) {
           </p>
         </>
       )}
+
+      <EbayRevenueTable ebay={ebay} />
     </section>
   );
 }

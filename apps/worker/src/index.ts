@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { createDealDiscoverer, newDealDiscoverStats } from "./deals/discover.js";
 import { createDealPoster, type DealPostStats } from "./deals/poster.js";
 import { createDealSuggester, newDealSuggestStats } from "./deals/suggest.js";
+import { createEbaySync } from "./ebay-sync.js";
 import { createBanter, type BanterStats } from "./banter.js";
 import { blueskyBackoffSeconds } from "./bluesky-health.js";
 import { llmBillingBlockedSeconds } from "./llm-health.js";
@@ -148,6 +149,7 @@ async function main(): Promise<void> {
   // RSS suggestions need no Amazon keys — the point is bridging the
   // pre-PA-API gap — so only DEALS_ENABLED (and its own toggle) gates them.
   const dealSuggester = config.deals.enabled ? createDealSuggester(llm, dealSuggestStats) : null;
+  const ebaySync = createEbaySync();
   if (!config.deals.enabled) {
     console.log("  deal tracker:     disabled (set DEALS_ENABLED=true to run)");
   }
@@ -198,6 +200,7 @@ async function main(): Promise<void> {
       ? [startLoop("dealSuggest", 60_000, () => dealSuggester.tick())]
       : []),
     ...(dealPoster ? [startLoop("dealPost", 30_000, () => dealPoster.tick())] : []),
+    ...(ebaySync.enabled ? [startLoop("ebaySync", 60 * 60_000, () => ebaySync.tick())] : []),
     ...(notificationListener
       ? [
           // 90s cadence: mention requests deserve a prompt answer.

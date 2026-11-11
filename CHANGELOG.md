@@ -11,11 +11,28 @@ Notable changes to TrendCart. Dates are deploy dates; the bot went live on
   embed with the title as alt text. The photo is skipped (text-only post) when
   the catalog has no row or image for that ASIN, or when Amazon's title for it
   doesn't match the posted title. Needs Creators API access; while the account
-  is `AssociateNotEligible` every post stays text-only.
+  is `AssociateNotEligible` every post stays text-only. eBay posts are unchanged.
 - **Deals → add image.** Each live Amazon deal post in *Recent deal posts* has
   an "add image" link. Pick any image or screenshot; the browser shrinks it
   under Bluesky's 976 KB cap and the post is rewritten in place with the image
   attached (same URL, text and link untouched).
+
+## Unreleased — eBay deal channel
+
+### Added
+- **Automated eBay deals (ADR-0018).** A new `EBAY` channel reads the Slickdeals
+  eBay feed and posts single-listing deals, price-free, with our Partner Network
+  campaign ID and the post ID as `customid`. It has its own daily cap and gap,
+  and stays off until `EBAY_CAMPAIGN_ID` is set (migration `ebay_channel`).
+- **eBay saved searches.** Eight seeded Browse API searches on gaming and
+  collectibles find marked-down listings from established sellers. Each is
+  re-read just before posting. Off until `EBAY_APP_ID` and `EBAY_CERT_ID` are set.
+- **Insights → eBay by post.** Clicks, orders, sales and earnings per post, from
+  an hourly read of Impact's Actions API.
+
+### Changed
+- `/r/<id>` also redirects to eBay. Bots get the listing without campaign
+  parameters, so crawler fetches don't register as affiliate clicks.
 
 ## Unreleased — Tracking Id summary upload
 

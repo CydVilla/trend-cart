@@ -63,7 +63,7 @@ export async function computeLimitUsage(): Promise<LimitUsage> {
   });
   const dealPostsLastDay = await prisma.dealPost.count({
     where: {
-      source: { notIn: [DealSource.MANUAL, DealSource.CURATED] },
+      source: { notIn: [DealSource.MANUAL, DealSource.CURATED, DealSource.EBAY] },
       status: DealPostStatus.POSTED,
       postedAt: { gte: new Date(now - DAY_MS) },
     },

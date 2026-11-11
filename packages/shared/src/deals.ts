@@ -16,6 +16,7 @@
  *  - "classic" — the original lead-in format on the fixed DEAL_ANCHOR phrase.
  */
 import { isAmazonHost } from "./amazon";
+import { extractEbayItemId, isEbayHost } from "./ebay";
 
 /** Fixed clickable phrase classic-style posts ride the link on. */
 export const DEAL_ANCHOR = "grab it on Amazon";
@@ -74,7 +75,7 @@ export function formatMoney(cents: number, currency = "USD"): string {
   }
 }
 
-function formatAsOf(date: Date): string {
+export function formatAsOf(date: Date): string {
   return (
     date.toLocaleString("en-US", {
       month: "short",
@@ -151,8 +152,15 @@ export function validateDealText(
   if (!/#ad\b/i.test(trimmed)) return { ok: false, reason: "missing #ad disclosure" };
   try {
     const url = new URL(linkUrl);
-    if (!isAmazonHost(url.hostname)) return { ok: false, reason: "link is not an Amazon URL" };
-    if (!url.searchParams.get("tag")) return { ok: false, reason: "link is missing the affiliate tag" };
+    if (isEbayHost(url.hostname)) {
+      if (!extractEbayItemId(linkUrl)) return { ok: false, reason: "link is not an eBay listing" };
+      if (!url.searchParams.get("campid")) {
+        return { ok: false, reason: "link is missing the eBay campaign ID" };
+      }
+    } else {
+      if (!isAmazonHost(url.hostname)) return { ok: false, reason: "link is not an Amazon URL" };
+      if (!url.searchParams.get("tag")) return { ok: false, reason: "link is missing the affiliate tag" };
+    }
   } catch {
     return { ok: false, reason: "invalid link URL" };
   }

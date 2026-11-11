@@ -2,6 +2,7 @@ import type { AssociatesReportKind, PrismaClient } from "@prisma/client";
 import {
   channelsForTag,
   extractAsin,
+  isEbayUrl,
   tagOfUrl,
   type AffiliateChannel,
   type ParsedAssociatesReport,
@@ -264,6 +265,7 @@ export async function computeRevenueReport(
   }
 
   for (const link of links) {
+    if (isEbayUrl(link.targetUrl)) continue; // Amazon's conversion denominator only
     const tag = tagOfUrl(link.targetUrl);
     if (tag) {
       const t = tagRow(tag);
@@ -389,6 +391,7 @@ export async function latestTrackingSummary(
   const ours = new Map<string, number>();
   let ourTotal = 0;
   for (const link of links) {
+    if (isEbayUrl(link.targetUrl)) continue;
     ourTotal += link.clickCount;
     const tag = tagOfUrl(link.targetUrl)?.toLowerCase();
     if (tag) ours.set(tag, (ours.get(tag) ?? 0) + link.clickCount);
@@ -421,5 +424,95 @@ export async function latestTrackingSummary(
       orderedItems: out.reduce((n, r) => n + r.orderedItems, 0),
       earningsCents: out.reduce((n, r) => n + r.earningsCents, 0),
     },
+  };
+}
+
+// ── eBay ────────────────────────────────────────────────────
+
+export type EbayPostRevenue = {
+  dealPostId: string;
+  title: string;
+  itemId: string;
+  postedAt: Date | null;
+  clicks: number;
+  orders: number;
+  saleCents: number;
+  payoutCents: number;
+};
+
+export type EbayRevenue = {
+  totals: { posts: number; clicks: number; orders: number; saleCents: number; payoutCents: number };
+  /** Conversions whose sub-ID names none of our posts. */
+  unattributed: { orders: number; saleCents: number; payoutCents: number };
+  /** Top posts by earnings, then clicks, then recency. */
+  posts: EbayPostRevenue[];
+};
+
+/** Every eBay post joined to its clicks and non-reversed conversions. */
+export async function computeEbayRevenue(
+  prisma: PrismaClient,
+  opts: { postLimit?: number } = {},
+): Promise<EbayRevenue> {
+  const [posts, conversions] = await Promise.all([
+    prisma.dealPost.findMany({
+      where: { source: "EBAY", status: "POSTED" },
+      select: { id: true, postedAt: true, listing: { select: { title: true, asin: true } } },
+    }),
+    prisma.ebayConversion.findMany({
+      where: { state: { not: "REVERSED" } },
+      select: { dealPostId: true, saleCents: true, payoutCents: true },
+    }),
+  ]);
+  const links = await prisma.trackedLink.findMany({
+    where: { kind: "deal", sourceId: { in: posts.map((p) => p.id) } },
+    select: { sourceId: true, clickCount: true },
+  });
+  const rows = new Map<string, EbayPostRevenue>(
+    posts.map((p) => [
+      p.id,
+      {
+        dealPostId: p.id,
+        title: p.listing.title,
+        itemId: p.listing.asin,
+        postedAt: p.postedAt,
+        clicks: 0,
+        orders: 0,
+        saleCents: 0,
+        payoutCents: 0,
+      },
+    ]),
+  );
+  for (const link of links) {
+    const row = link.sourceId ? rows.get(link.sourceId) : undefined;
+    if (row) row.clicks += link.clickCount;
+  }
+  const unattributed = { orders: 0, saleCents: 0, payoutCents: 0 };
+  for (const c of conversions) {
+    const row: { orders: number; saleCents: number; payoutCents: number } =
+      (c.dealPostId ? rows.get(c.dealPostId) : undefined) ?? unattributed;
+    row.orders += 1;
+    row.saleCents += c.saleCents;
+    row.payoutCents += c.payoutCents;
+  }
+  const all = [...rows.values()];
+  const sum = (pick: (r: EbayPostRevenue) => number): number =>
+    all.reduce((n, r) => n + pick(r), 0);
+  return {
+    totals: {
+      posts: all.length,
+      clicks: sum((r) => r.clicks),
+      orders: sum((r) => r.orders) + unattributed.orders,
+      saleCents: sum((r) => r.saleCents) + unattributed.saleCents,
+      payoutCents: sum((r) => r.payoutCents) + unattributed.payoutCents,
+    },
+    unattributed,
+    posts: all
+      .sort(
+        (a, b) =>
+          b.payoutCents - a.payoutCents ||
+          b.clicks - a.clicks ||
+          (b.postedAt?.getTime() ?? 0) - (a.postedAt?.getTime() ?? 0),
+      )
+      .slice(0, opts.postLimit ?? 50),
   };
 }
