@@ -26,8 +26,9 @@ export const config = {
   // Everything except the public about/disclosure page, the privacy policy
   // (required by developer-platform app registrations), the
   // click-redirect (/r/<id> — hit by anyone clicking a bot link, must never
-  // 401), the health probe (leaks only liveness booleans), and framework
+  // 401), the health probe (leaks only liveness booleans), eBay's account-
+  // deletion notification endpoint (called by eBay, unauthenticated), and framework
   // assets requires auth. /recommendations stays listed so legacy links
   // redirect instead of 401ing.
-  matcher: ["/((?!about|privacy|recommendations|r/|api/health|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!about|privacy|recommendations|r/|api/health|api/ebay/account-deletion|_next/static|_next/image|favicon.ico).*)"],
 };

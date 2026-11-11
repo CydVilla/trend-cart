@@ -3,6 +3,15 @@
 Notable changes to TrendCart. Dates are deploy dates; the bot went live on
 2026-07-03. Format loosely follows [Keep a Changelog](https://keepachangelog.com).
 
+## Unreleased — eBay account-deletion endpoint
+
+### Added
+- **`/api/ebay/account-deletion`.** Answers eBay's ownership challenge and
+  acknowledges Marketplace Account Deletion notifications, which eBay requires
+  before it activates a production keyset. TrendCart stores no eBay user data,
+  so a notification is acknowledged and nothing else happens. Needs
+  `EBAY_VERIFICATION_TOKEN`; public, like `/api/health`.
+
 ## Unreleased — Tracking Id summary upload
 
 ### Added
