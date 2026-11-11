@@ -372,6 +372,33 @@ export const config = {
       /* With credit: LLM-written lead sentence instead of the template. */
       llmCopy: envBool("DEAL_CURATED_LLM_COPY", true),
     },
+
+    /* eBay channel (ADR-0018): single-listing eBay deals from the Slickdeals
+       eBay feed, posted PRICE-FREE with our Partner Network campaign ID. Off
+       until EBAY_CAMPAIGN_ID is set. Rides the RSS loop's cadence but keeps
+       its own budget and gap. */
+    ebay: {
+      campaignId: envString("EBAY_CAMPAIGN_ID", ""),
+      /* Off = audit-only: DRY_RUN rows record what WOULD post. */
+      autopost: envBool("DEAL_EBAY_AUTOPOST", true),
+      maxPostsPerDay: envInt("DEAL_EBAY_MAX_POSTS_PER_DAY", 4),
+      cooldownMinutes: envInt("DEAL_EBAY_COOLDOWN_MINUTES", 60),
+      /* A feed item older than this is not evidence of a live deal. */
+      maxSourceAgeHours: envInt("DEAL_EBAY_MAX_AGE_HOURS", 6),
+      /* Browse API saved searches. Off until both keys are set. */
+      appId: envString("EBAY_APP_ID", ""),
+      certId: envString("EBAY_CERT_ID", ""),
+      minDiscountPercent: envInt("DEAL_EBAY_MIN_DISCOUNT_PERCENT", 20),
+      minSellerFeedbackPercent: envInt("DEAL_EBAY_MIN_SELLER_FEEDBACK_PERCENT", 98),
+      minSellerFeedbackScore: envInt("DEAL_EBAY_MIN_SELLER_FEEDBACK_SCORE", 500),
+    },
+  },
+
+  /* Impact Partner API: read-only conversion reporting for eBay posts. */
+  impact: {
+    accountSid: envString("IMPACT_ACCOUNT_SID", ""),
+    authToken: envString("IMPACT_AUTH_TOKEN", ""),
+    ebayProgramId: envString("IMPACT_EBAY_PROGRAM_ID", "9356"),
   },
 
   /* Amazon Creators API — successor to PA-API 5.0, whose endpoint was switched

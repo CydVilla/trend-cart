@@ -396,12 +396,15 @@ enum DealPostStatus {
 /// How a deal post was triggered. AUTOMATED = watchlist price trigger;
 /// DISCOVERED = found on sale by a DealFeed search or an RSS source;
 /// MANUAL = operator; CURATED = mirrored from a curator account on Bluesky
-/// (e.g. Wario64) — price-free, with its own daily budget and cooldown.
+/// (e.g. Wario64) — price-free, with its own daily budget and cooldown;
+/// EBAY = an eBay listing from the Slickdeals eBay feed (ADR-0018), also
+/// price-free and on its own budget. Its listing's `asin` is the eBay item ID.
 enum DealSource {
   AUTOMATED
   DISCOVERED
   MANUAL
   CURATED
+  EBAY
 }
 
 /// How a TrackedListing entered the table. WATCHLIST rows are operator-curated
@@ -729,4 +732,26 @@ model AssociatesTrackingSummary {
 
   @@unique([fromDay, toDay, trackingId])
   @@index([importedAt])
+}
+
+/// One eBay conversion from the Impact Actions API (ADR-0018), upserted hourly
+/// so state and payout changes land on the same row. `dealPostId` is set when
+/// the conversion's sub-ID names one of our eBay posts. It is deliberately not
+/// a relation: earnings must survive a post being deleted.
+model EbayConversion {
+  /// Impact's action ID.
+  id          String   @id
+  dealPostId  String?
+  /// The raw sub-ID Impact reported, kept even when it matches no post.
+  subId       String?
+  /// PENDING | APPROVED | REVERSED.
+  state       String
+  saleCents   Int
+  payoutCents Int
+  currency    String   @default("USD")
+  eventAt     DateTime
+  updatedAt   DateTime @updatedAt
+
+  @@index([dealPostId])
+  @@index([eventAt])
 }

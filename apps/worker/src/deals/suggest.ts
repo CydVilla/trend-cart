@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   prisma,
   DealArmState,
@@ -10,13 +11,19 @@ import {
 } from "@trendcart/db";
 import {
   canonicalAmazonUrl,
+  canonicalEbayUrl,
+  canonicalListingUrl,
   cleanDealTitle,
   CURATOR_URL_PREFIX,
   curatorProfileHandle,
   dealChannel,
+  EBAY_SEARCH_URL_PREFIX,
+  EBAY_SOURCE_URL,
+  ebaySearchQuery,
   shortenAmazonTitle,
   validateDealText,
   withAffiliateTag,
+  withEbayTracking,
   type CuratedDealKind,
   type HighConversionLane,
   type LlmClient,
@@ -39,6 +46,13 @@ import {
   type CuratedMeta,
   type CuratorPost,
 } from "./curated.js";
+import {
+  browseFeedItem,
+  composeBrowseDeal,
+  createEbayBrowseClient,
+  type BrowseCheck,
+} from "./ebay-browse.js";
+import { composeEbayDeal, ebayDealTitle, ebayFeedItem, type EbayItem } from "./ebay.js";
 import {
   HIGH_CONVERSION_LANES,
   GIFTABLE_MAX_PRICE_CENTS,
@@ -101,16 +115,16 @@ type JsonRecord = Record<string, unknown>;
  *  deterministic skip), or deferred it to a later fetch. */
 type ItemOutcome = "staged" | "done" | "retry";
 
-type FeedItem = RssItem | CuratedItem;
+type FeedItem = RssItem | CuratedItem | EbayItem;
 
 /**
- * The two automated channels share staging, ranking, verification, and the
- * posting pipeline, but not budgets: RSS feeds (Slickdeals et al.) and
- * curator accounts (ADR-0017) each have their own daily cap and cooldown, so
- * a prolific curator can't starve the RSS lane or vice versa.
+ * The automated channels share staging, ranking, verification, and the
+ * posting pipeline, but not budgets: RSS feeds (Slickdeals et al.), curator
+ * accounts (ADR-0017), and eBay listings (ADR-0018) each have their own daily
+ * cap and cooldown, so one channel can't starve another.
  */
 type Channel = {
-  name: "rss" | "curated";
+  name: "rss" | "curated" | "ebay";
   dealSource: DealSource;
   autopost: boolean;
   maxPostsPerDay: number;
@@ -135,8 +149,14 @@ const RSS_CHANNEL: Channel = {
   cooldownMinutes: config.deals.globalCooldownMinutes,
   maxEvidenceAgeHours: config.deals.suggestions.maxSaleEvidenceAgeHours,
   ownPosts: { source: DealSource.DISCOVERED, feedId: null },
-  gatingPosts: { source: { notIn: [DealSource.MANUAL, DealSource.CURATED] } },
-  poolSource: { NOT: { url: { startsWith: CURATOR_URL_PREFIX } } },
+  gatingPosts: { source: { notIn: [DealSource.MANUAL, DealSource.CURATED, DealSource.EBAY] } },
+  poolSource: {
+    NOT: [
+      { url: { startsWith: CURATOR_URL_PREFIX } },
+      { url: EBAY_SOURCE_URL },
+      { url: { startsWith: EBAY_SEARCH_URL_PREFIX } },
+    ],
+  },
 };
 
 const CURATED_CHANNEL: Channel = {
@@ -151,6 +171,50 @@ const CURATED_CHANNEL: Channel = {
   gatingPosts: { source: DealSource.CURATED },
   poolSource: { url: { startsWith: CURATOR_URL_PREFIX } },
 };
+
+const EBAY_CHANNEL: Channel = {
+  name: "ebay",
+  dealSource: DealSource.EBAY,
+  autopost: config.deals.ebay.autopost,
+  maxPostsPerDay: config.deals.ebay.maxPostsPerDay,
+  sharedMaxPostsPerDay: config.deals.ebay.maxPostsPerDay,
+  cooldownMinutes: config.deals.ebay.cooldownMinutes,
+  maxEvidenceAgeHours: config.deals.ebay.maxSourceAgeHours,
+  ownPosts: { source: DealSource.EBAY },
+  gatingPosts: { source: DealSource.EBAY },
+  poolSource: { OR: [{ url: EBAY_SOURCE_URL }, { url: { startsWith: EBAY_SEARCH_URL_PREFIX } }] },
+};
+
+const ebayEnabled = Boolean(config.deals.ebay.campaignId);
+// Sandbox keys (App ID "…-SBX-…") only work on eBay's sandbox host, whose
+// listings are fake — they must never drive the live channel.
+const ebaySandboxKeys = /-SBX-/i.test(config.deals.ebay.appId);
+if (ebayEnabled && ebaySandboxKeys) {
+  console.warn("  eBay searches:    disabled — EBAY_APP_ID is a sandbox keyset");
+}
+const ebayBrowse =
+  ebayEnabled && !ebaySandboxKeys && config.deals.ebay.appId && config.deals.ebay.certId
+    ? createEbayBrowseClient(
+        {
+          appId: config.deals.ebay.appId,
+          certId: config.deals.ebay.certId,
+          campaignId: config.deals.ebay.campaignId,
+        },
+        config.deals.ebay,
+      )
+    : null;
+
+function isEbaySource(source: { url: string }): boolean {
+  return source.url === EBAY_SOURCE_URL;
+}
+
+function isEbaySearchSource(source: { url: string }): boolean {
+  return source.url.startsWith(EBAY_SEARCH_URL_PREFIX);
+}
+
+function isEbayItem(item: FeedItem): item is EbayItem {
+  return "ebay" in item;
+}
 
 function isCuratorSource(source: { url: string }): boolean {
   return source.url.startsWith(CURATOR_URL_PREFIX);
@@ -266,6 +330,15 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       `${hasLlm ? "LLM when credit allows, template otherwise" : "tokenless (template copy)"}, ` +
       `${config.deals.curated.autopost ? "AUTOPOST" : "audit-only (DEAL_CURATED_AUTOPOST=false)"}`,
   );
+  console.log(
+    ebayEnabled
+      ? `  ebay channel:     max ${config.deals.ebay.maxPostsPerDay}/day, ${config.deals.ebay.cooldownMinutes}m gap, ` +
+          `${config.deals.ebay.autopost ? "AUTOPOST" : "audit-only (DEAL_EBAY_AUTOPOST=false)"}`
+      : "  ebay channel:     disabled (set EBAY_CAMPAIGN_ID)",
+  );
+  if (ebayEnabled) {
+    console.log(`  ebay search:      ${ebayBrowse ? "enabled" : "disabled (set EBAY_APP_ID + EBAY_CERT_ID)"}`);
+  }
 
   /** Credit is checked per call, not at startup: a top-up turns the LLM
    *  steps back on at the next tick, and exhaustion turns them off. */
@@ -339,7 +412,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
         title: item.title.slice(0, 300),
         asin: ref.asin,
         marketplace: ref.marketplace,
-        productUrl: `https://${ref.marketplace}/dp/${ref.asin}`,
+        productUrl: canonicalListingUrl(ref.asin, ref.marketplace),
         hintPriceCents,
         // A curator's "source" is their post, not the Amazon link it carried.
         sourceUrl: curated ? curated.postUrl : item.link,
@@ -472,7 +545,8 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     llmBudget: { remaining: number },
   ): Promise<ItemOutcome> {
     const curated = isCuratedItem(item) ? item.curated : null;
-    const channel = curated ? CURATED_CHANNEL : RSS_CHANNEL;
+    const ebay = isEbayItem(item);
+    const channel = ebay ? EBAY_CHANNEL : curated ? CURATED_CHANNEL : RSS_CHANNEL;
 
     // Per-source guid dedup — the same item reappears in every fetch.
     const seen = await prisma.dealSuggestion.findUnique({
@@ -494,7 +568,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       return "done";
     }
 
-    const ref = matchAmazonProduct(item);
+    const ref = ebay ? item.ebay : matchAmazonProduct(item);
     if (!ref) {
       skip("no_or_ambiguous_amazon_link");
       return "done";
@@ -504,14 +578,16 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       return "done";
     }
     // Single-marketplace: only the configured marketplace passes.
-    if (ref.marketplace !== config.creatorsApi.marketplace) {
+    if (!ebay && ref.marketplace !== config.creatorsApi.marketplace) {
       skip("marketplace_mismatch");
       return "done";
     }
 
     // The hint price is used ONLY for the source's price-band filter and the
     // audit row — it is never advertised.
-    const hintPriceCents = extractPriceHintCents(item.title, item.description, item.content);
+    const hintPriceCents =
+      (ebay ? item.ebay.priceCents : undefined) ??
+      extractPriceHintCents(item.title, item.description, item.content);
     if (hintPriceCents != null) {
       if (source.minPriceCents != null && hintPriceCents < source.minPriceCents) {
         skip("below_price_floor");
@@ -570,9 +646,9 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     let topicConfidence = lane === "other" ? 0 : 70;
     let purchaseIntentScore = lane === "other" ? 0 : 65;
     let gateVerdict: Record<string, unknown> = { mode: "heuristic" };
-    /** RSS: defer the item. Curated: keep the keyword verdict, noting why. */
+    /** RSS: defer the item. Curated/eBay: keep the keyword verdict, noting why. */
     const withoutLlm = (reason: string): ItemOutcome | null => {
-      if (!curated) {
+      if (!curated && !ebay) {
         skip(reason);
         return "retry"; // no ledger row — the item retries on a later fetch
       }
@@ -967,7 +1043,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
         createdAt: { lte: stagedBefore },
         source: { isActive: true, ...channel.poolSource },
       },
-      include: { source: { select: { id: true, name: true } } },
+      include: { source: { select: { id: true, name: true, url: true } } },
       orderBy: { createdAt: "desc" },
       take: Math.max(1, config.deals.suggestions.candidatePoolSize),
     });
@@ -1042,7 +1118,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       // RSS posts sparingly, so the diversity penalty doubles as a floor.
       // Curators post all day: there it only ORDERS the queue, or a second
       // movie deal in a day could never clear the floor.
-      const floorScore = channel.name === "curated" ? meta.baseScore : effectiveScore;
+      const floorScore = channel.name === "rss" ? effectiveScore : meta.baseScore;
       if (floorScore < config.deals.suggestions.minCandidateScore) continue;
       if (!hasFreshSaleTimestamp(meta.publishedAt, now, channel.maxEvidenceAgeHours)) {
         await dismissCandidate(candidate.id, candidate.gateVerdict, "stale_feed_evidence");
@@ -1081,6 +1157,12 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       factChecks += 1;
       let verdict: unknown;
       let verifiedAt: Date | null;
+      // The post ID goes to eBay as the affiliate reference, so it has to be
+      // chosen before the listing is re-read rather than by the database.
+      const browsePostId = isEbaySearchSource(candidate.source)
+        ? `eb${randomBytes(11).toString("hex")}`
+        : null;
+      let browseCheck: Extract<BrowseCheck, { status: "ok" }> | null = null;
       if (config.llm.useFake) {
         verdict = {
           accurate: true,
@@ -1099,6 +1181,43 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
           saleEvidencePublishedAt: meta.publishedAt?.toISOString() ?? now.toISOString(),
         };
         verifiedAt = null;
+      } else if (browsePostId) {
+        if (!ebayBrowse) {
+          await releaseCandidate(candidate.id, candidate.gateVerdict, "ebay_browse_disabled");
+          continue;
+        }
+        const check = await ebayBrowse.check(candidate.asin, browsePostId);
+        if (!check) {
+          await releaseCandidate(candidate.id, candidate.gateVerdict, "ebay_check_failed");
+          skip("ebay_check_failed");
+          continue;
+        }
+        if (check.status === "unavailable") {
+          await dismissCandidate(candidate.id, candidate.gateVerdict, "ebay_listing_unavailable", {
+            detail: check.reason,
+          });
+          continue;
+        }
+        browseCheck = check;
+        verdict = {
+          mode: "browse-verified",
+          priceCents: check.priceCents,
+          discountPercent: check.discountPercent,
+          checkedAt: new Date().toISOString(),
+        };
+        verifiedAt = new Date();
+      } else if (channel.name === "ebay") {
+        // No listing check exists without an eBay API key, and the listing
+        // page is never scraped: the fresh, attributed feed item is the
+        // evidence and the copy stays price-free.
+        verdict = {
+          mode: "source-attested",
+          source: candidate.source.name,
+          sourceUrl: candidate.sourceUrl,
+          publishedAt: meta.publishedAt?.toISOString() ?? null,
+          checkedAt: now.toISOString(),
+        };
+        verifiedAt = new Date();
       } else if (channel.name === "curated") {
         const outcome = await verifyCurated({
           title: curatedMeta!.productTitle,
@@ -1141,13 +1260,33 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
         verifiedAt = new Date();
       }
 
-      const linkUrl = withAffiliateTag(
-        canonicalAmazonUrl(candidate.asin, candidate.marketplace),
-        config.site.affiliateTags[dealChannel(channel.dealSource, null)],
-      );
+      const linkUrl = browseCheck
+        ? browseCheck.affiliateUrl
+        : channel.name === "ebay"
+          ? withEbayTracking(canonicalEbayUrl(candidate.asin), config.deals.ebay.campaignId)
+          : withAffiliateTag(
+              canonicalAmazonUrl(candidate.asin, candidate.marketplace),
+              config.site.affiliateTags[dealChannel(channel.dealSource, null)],
+            );
       const composed = curatedMeta
         ? await composeCurated(candidate.source.name, candidate.asin, meta.lane, curatedMeta, linkUrl)
-        : composeRssDeal(candidate.title, candidate.source.name, linkUrl);
+        : browseCheck
+          ? composeBrowseDeal({
+              listingTitle: candidate.title,
+              priceCents: browseCheck.priceCents,
+              discountPercent: browseCheck.discountPercent,
+              priceAsOf: now,
+              linkUrl,
+              maxLength: config.deals.postMaxLength,
+            })
+          : channel.name === "ebay"
+          ? composeEbayDeal({
+              rawTitle: candidate.title,
+              sourceLabel: attributionLabel(candidate.source.name),
+              linkUrl,
+              maxLength: config.deals.postMaxLength,
+            })
+          : composeRssDeal(candidate.title, candidate.source.name, linkUrl);
       if (!composed) {
         await dismissCandidate(candidate.id, candidate.gateVerdict, "compose_failed");
         continue;
@@ -1251,16 +1390,18 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
                 data: {
                   asin: candidate.asin,
                   marketplace: candidate.marketplace,
-                  productUrl: canonicalAmazonUrl(candidate.asin, candidate.marketplace),
+                  productUrl: canonicalListingUrl(candidate.asin, candidate.marketplace),
                   title:
                     curatedMeta?.productTitle ??
+                    (browseCheck ? shortenAmazonTitle(candidate.title, 120) : null) ??
+                    (channel.name === "ebay" ? ebayDealTitle(candidate.title) : null) ??
                     (shortenAmazonTitle(cleanDealTitle(candidate.title), 120) ||
                       candidate.title.slice(0, 120)),
                   currency: "USD",
                   origin: ListingOrigin.DISCOVERED,
                   armState: DealArmState.DISARMED,
                   lastCheckedAt: now,
-                  source: "WEB_VERIFIED",
+                  source: channel.name === "ebay" ? "SOURCE_ATTESTED" : "WEB_VERIFIED",
                 },
                 select: { id: true, isActive: true, lastPostedAt: true },
               });
@@ -1268,14 +1409,15 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
 
             const post = await tx.dealPost.create({
               data: {
+                ...(browsePostId ? { id: browsePostId } : {}),
                 listingId: listingRow.id,
                 suggestionId: candidate.id,
                 source: channel.dealSource,
                 status,
                 // Feed/curator prices stay exclusively in DealSuggestion.
                 // Zeroes make it structurally impossible for the poster to
-                // render a price.
-                salePriceCents: 0,
+                // render a price. Only eBay's API re-read supplies a real one.
+                salePriceCents: browseCheck?.priceCents ?? 0,
                 targetPriceCents: 0,
                 currency: "USD",
                 priceAsOf: now,
@@ -1340,6 +1482,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     stats.sources += 1;
     const startedAt = new Date();
     const xml = await fetchFeed(source.url);
+    const ebaySource = isEbaySource(source);
     const items = parseRssItems(xml)
       .sort(
         (a, b) =>
@@ -1348,7 +1491,12 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       )
       .slice(0, config.deals.suggestions.maxItemsPerFetch);
     let staged = 0;
-    for (const item of items) {
+    for (const rawItem of items) {
+      const item = ebaySource ? ebayFeedItem(rawItem) : rawItem;
+      if (!item) {
+        skip("ebay_no_single_complete_item_id");
+        continue;
+      }
       try {
         if ((await handleItem(source, item, llmBudget)) === "staged") staged += 1;
       } catch (error) {
@@ -1370,6 +1518,47 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       },
     });
     if (staged > 0) console.log(`[rssDeal] ${source.name}: ${staged} ranked candidate(s) staged`);
+  }
+
+  /** A saved eBay search: only qualifying listings ever reach handleItem. */
+  async function runEbaySearch(
+    source: DealSuggestionSource,
+    query: string,
+    llmBudget: { remaining: number },
+  ): Promise<void> {
+    if (!ebayBrowse) throw new Error("eBay search is not configured");
+    stats.sources += 1;
+    const startedAt = new Date();
+    const listings = (
+      await ebayBrowse.search(query, {
+        minCents: source.minPriceCents,
+        maxCents: source.maxPriceCents,
+      })
+    ).slice(0, config.deals.suggestions.maxItemsPerFetch);
+    let staged = 0;
+    for (const listing of listings) {
+      try {
+        const item = browseFeedItem(listing, startedAt);
+        if ((await handleItem(source, item, llmBudget)) === "staged") staged += 1;
+      } catch (error) {
+        stats.errors += 1;
+        console.error(
+          `[ebaySearch] item failed (${source.name}):`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    stats.items += listings.length;
+    await prisma.dealSuggestionSource.update({
+      where: { id: source.id },
+      data: {
+        lastFetchedAt: startedAt,
+        lastItemCount: listings.length,
+        lastQueuedCount: staged,
+        lastFetchError: null,
+      },
+    });
+    if (staged > 0) console.log(`[ebaySearch] ${source.name}: ${staged} candidate(s) staged`);
   }
 
   async function resolveCached(uri: string): Promise<AmazonRef | null> {
@@ -1474,6 +1663,10 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     const candidates = await prisma.dealSuggestionSource.findMany({
       where: {
         isActive: true,
+        NOT: [
+          ...(ebayEnabled ? [] : [{ url: EBAY_SOURCE_URL }]),
+          ...(ebayBrowse ? [] : [{ url: { startsWith: EBAY_SEARCH_URL_PREFIX } }]),
+        ],
         OR: [
           { lastFetchedAt: null }, // "Fetch now" resets this
           { lastFetchedAt: { lte: new Date(nowMs - minIntervalMs) } },
@@ -1499,7 +1692,11 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
       const llmBudget = { remaining: allocated };
       try {
         const actor = curatorProfileHandle(source.url);
-        if (isCuratorSource(source)) {
+        const ebayQuery = ebaySearchQuery(source.url);
+        if (isEbaySearchSource(source)) {
+          if (!ebayQuery) throw new Error("eBay search URL has no _nkw keywords");
+          await runEbaySearch(source, ebayQuery, llmBudget);
+        } else if (isCuratorSource(source)) {
           if (!actor) throw new Error("curator URL is not a valid bsky.app profile");
           await runCuratorSource(source, actor, llmBudget);
         } else {
@@ -1526,6 +1723,7 @@ export function createDealSuggester(llm: LlmClient | null, stats: DealSuggestSta
     // the best verified opportunity — per channel.
     await promoteCandidates(RSS_CHANNEL);
     await promoteCandidates(CURATED_CHANNEL);
+    if (ebayEnabled) await promoteCandidates(EBAY_CHANNEL);
   }
 
   return { tick, enabled: true };

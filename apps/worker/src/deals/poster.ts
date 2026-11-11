@@ -5,11 +5,15 @@ import {
   DEAL_ANCHOR,
   dealChannel,
   extractAsin,
+  extractEbayItemId,
   formatMoney,
+  hasEbayCustomId,
   hashtagSpans,
   isAmazonHost,
+  isEbayUrl,
   validateDealText,
   withAffiliateTag,
+  withEbayTracking,
 } from "@trendcart/shared";
 import { blueskyAgent, blueskyLoginDisabled, noteBlueskySessionLost } from "../bluesky-agent.js";
 import {
@@ -173,17 +177,20 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     // Manual "post deal now" posts are operator-initiated — they bypass the
     // global throttles. The AUTOMATED price-trigger and DISCOVERED feed finds
     // are rate-limited here, so a burst of fires can't flood the profile.
-    // CURATED (curator-account, ADR-0017) posts run on their own budget and
-    // gap, and don't count against the other channels' — or vice versa.
+    // CURATED (curator-account, ADR-0017) and EBAY (ADR-0018) posts run on
+    // their own budget and gap, and don't count against the other channels'.
     if (candidate.source !== DealSource.MANUAL) {
-      const curated = candidate.source === DealSource.CURATED;
-      const channelPosts = curated
-        ? { source: DealSource.CURATED }
-        : { source: { notIn: [DealSource.MANUAL, DealSource.CURATED] } };
-      const cooldownMinutes = curated
-        ? config.deals.curated.cooldownMinutes
-        : config.deals.globalCooldownMinutes;
-      const dailyCap = curated ? config.deals.curated.maxPostsPerDay : config.deals.maxPostsPerDay;
+      const ownBudget =
+        candidate.source === DealSource.CURATED
+          ? config.deals.curated
+          : candidate.source === DealSource.EBAY
+            ? config.deals.ebay
+            : null;
+      const channelPosts = ownBudget
+        ? { source: candidate.source }
+        : { source: { notIn: [DealSource.MANUAL, DealSource.CURATED, DealSource.EBAY] } };
+      const cooldownMinutes = ownBudget?.cooldownMinutes ?? config.deals.globalCooldownMinutes;
+      const dailyCap = ownBudget?.maxPostsPerDay ?? config.deals.maxPostsPerDay;
       const lastPosted = await prisma.dealPost.findFirst({
         where: {
           ...channelPosts,
@@ -226,20 +233,30 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     // the queue-time snapshot: rows queued before a channel got its own
     // AMAZON_TAG_* var (or by a script that still uses the base tag) would
     // otherwise post under the wrong ID and blur the per-channel report.
-    // withAffiliateTag replaces any existing tag, so this is idempotent.
-    const linkUrl = withAffiliateTag(
-      deal.linkUrl,
-      config.site.affiliateTags[dealChannel(deal.source, deal.feedId)],
-    );
+    // withAffiliateTag replaces any existing tag, so this is idempotent. eBay
+    // links get the post's own ID as customid, which only exists by now. A
+    // Browse API link already has it, and must go out exactly as eBay issued it.
+    const isEbay = deal.source === DealSource.EBAY;
+    const linkUrl = isEbay
+      ? hasEbayCustomId(deal.linkUrl, deal.id)
+        ? deal.linkUrl
+        : withEbayTracking(deal.linkUrl, config.deals.ebay.campaignId, deal.id)
+      : withAffiliateTag(
+          deal.linkUrl,
+          config.site.affiliateTags[dealChannel(deal.source, deal.feedId)],
+        );
 
-    // RSS-sourced posts (DISCOVERED with no feedId) and curator posts
-    // (CURATED) are the PRICE-FREE channels: no price is advertised, so price
-    // freshness doesn't apply and no priced embed may ever render
+    // RSS-sourced posts (DISCOVERED with no feedId), curator posts (CURATED)
+    // and eBay posts are the PRICE-FREE channels: no price is advertised, so
+    // price freshness doesn't apply and no priced embed may ever render
     // (salePriceCents is zeroed; any source price stays an unattested hint).
     const rssAutonomous =
       (deal.source === DealSource.DISCOVERED && !deal.feedId) ||
-      deal.source === DealSource.CURATED;
-    const priceFree = rssAutonomous || deal.salePriceCents <= 0;
+      deal.source === DealSource.CURATED ||
+      isEbay;
+    // The exception is an eBay Browse post: its price came from eBay's API
+    // moments ago, and the staleness check below applies to it.
+    const priceFree = (rssAutonomous && !(isEbay && deal.salePriceCents > 0)) || deal.salePriceCents <= 0;
 
     // Pre-flight: paused listing, or a price snapshot too stale to advertise.
     if (!listing.isActive) {
@@ -268,7 +285,7 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       await terminal(
         deal.id,
         DealPostStatus.SKIPPED,
-        "strict Amazon sale verification missing or stale before posting",
+        "sale verification missing or stale before posting",
       );
       return;
     }
@@ -301,11 +318,11 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
       return;
     }
     try {
-      if (!isAmazonHost(new URL(linkUrl).hostname)) {
-        await terminal(deal.id, DealPostStatus.FAILED, "link is not an Amazon URL");
+      if (isEbay ? !isEbayUrl(linkUrl) : !isAmazonHost(new URL(linkUrl).hostname)) {
+        await terminal(deal.id, DealPostStatus.FAILED, `link is not an ${isEbay ? "eBay" : "Amazon"} URL`);
         return;
       }
-      if (rssAutonomous && extractAsin(linkUrl) !== listing.asin) {
+      if (rssAutonomous && (isEbay ? extractEbayItemId(linkUrl) : extractAsin(linkUrl)) !== listing.asin) {
         await terminal(deal.id, DealPostStatus.FAILED, "affiliate link ASIN does not match listing");
         return;
       }
@@ -326,8 +343,9 @@ export function createDealPoster(stats: DealPostStats): DealPoster {
     try {
       const tracked = await createTrackedLink(linkUrl, "deal", deal.id);
       const facets = buildFacets(text, tracked.url, anchor);
-      // Amazon's own image for the linked ASIN, when one can be had.
-      const image = await uploadImage(activeAgent, await listingImageUrl(listing));
+      // eBay posts carry no photo (ADR-0018). Everything else gets Amazon's
+      // own image for the linked ASIN when one can be had.
+      const image = isEbay ? null : await uploadImage(activeAgent, await listingImageUrl(listing));
       const wasClause =
         deal.wasPriceCents && deal.wasPriceCents > deal.salePriceCents
           ? ` (was ${formatMoney(deal.wasPriceCents, deal.currency)})`

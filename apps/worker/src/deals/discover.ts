@@ -164,9 +164,9 @@ export function createDealDiscoverer(stats: DealDiscoverStats): DealDiscoverer {
     ];
     const dayAgo = new Date(Date.now() - 24 * 3_600_000);
     const queuedToday = await prisma.dealPost.count({
-      // Curator posts have their own budget (ADR-0017) — they don't spend this one.
+      // Curator and eBay posts have their own budgets — they don't spend this one.
       where: {
-        source: { not: DealSource.CURATED },
+        source: { notIn: [DealSource.CURATED, DealSource.EBAY] },
         status: { in: activeStatuses },
         createdAt: { gte: dayAgo },
       },

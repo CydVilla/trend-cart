@@ -1,5 +1,5 @@
 import { prisma } from "@trendcart/db";
-import { isAmazonHost } from "@trendcart/shared";
+import { canonicalEbayUrl, extractEbayItemId, isAmazonHost, isEbayHost } from "@trendcart/shared";
 import { NextResponse } from "next/server";
 
 // Public first-party click redirect: /r/<id> → the tagged Amazon URL, counting
@@ -54,13 +54,17 @@ export async function GET(
       select: { targetUrl: true, firstClickAt: true },
     });
     if (link) {
-      // Only ever bounce to Amazon — never let this become an open redirect.
+      // Only ever bounce to Amazon or eBay — never let this become an open
+      // redirect. Bots get eBay's bare listing URL: its campaign parameters
+      // register a click with eBay, and crawlers aren't our traffic to report.
       try {
-        if (isAmazonHost(new URL(link.targetUrl).hostname)) {
-          target = link.targetUrl;
+        const { hostname } = new URL(link.targetUrl);
+        const itemId = isEbayHost(hostname) ? extractEbayItemId(link.targetUrl) : null;
+        if (isAmazonHost(hostname) || isEbayHost(hostname)) {
+          target = itemId && isBotRequest(req) ? canonicalEbayUrl(itemId) : link.targetUrl;
           fallbackCause = null;
         } else {
-          fallbackCause = "target not an Amazon host";
+          fallbackCause = "target not an Amazon or eBay host";
         }
       } catch {
         fallbackCause = "malformed target URL";

@@ -247,6 +247,9 @@ See [.env.example](.env.example) — every variable is documented there. Highlig
 | `BOT_APP_PASSWORD` | Bluesky **app password** (never your real password) |
 | `DEALS_ENABLED` | Master switch for the deal tracker's worker loops (default false) |
 | `CREATORS_API_CLIENT_ID` / `CREATORS_API_CLIENT_SECRET` | Amazon Creators API credentials (PA-API 5.0's successor) — enable deal feeds; access needs 10 qualifying sales in 30 days |
+| `EBAY_CAMPAIGN_ID` / `DEAL_EBAY_*` | eBay Partner Network channel (ADR-0018): campaign ID (unset = off), autopost, daily cap, gap, max feed-item age |
+| `EBAY_APP_ID` / `EBAY_CERT_ID` | eBay Browse API keys for saved searches (unset = off). `DEAL_EBAY_MIN_*` set the discount and seller floors |
+| `IMPACT_ACCOUNT_SID` / `IMPACT_AUTH_TOKEN` | Read-only Impact API access for per-post eBay conversions on Insights |
 | `CREATORS_API_PARTNER_TAG` | Creators API partner tag; defaults to `AMAZON_ASSOCIATE_TAG` |
 | `DEAL_POST_STYLE` | `wario` (default, terse deal-account copy) \| `classic` |
 | `DEAL_FEED_AUTOPOST` | `true` = Creators API feed-discovered deals post without approval (default false) |

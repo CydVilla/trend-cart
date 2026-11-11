@@ -86,7 +86,13 @@ export type AmazonMatch = AmazonRef & {
   /** Confidence that this exact ASIN is the product named by the RSS item,
    * not an unrelated Amazon link embedded elsewhere in the feed markup. */
   matchConfidence: number;
-  evidence: "direct-item-link" | "embedded-target" | "amazon-product-attribute" | "direct-body-link";
+  evidence:
+    | "direct-item-link"
+    | "embedded-target"
+    | "amazon-product-attribute"
+    | "direct-body-link"
+    | "ebay-exit-link"
+    | "ebay-browse";
 };
 
 const URL_RE = /https?:\/\/[^\s"'<>\\]+/gi;
