@@ -1,5 +1,11 @@
 import { prisma } from "@trendcart/db";
-import { canonicalEbayUrl, extractEbayItemId, isAmazonHost, isEbayHost } from "@trendcart/shared";
+import {
+  canonicalEbayUrl,
+  clickBotReason,
+  extractEbayItemId,
+  isAmazonHost,
+  isEbayHost,
+} from "@trendcart/shared";
 import { NextResponse } from "next/server";
 
 // Public first-party click redirect: /r/<id> → the tagged Amazon URL, counting
@@ -13,26 +19,7 @@ function fallbackUrl(): string {
   return tag ? `https://www.amazon.com/?tag=${encodeURIComponent(tag)}` : "https://www.amazon.com/";
 }
 
-/**
- * Bot / preview-fetcher detection. Bluesky's firehose is public, and crawlers
- * subscribed to it fetch every posted URL within seconds — measured
- * 2026-07-27: MEDIAN 0.4s from reply post to "first click" across 283 links,
- * which no human feed-scroller produces. Those fetches must still get their
- * 302 (never break anyone's redirect), but they are not the revenue signal:
- * they land in `botClickCount`, humans in `clickCount`.
- *
- * A UA denylist can't be exhaustive — sophisticated crawlers fake browser
- * UAs — so `clickCount` stays an upper bound on humans; this just strips the
- * honest majority of the noise.
- */
-const BOT_UA_RE =
-  /bot|crawl|spider|preview|scan|monitor|probe|fetch|scrape|curl|wget|python|httpx|aiohttp|java\/|okhttp|go-http|libwww|headless|phantom|lighthouse|facebookexternalhit|slackbot|discordbot|telegrambot|whatsapp|twitterbot|bluesky|bsky|cardyb|mastodon|pleroma|misskey|iframely|embedly|unfurl|pinterest|redditbot|applebot|googlebot|bingbot|duckduck|yandex|baidu|semrush|ahrefs|mj12|dotbot|petalbot|archive/i;
-
-function isBotRequest(req: Request): boolean {
-  if (req.method === "HEAD") return true;
-  const ua = req.headers.get("user-agent") ?? "";
-  return ua.length === 0 || BOT_UA_RE.test(ua);
-}
+// Bot detection lives in @trendcart/shared (clickBotReason) so it can be tested.
 
 export async function GET(
   req: Request,
@@ -51,9 +38,11 @@ export async function GET(
     linkId = id;
     const link = await prisma.trackedLink.findUnique({
       where: { id },
-      select: { targetUrl: true, firstClickAt: true },
+      select: { targetUrl: true, firstClickAt: true, createdAt: true },
     });
     if (link) {
+      const botReason = clickBotReason(req, link.createdAt);
+      const isBot = botReason !== null;
       // Only ever bounce to Amazon or eBay — never let this become an open
       // redirect. Bots get eBay's bare listing URL: its campaign parameters
       // register a click with eBay, and crawlers aren't our traffic to report.
@@ -61,7 +50,7 @@ export async function GET(
         const { hostname } = new URL(link.targetUrl);
         const itemId = isEbayHost(hostname) ? extractEbayItemId(link.targetUrl) : null;
         if (isAmazonHost(hostname) || isEbayHost(hostname)) {
-          target = itemId && isBotRequest(req) ? canonicalEbayUrl(itemId) : link.targetUrl;
+          target = itemId && isBot ? canonicalEbayUrl(itemId) : link.targetUrl;
           fallbackCause = null;
         } else {
           fallbackCause = "target not an Amazon or eBay host";
@@ -74,7 +63,7 @@ export async function GET(
       await prisma.trackedLink
         .update({
           where: { id },
-          data: isBotRequest(req)
+          data: isBot
             ? { botClickCount: { increment: 1 } }
             : {
                 clickCount: { increment: 1 },
@@ -83,6 +72,10 @@ export async function GET(
               },
         })
         .catch(() => {}); // count is best-effort; the redirect below is not
+      // One line per click so leaks past the filter can be found in the logs
+      // and added to it. The user-agent is a browser string, not personal data.
+      const ua = (req.headers.get("user-agent") ?? "").slice(0, 200);
+      console.log(`[click] /r/${id} ${botReason ? `bot:${botReason}` : "human"} ua="${ua}"`);
     } else {
       fallbackCause = "no TrackedLink row";
     }

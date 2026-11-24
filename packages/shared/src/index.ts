@@ -10,3 +10,4 @@ export * from "./product-match";
 export * from "./thresholds";
 export * from "./models";
 export * from "./bluesky-image";
+export * from "./click-filter";
